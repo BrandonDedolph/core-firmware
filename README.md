@@ -175,6 +175,19 @@ goodbye.
 
 Hardware notes the drivers were written against: [`core/docs/hw/`](core/docs/hw/).
 
+**Why only the 80 GB?** It is the one iPod this firmware has been booted on. The 30 and 60 GB
+5G and 5.5G share the SoC but differ in the drive, the FAT layout (the 80 GB's filesystem is
+built on 2048-byte virtual sectors) and the LCD controller variants, and an iFlash-converted
+unit differs again. Nothing has been tried on them, so the installer refuses them rather than
+guess; `core flash --untested-hardware` exists for anyone who wants to be the first, with the
+recovery combo below as the floor. Reports from other models are welcome as issues.
+
+**Why a backup, when iTunes can restore the original firmware?** iTunes can, and the guide says
+so. The backup is for the moment the write goes wrong: a partition image on your own disk lets
+`core flash --from-backup` put the iPod back in seconds, offline, without iTunes, Apple's
+servers, or a second computer. It also keeps your device's own Apple image, which the installer
+can put back exactly as it was.
+
 ## Build
 
 Needs `meson`, `ninja`, `pkg-config`, a C11 host compiler, and `arm-none-eabi-gcc` with binutils

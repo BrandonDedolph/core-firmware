@@ -487,6 +487,21 @@ root, `COREOTG.DAT` the live On-The-Go list, also in the root, and
 the log: every diagnostic line the firmware wrote, with boot boundaries, battery samples and the
 audio counters. If you report a problem, that dump is what explains it.
 
+`COREFLSH.TXT`, also in the root, is a note the `core` app leaves after every verified firmware
+write: which image it wrote and where the event log stood at that moment. The firmware never reads
+it; deleting it is harmless. It is what lets the app tell a boot of the new firmware from a boot of
+the old one.
+
+**Did it boot?** A flash ends by reading the image back byte for byte, which proves the bytes, not
+that the iPod started them. To check the start: unplug the iPod and let it boot, plug it back in,
+and run `core doctor --boot`, or look at **Last boot** on the desktop app's Summary tab. Core adds to
+`CORELOG.BIN` every time it starts, so a start newer than the flash note is a start of the new
+firmware. The check prints when the iPod last started, which build that was, whether the library
+index loaded, and whether the session ended cleanly (sleep, standby, disk mode) or just stopped (a
+reset, a crash, a flat battery). It exits with an error while the iPod still holds firmware it has
+not started. Firmware written by an older `core` or by another tool leaves no note, so the build is
+then reported as unknown.
+
 ## If something is wrong
 
 - **It will not boot, or the screen is blank.** Hold Select + Play at power-on. That is Apple's disk

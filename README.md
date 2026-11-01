@@ -238,6 +238,10 @@ If a build does not boot, hold Select + Play at power-on. That is Apple's disk m
 ROM; nothing this firmware writes can remove it. Reflash, or restore the partition with
 `core flash --from-backup <file>` (ipodpatcher `-w`).
 
+A verified write proves the bytes, not the boot. After the iPod has restarted, `core doctor --boot`
+(or the desktop app's Summary tab) says which build it started and whether the library loaded; the
+user guide has the details.
+
 ## Status
 
 Runs on the device: direct boot, FLAC playback, the library, Search, the A–Z letter, On-The-Go,

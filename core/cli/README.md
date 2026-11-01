@@ -74,7 +74,7 @@ CGO_ENABLED=1 go build -o core-app ./cmd/core-app
 `core` binaries, `core-app-windows-amd64.exe`, and whichever `core-app`
 builds the host can make natively — then **prints the ones it skipped**.
 Nobody has three machines, and a release job that silently published
-seven of eleven assets would be worse than one that names the four it
+six of ten assets would be worse than one that names the four it
 could not build. `.github/workflows/release.yml` runs it on
 `ubuntu-latest`, `ubuntu-24.04-arm` and `macos-latest` for that reason.
 
@@ -374,6 +374,47 @@ re-runs in place, and the exact line is printed.
   artifact before the replacement is complete on disk — `make ipod`
   passes `--force` on every build, and a truncated `core.ipod` still
   parses as a valid header.
+
+## Versions and releases
+
+The app and the `core` CLI are versioned apart from the firmware. Their
+tags are `app-vX.Y.Z` (the first is `app-v0.3.0`); the firmware keeps
+`vX.Y.Z`. `scripts/build-all.sh` and the release workflow stamp the
+binaries from `git describe --tags --always --dirty --match 'app-v[0-9]*'`,
+so a firmware tag on the same commit never becomes the app's version — and
+with no app tag reachable the stamp is the bare short hash. The window's
+About prints the stamp, the commit and the build date, and the CLI's
+`--version` the same.
+
+**Which firmware it writes for.** `app.MinFirmware` (`v0.2.0`) is the
+oldest firmware whose index, config and log formats this app writes. About
+says "writes files for Core v0.2.0 or newer"; when the iPod's firmware is
+older the header and the iPod tab say "this app needs Core v0.2.0 or newer
+on the iPod — update the firmware first", Update is the primary instead of
+Sync, and a real sync refuses (the preview still runs). Raise it when a
+firmware release changes one of those formats.
+
+**Update checks.** The firmware check lists the repo's releases and takes
+the newest published `v…` release that carries `core.ipod`
+(`ghrelease.LatestFirmware`) — never `releases/latest`, which may be an app
+release. Once per launch a second, quiet check (`ghrelease.LatestApp`)
+looks for a newer `app-v…` release than the one running (numeric compare;
+a build stamped with a bare hash is never told) and, if there is one, puts
+a line in About and "Get the newer app…" in the ··· menu. It logs only on
+failure.
+
+**Cutting an app release.**
+
+```bash
+# 1. write the "## app-vX.Y.Z — <date>" section in core/cli/CHANGELOG.md
+tools/.venv/bin/python3 tools/release.py app-vX.Y.Z    # checks it, prints the rest:
+git tag -a app-vX.Y.Z -m "Core app vX.Y.Z"
+git push origin app-vX.Y.Z
+gh release create app-vX.Y.Z --title "Core app vX.Y.Z" --notes-file <printed path>
+# .github/workflows/release.yml builds the ten binaries from the tag and
+# attaches them (no core.ipod — that is a firmware release's). Then:
+tools/.venv/bin/python3 tools/release.py app-vX.Y.Z --check
+```
 
 ## Licence
 

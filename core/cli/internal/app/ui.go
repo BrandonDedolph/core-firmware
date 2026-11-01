@@ -263,8 +263,10 @@ type UI struct {
 	logFrames                                          int
 	// newBackups is a job's read of the backup folder, for drain;
 	// newNotice is a result for the header's line 2 (State.Notice).
-	newBackups  *Backups
-	newNotice   string
+	newBackups *Backups
+	newNotice  string
+	// newApp is the launch check's newer app release: tag, page URL.
+	newApp      *[2]string
 	menuBtn     widget.Clickable
 	menuScrim   widget.Clickable
 	menuClicks  [menuCount]widget.Clickable
@@ -415,6 +417,8 @@ func (u *UI) drain() {
 	u.newBackups = nil
 	notice := u.newNotice
 	u.newNotice = ""
+	newApp := u.newApp
+	u.newApp = nil
 	path, pathFor := u.newPath, u.pathFor
 	u.newPath, u.pathFor = "", JobNone
 	renamed := u.newName
@@ -452,6 +456,9 @@ func (u *UI) drain() {
 	}
 	if backups != nil {
 		u.st.Backups = *backups
+	}
+	if newApp != nil {
+		u.st.NewerApp, u.st.NewerAppURL = newApp[0], newApp[1]
 	}
 	if notice != "" {
 		u.st.Notice, u.st.NoticeAt = notice, u.now()
@@ -592,7 +599,7 @@ func (u *UI) afterJob(e Event) {
 		// without anybody pressing Check.
 		if !u.autoChecked && u.st.Device.Found {
 			u.autoChecked = true
-			u.later(u.startCheck)
+			u.later(u.startLaunchCheck)
 		}
 	}
 }
@@ -1134,6 +1141,9 @@ func (u *UI) statusLine() (string, color.NRGBA) {
 	}
 	if u.st.Notice != "" && u.now().Sub(u.st.NoticeAt) < NoticeFor {
 		return u.st.Notice, u.pal.MutedD
+	}
+	if u.st.FirmwareTooOld() {
+		return TooOldText, u.pal.Accent
 	}
 	if u.st.Ejected && d.Found {
 		return "Ejected — safe to unplug", u.pal.MutedD

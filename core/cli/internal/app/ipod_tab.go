@@ -85,6 +85,13 @@ func (u *UI) ipodRows() []ipodRow {
 		fw.value = "Core " + tag
 	}
 	switch {
+	case u.st.FirmwareTooOld():
+		fw.sub = TooOldText
+		if rel.Checked && rel.Tag != "" && rel.Err == "" {
+			fw.actions = []btn{{&u.updateBtn, "Update", true, !busy}}
+		} else {
+			fw.actions = []btn{{&u.checkBtn, "Check", false, !busy}}
+		}
 	case u.st.UpdateAvailable():
 		fw.sub = rel.Tag + " is available"
 		if !rel.Published.IsZero() {

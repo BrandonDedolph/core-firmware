@@ -39,7 +39,7 @@ func TestIPodRowsForTheDemo(t *testing.T) {
 	}
 
 	fw := rowByLabel(t, u, "Firmware")
-	if fw.value != "Core v0.1.2" || !strings.HasPrefix(fw.sub, "v0.1.3 is available · released Sep 24, 2026 · Hold banner") {
+	if fw.value != "Core v0.2.1" || !strings.HasPrefix(fw.sub, "v0.2.2 is available · released Sep 24, 2026 · Hold banner") {
 		t.Errorf("Firmware row = %+v", fw)
 	}
 	if len(fw.actions) != 1 || fw.actions[0].label != "Update" || !fw.actions[0].primary {
@@ -67,7 +67,7 @@ func TestIPodRowsForTheDemo(t *testing.T) {
 func TestFirmwareRowStates(t *testing.T) {
 	u := NewUI(Options{})
 	st := DemoState()
-	st.Device.Firmware = "v0.1.3 (build x)"
+	st.Device.Firmware = "v0.2.2 (build x)"
 	u.SetState(st)
 	if fw := rowByLabel(t, u, "Firmware"); fw.sub != "up to date" || len(fw.actions) != 0 {
 		t.Errorf("up to date: %+v", fw)

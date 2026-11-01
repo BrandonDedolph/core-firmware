@@ -8,9 +8,11 @@ import (
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/fwpart"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/ghrelease"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/installer"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/library"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/version"
 )
 
 // This file is what the buttons do: one function per job, each handed
@@ -77,12 +79,16 @@ func (u *UI) startRefresh() {
 func (u *UI) startSync(kind JobKind) {
 	src := strings.TrimSpace(u.sourceEd.Text())
 	dst := u.st.Device.Volume
+	tooOld := u.st.FirmwareTooOld()
 	u.start(kind, func(ctx context.Context, emit func(Event)) error {
 		if src == "" {
 			return fmt.Errorf("no music folder: choose it on the Library tab")
 		}
 		if dst == "" {
 			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
+		}
+		if tooOld && kind != JobDryRun {
+			return fmt.Errorf("%s", TooOldText)
 		}
 		o := syncer.Options{Src: src, Dst: dst, GenreMap: library.GenreMapEmbedded}
 		switch kind {
@@ -147,8 +153,19 @@ func (u *UI) startSync(kind JobKind) {
 // not the place to say that a network request the user did not make went
 // wrong, so the job itself ends cleanly and the header simply shows no
 // update state.
-func (u *UI) startCheck() {
+func (u *UI) startCheck() { u.check(false) }
+
+// startLaunchCheck is startCheck plus the quiet second question, asked once
+// per launch: is there a newer desktop app? It says nothing unless there is
+// (About and the ··· menu then offer it) or the question fails (a log line).
+func (u *UI) startLaunchCheck() { u.check(true) }
+
+func (u *UI) check(withApp bool) {
+	running := version.Version
 	u.start(JobCheck, func(ctx context.Context, emit func(Event)) error {
+		if withApp {
+			defer u.checkApp(ctx, running, emit)
+		}
 		emit(Event{Kind: EventProgress, Text: "asking GitHub", Pct: -1})
 		rel, err := u.be.Release(ctx)
 		if err != nil {
@@ -196,6 +213,21 @@ func (u *UI) startUpdate() {
 		}
 		return u.readBack(ctx, emit)
 	})
+}
+
+// checkApp is the app half of the launch check. Job goroutine.
+func (u *UI) checkApp(ctx context.Context, running string, emit func(Event)) {
+	tag, url, err := u.be.AppRelease(ctx)
+	if err != nil {
+		emit(Event{Kind: EventLog, Text: "could not check for a newer app: " + firstLine(err.Error())})
+		return
+	}
+	if !ghrelease.AppNewer(tag, running) {
+		return
+	}
+	u.mu.Lock()
+	u.newApp = &[2]string{tag, url}
+	u.mu.Unlock()
 }
 
 // installedTag is the "v0.1.2" out of fwpart.VersionText's

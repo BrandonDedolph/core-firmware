@@ -347,8 +347,12 @@ type State struct {
 	// CheckedAt is when the last update check answered, for the iPod
 	// tab's note ("checked for updates 3 min ago"); zero is never.
 	CheckedAt time.Time
-	Job       *JobStatus
-	Log       []string
+	// NewerApp and NewerAppURL are a desktop-app release newer than this
+	// build (ghrelease.AppNewer), found by the launch check; empty when
+	// there is none or this is a developer build.
+	NewerApp, NewerAppURL string
+	Job                   *JobStatus
+	Log                   []string
 
 	// Tab is which of the three screens the body shows.
 	Tab Tab
@@ -651,6 +655,13 @@ func (s *State) Primary() Action {
 		return ActionNone
 	case s.Phase() == PhaseNotInstalled:
 		return ActionInstall
+	case s.FirmwareTooOld():
+		// Sync would write index/config/log files the firmware on the
+		// iPod cannot read; the firmware has to move first.
+		if s.Release.Checked && s.Release.Tag != "" && s.Release.Err == "" {
+			return ActionUpdate
+		}
+		return ActionEject
 	case s.PendingTracks() > 0 || s.LibraryChanged:
 		return ActionSync
 	case s.UpdateAvailable():
@@ -658,6 +669,64 @@ func (s *State) Primary() Action {
 	default:
 		return ActionEject
 	}
+}
+
+// MinFirmware is the oldest firmware whose index, config and log formats
+// this app writes. A sync onto anything older would leave files the iPod
+// cannot read, so the app offers the firmware update first.
+const MinFirmware = "v0.2.0"
+
+// FirmwareTooOld reports whether the iPod's Core is older than MinFirmware.
+// An unknown version (no marker, or Apple's firmware) is not "too old":
+// there is nothing to compare, and the Install screen covers Apple's.
+func (s *State) FirmwareTooOld() bool {
+	tag := installedTag(s.Device.Firmware)
+	if tag == "" || s.Phase() != PhaseReady {
+		return false
+	}
+	return versionLess(tag, MinFirmware)
+}
+
+// TooOldText is what the header and the iPod tab say when it is.
+const TooOldText = "this app needs Core " + MinFirmware + " or newer on the iPod — update the firmware first"
+
+// versionLess compares two vX.Y.Z tags numerically; a tag that does not
+// parse is never less.
+func versionLess(a, b string) bool {
+	pa, oka := parseVersion(a)
+	pb, okb := parseVersion(b)
+	if !oka || !okb {
+		return false
+	}
+	for i := range pa {
+		if pa[i] != pb[i] {
+			return pa[i] < pb[i]
+		}
+	}
+	return false
+}
+
+func parseVersion(t string) ([3]int, bool) {
+	var v [3]int
+	t = strings.TrimPrefix(t, "v")
+	parts := strings.SplitN(t, ".", 3)
+	if len(parts) != 3 {
+		return v, false
+	}
+	for i, p := range parts {
+		n := 0
+		if p == "" {
+			return v, false
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		v[i] = n
+	}
+	return v, true
 }
 
 // PendingAlbums and PendingTracks are what the last plan says is not on

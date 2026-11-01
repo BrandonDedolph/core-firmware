@@ -35,6 +35,7 @@ const (
 	menuCheck
 	menuCopyLog
 	menuOpenMusic
+	menuGetApp
 	menuAbout
 	menuCount
 )
@@ -47,6 +48,7 @@ var menuLabels = [menuCount]string{
 	menuCheck:     "Check for updates",
 	menuCopyLog:   "Copy the log",
 	menuOpenMusic: "Open the music folder",
+	menuGetApp:    "Get the newer app…",
 	menuAbout:     "About",
 }
 
@@ -57,7 +59,7 @@ var menuGroups = [][]int{
 	{menuReread, menuCheck},
 	{menuCopyLog, menuOpenMusic},
 	nil, // the theme
-	{menuAbout},
+	{menuGetApp, menuAbout},
 }
 
 // themeChoices are the radio rows under "Theme".
@@ -79,6 +81,15 @@ func (u *UI) menuEnabled(i int) bool {
 		return len(u.st.Log) > 0
 	case menuOpenMusic:
 		return strings.TrimSpace(u.st.Source) != ""
+	}
+	return true
+}
+
+// menuVisible hides the one item that only exists sometimes: "Get the
+// newer app…", there only when the launch check found one.
+func (u *UI) menuVisible(i int) bool {
+	if i == menuGetApp {
+		return u.st.NewerApp != "" && u.st.NewerAppURL != ""
 	}
 	return true
 }
@@ -108,7 +119,7 @@ func (u *UI) menuEvents(gtx C) {
 		}
 	}
 	for i := range u.menuClicks {
-		if !u.menuClicks[i].Clicked(gtx) || !u.menuEnabled(i) {
+		if !u.menuClicks[i].Clicked(gtx) || !u.menuEnabled(i) || !u.menuVisible(i) {
 			continue
 		}
 		u.st.MenuOpen = false
@@ -132,6 +143,10 @@ func (u *UI) menuDo(gtx C, i int) {
 		u.copyLog(gtx)
 	case menuOpenMusic:
 		u.openMusicFolder()
+	case menuGetApp:
+		if err := openURL(u.st.NewerAppURL); err != nil {
+			u.st.Logf("could not open %s: %v", u.st.NewerAppURL, err)
+		}
 	case menuAbout:
 		u.showAbout()
 	}
@@ -172,6 +187,25 @@ var openFolder = func(dir string) error {
 	return nil
 }
 
+// openURL opens a web page in the default browser. A variable for the
+// tests, like openFolder.
+var openURL = func(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
 // openMusicFolder shows the music folder in the file manager, or does
 // nothing when there is none.
 func (u *UI) openMusicFolder() {
@@ -191,14 +225,8 @@ func (u *UI) showAbout() {
 		cli = "not found beside this app"
 	}
 	u.dlg = &dialogRequest{
-		title: "About Core",
-		body: strings.Join([]string{
-			"core-app " + version.Version,
-			"commit " + version.Commit + "  ·  built " + version.Date,
-			"core CLI: " + cli,
-			"",
-			"Core is Apache-2.0 · Nunito is OFL",
-		}, "\n"),
+		title:   "About Core",
+		body:    strings.Join(u.aboutLines(cli), "\n"),
 		okLabel: "Close",
 		info:    true,
 		reply:   make(chan string, 1),
@@ -234,6 +262,9 @@ func (u *UI) menuLayer(gtx C) D {
 				}
 				for _, i := range items {
 					i := i
+					if !u.menuVisible(i) {
+						continue
+					}
 					rows = append(rows, layout.Rigid(func(gtx C) D {
 						return u.menuRow(gtx, &u.menuClicks[i], menuLabels[i], u.menuEnabled(i), false, false)
 					}))
@@ -330,4 +361,20 @@ func (u *UI) radioDot(gtx C, on bool) D {
 		paint.FillShape(gtx.Ops, u.pal.Ink, clip.Ellipse{Min: image.Pt(i, i), Max: sz.Sub(image.Pt(i, i))}.Op(gtx.Ops))
 	}
 	return D{Size: sz}
+}
+
+// aboutLines is the About dialog's text: this build, what firmware it
+// writes for, the CLI beside it, a newer app when the launch check found
+// one, and the licences.
+func (u *UI) aboutLines(cli string) []string {
+	lines := []string{
+		"core-app " + version.Version,
+		"commit " + version.Commit + "  ·  built " + version.Date,
+		"writes files for Core " + MinFirmware + " or newer",
+		"core CLI: " + cli,
+	}
+	if u.st.NewerApp != "" {
+		lines = append(lines, "", "Core app "+u.st.NewerApp+" is available — "+u.st.NewerAppURL)
+	}
+	return append(lines, "", "Core is Apache-2.0 · Nunito is OFL")
 }

@@ -48,6 +48,8 @@ func plausibleImage(n int) []byte {
 // can prove no second request happened.
 type apiServer struct {
 	*httptest.Server
+	// list is what /releases answers, in order.
+	list      []Release
 	downloads int32
 	authSeen  chan string
 }
@@ -77,6 +79,15 @@ func newAPIServer(t *testing.T, releases map[string]Release, bodies map[string][
 		}
 		key := ""
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/repos/owner/name/releases"):
+			// The list endpoint: s.list, in order.
+			if r.URL.Query().Get("per_page") != "20" {
+				http.Error(w, "per_page", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(s.list)
+			return
 		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
 			key = "latest"
 		default:

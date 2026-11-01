@@ -153,7 +153,7 @@ func TestPrimaryLabelsSayWhatTheyDo(t *testing.T) {
 		t.Errorf("seven albums: %q", got)
 	}
 	st.Albums = nil
-	if got := st.PrimaryLabel(); got != "Update to v0.1.3" {
+	if got := st.PrimaryLabel(); got != "Update to v0.2.2" {
 		t.Errorf("update: %q", got)
 	}
 	st.Release = Release{}

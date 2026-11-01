@@ -1,6 +1,6 @@
 # Using core
 
-This guide describes Core v0.2.1. The device shows its version bottom-right on the boot screen and
+This guide describes Core v0.2.1 and the Core app app-v0.3.0. The device shows its version bottom-right on the boot screen and
 in Settings → About; Boot Details shows the full build string.
 
 This is the guide for the person holding the iPod. It covers the controls, every screen, the `core`
@@ -374,7 +374,8 @@ the layout the firmware reads, bakes the album art, writes the index, and flashe
 file, no installer.
 
 Download the one for your machine from the
-[latest release](https://github.com/BrandonDedolph/ipod-core/releases/latest):
+[releases page](https://github.com/BrandonDedolph/ipod-core/releases) — the newest `app-v…` release
+carries the app and the command line; the `v…` releases carry the firmware (`core.ipod`):
 
 | File | For |
 |---|---|

@@ -63,6 +63,10 @@ type fakeBackend struct {
 	// releaseCalls and refreshCalls count the two reads the header's
 	// after-job behaviour adds; flashFirmware is what a successful fake
 	// Flash leaves installed, so a test can see the header follow it.
+	appTag, appURL string
+	appErr         error
+	appCalls       int
+
 	backupsApple time.Time
 	backupsN     int
 	backupsDir   string
@@ -312,6 +316,14 @@ func (f *fakeBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 		}
 	}
 	return plan, err
+}
+
+// AppRelease answers from appTag/appURL/appErr.
+func (f *fakeBackend) AppRelease(ctx context.Context) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.appCalls++
+	return f.appTag, f.appURL, f.appErr
 }
 
 func (f *fakeBackend) Release(ctx context.Context) (Release, error) {

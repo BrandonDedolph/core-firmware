@@ -44,10 +44,10 @@ func DemoState() State {
 			// The bench volume: 74.5 GB as Explorer counts it, 51.2 free.
 			Free:     54_975_581_388,
 			Capacity: 79_993_765_888,
-			Firmware: "v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
+			Firmware: "v0.2.1 (build 2026-09-14T22:41:07Z g928727d)",
 			Installed: fwpart.Installed{
-				Kind: fwpart.Core, Version: "v0.1.2", BuildID: "2026-09-14T22:41:07Z g928727d",
-				Description: "Core v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
+				Kind: fwpart.Core, Version: "v0.2.1", BuildID: "2026-09-14T22:41:07Z g928727d",
+				Description: "Core v0.2.1 (build 2026-09-14T22:41:07Z g928727d)",
 			},
 			OSOSOK:   true,
 			OSOSNote: "237,640 bytes of 7,618,560 capacity, checksum 0x01589d64 verifies",
@@ -64,7 +64,7 @@ func DemoState() State {
 		},
 		Release: Release{
 			Checked: true,
-			Tag:     "v0.1.3",
+			Tag:     "v0.2.2",
 			Asset:   "core.ipod",
 			Notes:   "Hold banner, About in ink, version marker in the image.",
 		},
@@ -286,7 +286,7 @@ func LookingState() State {
 		Device:    Device{Err: "disk: no iPod found", Elevated: true},
 		CLIPath:   `C:\Users\brandon-home\ipod-bringup\core.exe`,
 	}
-	st.Logf("core-app v0.1.3")
+	st.Logf("core-app v0.2.2")
 	st.Logf("core CLI: %s", st.CLIPath)
 	st.Logf("watching for an iPod every 2 seconds")
 	st.Logf("14:01:58  no iPod found: disk: no iPod found")
@@ -328,7 +328,7 @@ func NotInstalledState() State {
 }
 
 const notInstalledLog = `
-core-app v0.1.3
+core-app v0.2.2
 core CLI: C:\Users\brandon-home\ipod-bringup\core.exe
 watching for an iPod every 2 seconds
 --- refresh ---
@@ -339,16 +339,16 @@ watching for an iPod every 2 seconds
 `
 
 const demoLog = `
-core-app v0.1.2
+core-app v0.2.1
 core CLI: C:\Users\brandon-home\ipod-bringup\core.exe
 --- refresh ---
 14:02:03  device: \\.\PhysicalDrive2 — Apple iPod, 80.0 GB (74.5 GiB)
 14:02:03  sector 2048 bytes (reported by the OS, confirmed: the Apple preamble is at sector 63)
-14:02:03  firmware: v0.1.2 (build 2026-09-14T22:41:07Z g928727d)
+14:02:03  firmware: v0.2.1 (build 2026-09-14T22:41:07Z g928727d)
 14:02:03  OSOS 237,640 bytes, checksum 0x01589d64 verifies
 14:02:04  library: 928 songs, 101 albums, index 237,584 B, CORECFG.DAT and CORELOG.BIN valid
 --- check for updates ---
-14:02:19  latest release: v0.1.3 (core.ipod)
+14:02:19  latest release: v0.2.2 (core.ipod)
 --- sync ---
 14:03:41  scanned 101 albums, 928 tracks
 14:03:41  plan: 101 albums, 63 to copy, 865 already there, 0 to rename, 0 orphan(s)

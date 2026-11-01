@@ -64,8 +64,13 @@ type Backend interface {
 	// Sync plans and executes one sync. o.DryRun makes it a plan and
 	// nothing else.
 	Sync(ctx context.Context, o syncer.Options, emit func(Event)) (*syncer.Plan, error)
-	// Release asks GitHub what the latest firmware release is.
+	// Release asks GitHub what the latest firmware release is — a `v…`
+	// release carrying core.ipod; the app's own `app-v…` releases are
+	// never it.
 	Release(ctx context.Context) (Release, error)
+	// AppRelease asks GitHub for the newest desktop-app release (an
+	// `app-v…` tag): its tag and its page.
+	AppRelease(ctx context.Context) (tag, url string, err error)
 	// Download fetches (or finds cached) the release's .ipod and
 	// returns the local path, checksum already verified.
 	Download(ctx context.Context, rel Release, emit func(Event)) (string, error)
@@ -416,13 +421,15 @@ func (b *RealBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 
 // --- Firmware ----------------------------------------------------------
 
-// Release asks GitHub for the latest release.
+// Release asks GitHub for the latest FIRMWARE release. Not
+// ghrelease.Latest: the app is released apart (`app-v…`), and GitHub's
+// "latest" may be an app release with no firmware on it.
 func (b *RealBackend) Release(ctx context.Context) (Release, error) {
 	repo := b.Repo
 	if repo == "" {
 		repo = ghrelease.DefaultRepo
 	}
-	rel, err := ghrelease.Latest(ctx, repo)
+	rel, err := ghrelease.LatestFirmware(ctx, repo)
 	if err != nil {
 		return Release{Checked: true, Err: err.Error()}, err
 	}
@@ -431,6 +438,19 @@ func (b *RealBackend) Release(ctx context.Context) (Release, error) {
 		out.Asset = a.Name
 	}
 	return out, nil
+}
+
+// AppRelease asks GitHub for the newest desktop-app release.
+func (b *RealBackend) AppRelease(ctx context.Context) (string, string, error) {
+	repo := b.Repo
+	if repo == "" {
+		repo = ghrelease.DefaultRepo
+	}
+	rel, err := ghrelease.LatestApp(ctx, repo)
+	if err != nil {
+		return "", "", err
+	}
+	return rel.Tag, rel.URL, nil
 }
 
 // Download fetches the release's firmware image into the cache. The

@@ -31,6 +31,7 @@ import (
 type fakeGitHub struct {
 	*httptest.Server
 	releases  map[string]ghrelease.Release
+	order     []string // tags in publish order; /releases lists them newest first
 	bodies    map[string][]byte
 	downloads int32
 }
@@ -53,6 +54,14 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			}
 			atomic.AddInt32(&g.downloads, 1)
 			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/repos/owner/name/releases") {
+			var list []ghrelease.Release
+			for i := len(g.order) - 1; i >= 0; i-- {
+				list = append(list, g.releases[g.order[i]])
+			}
+			json.NewEncoder(w).Encode(list)
 			return
 		}
 		key := "latest"
@@ -87,6 +96,9 @@ func (g *fakeGitHub) asset(name string, body []byte) ghrelease.Asset {
 // publish makes a release answer /releases/latest and its own tag.
 func (g *fakeGitHub) publish(rel ghrelease.Release) {
 	g.releases["latest"] = rel
+	if _, seen := g.releases[rel.Tag]; !seen {
+		g.order = append(g.order, rel.Tag)
+	}
 	g.releases[rel.Tag] = rel
 }
 
@@ -193,7 +205,7 @@ func TestUpdateCheckElidesLongNotes(t *testing.T) {
 	for i := 0; i < notesLineLimit+20; i++ {
 		fmt.Fprintf(&sb, "line %d\n", i)
 	}
-	g.publish(ghrelease.Release{Tag: "v0.1.3", Notes: sb.String()})
+	g.publish(ghrelease.Release{Tag: "v0.1.3", Notes: sb.String(), Assets: []ghrelease.Asset{{Name: "core.ipod"}}})
 	stubDeviceVersion(t, "v0.1.2", nil)
 	isolateCache(t)
 
@@ -214,7 +226,7 @@ func TestUpdateCheckElidesLongNotes(t *testing.T) {
 // it cannot name a version.
 func TestUpdateCheckWithAnUnknownDeviceVersion(t *testing.T) {
 	g := newFakeGitHub(t)
-	g.publish(ghrelease.Release{Tag: "v0.1.3"})
+	g.publish(ghrelease.Release{Tag: "v0.1.3", Assets: []ghrelease.Asset{{Name: "core.ipod"}}})
 	stubDeviceVersion(t, "", nil)
 	isolateCache(t)
 
@@ -235,7 +247,7 @@ func TestUpdateCheckWithAnUnknownDeviceVersion(t *testing.T) {
 // printed under it.
 func TestUpdateCheckWithNoDevice(t *testing.T) {
 	g := newFakeGitHub(t)
-	g.publish(ghrelease.Release{Tag: "v0.1.3"})
+	g.publish(ghrelease.Release{Tag: "v0.1.3", Assets: []ghrelease.Asset{{Name: "core.ipod"}}})
 	stubDeviceVersion(t, "", errNoDeviceForTest)
 	isolateCache(t)
 

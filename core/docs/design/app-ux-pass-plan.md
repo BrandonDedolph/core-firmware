@@ -176,7 +176,7 @@ both themes into the PR description for review. Review is visual first.
 | **A4 iPod tab** | rows; Storage from the volume; Backups row (Apple backup + partition backups, Show folder, Back up now); Advanced disclosure with the old facts and the image flash | Details tab gone; `details_tab.go` becomes `ipod_tab.go` |
 | **A5 Log strip** | strip + drawer on every screen; Looking and NotInstalled redrawn around the mark; log pane leaves the iPod tab | an install error is readable on the NotInstalled screen |
 | **A6 Gates** | identity card + hold-to-write; untested hardware refused (CLI's `--untested-hardware` only); Sync-and-remove dialog lists what it deletes | a write on tested hardware needs no typing; untested is refused with the CLI flag named |
-| **A7 Ship** | one music-folder entry point; footer click → Library; docs/screens/core_app.png (+ an Onyx shot) and the guide re-shot; README; release v0.2.2 | `core-app` in both themes in the README |
+| **A7 Ship** | one music-folder entry point; footer click → Library; docs/screens/core_app.png (+ an Onyx shot) and the guide re-shot; README; release **`app-v0.3.0`** — the app's first release under its own version (decided 2026-11-01: `app-v…` tags for the app and the CLI, `v…` for the firmware); the firmware is unchanged | `core-app` in both themes in the README |
 
 ## Not in this pass
 

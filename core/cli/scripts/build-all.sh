@@ -45,10 +45,13 @@ OUT="$(cd "$OUT" && pwd)"
 
 # The stamp. `git describe` gives the tag when we are on one (release.yml
 # always is) and <tag>-<n>-g<sha>[-dirty] otherwise, so a CI artifact says out
-# loud how far past the last release it is. Without git at all — a source
-# tarball — the strings stay at the package defaults.
+# loud how far past the last release it is. Only `app-v…` tags count: the app
+# and the CLI are versioned apart from the firmware (whose tags are `v…`), so
+# a firmware tag must never become the app's version. With no app tag
+# reachable --always yields the bare short hash. Without git at all — a
+# source tarball — the strings stay at the package defaults.
 if git rev-parse --git-dir >/dev/null 2>&1; then
-  VERSION="${CORE_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo '(devel)')}"
+  VERSION="${CORE_VERSION:-$(git describe --tags --always --dirty --match 'app-v[0-9]*' 2>/dev/null || echo '(devel)')}"
   COMMIT="${CORE_COMMIT:-$(git rev-parse HEAD)}"
 else
   VERSION="${CORE_VERSION:-(devel)}"

@@ -69,6 +69,8 @@ func TestSnapshotLaunchPhases(t *testing.T) {
 	}{
 		{"looking", LookingState()},
 		{"notinstalled", NotInstalledState()},
+		{"looking-drawer", func() State { st := LookingState(); st.LogOpen = true; return st }()},
+		{"notinstalled-drawer", func() State { st := NotInstalledState(); st.LogOpen = true; return st }()},
 	}
 	sizes := [][2]int{{900, 600}, {MinWidth, MinHeight}}
 	for _, c := range cases {

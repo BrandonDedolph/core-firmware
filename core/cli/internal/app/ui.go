@@ -226,6 +226,12 @@ type UI struct {
 	// The iPod tab's own: Show folder, and the Advanced disclosure.
 	backupDirBtn widget.Clickable
 	advancedBtn  widget.Clickable
+	// The log strip and drawer (logstrip.go). footH is the footer's
+	// height in the last frame — the drawer sits on it. logFrames counts
+	// the drawer's layouts, for the test that it is not on the iPod tab.
+	logStripBtn, logCloseBtn, clearLogBtn, drawerBlock widget.Clickable
+	footH                                              int
+	logFrames                                          int
 	// newBackups is a job's read of the backup folder, for drain.
 	newBackups  *Backups
 	menuBtn     widget.Clickable
@@ -615,7 +621,7 @@ func (u *UI) Layout(gtx C) D {
 				g = gtx.Disabled()
 			}
 			g.Constraints.Min = gtx.Constraints.Max
-			return u.page(g)
+			return u.pageWithDrawer(g)
 		}),
 		layout.Expanded(func(gtx C) D {
 			if u.dlg != nil {
@@ -625,6 +631,20 @@ func (u *UI) Layout(gtx C) D {
 				return u.menuLayer(gtx)
 			}
 			return D{}
+		}),
+	)
+}
+
+// pageWithDrawer is the page, and the log drawer over it when it is open:
+// above the body, below the dialogs and the menu.
+func (u *UI) pageWithDrawer(gtx C) D {
+	return layout.Stack{}.Layout(gtx,
+		layout.Stacked(u.page),
+		layout.Expanded(func(gtx C) D {
+			if !u.st.LogOpen {
+				return D{}
+			}
+			return u.drawerLayer(gtx)
 		}),
 	)
 }
@@ -704,9 +724,7 @@ func (u *UI) events(gtx C) {
 		u.st.Logf("cancel requested")
 		u.run.Cancel()
 	}
-	if u.copyBtn.Clicked(gtx) {
-		u.copyLog(gtx)
-	}
+	u.logEvents(gtx)
 	if u.advancedBtn.Clicked(gtx) {
 		u.st.Advanced = !u.st.Advanced
 		if u.st.Advanced {
@@ -1279,37 +1297,44 @@ func (u *UI) hairline(gtx C) D {
 	return D{Size: sz}
 }
 
-// footer is the bottom strip: what is on the iPod, and the music folder with
-// the one link that changes it.
+// footer is the bottom strip: the music folder with the one link that
+// changes it on the left, and the log strip on the right.
 func (u *UI) footer(gtx C) D {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(u.hairline),
 		layout.Rigid(func(gtx C) D {
 			return layout.Inset{Top: unit.Dp(9), Bottom: unit.Dp(9), Left: unit.Dp(14), Right: unit.Dp(14)}.
 				Layout(gtx, func(gtx C) D {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					half := gtx.Constraints.Max.X / 2
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(u.text(11, u.pal.MutedD, u.footerLine())),
-						layout.Flexed(1, func(gtx C) D {
-							return layout.E.Layout(gtx, u.line(11, u.pal.Muted, u.footerSource()))
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 						layout.Rigid(func(gtx C) D {
-							if !u.pickerOK {
-								return D{}
-							}
-							return u.changeBtn.Layout(gtx, func(gtx C) D {
-								col := u.pal.Ink
-								if u.st.Busy() {
-									col = u.pal.SelSub
-								}
-								return u.text(11, col, "Change")(gtx)
-							})
+							gtx.Constraints.Max.X = half - gtx.Dp(12)
+							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+								layout.Flexed(1, u.line(11, u.pal.Muted, u.footerSource())),
+								layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+								layout.Rigid(func(gtx C) D {
+									if !u.pickerOK {
+										return D{}
+									}
+									return u.changeBtn.Layout(gtx, func(gtx C) D {
+										col := u.pal.Ink
+										if u.st.Busy() {
+											col = u.pal.SelSub
+										}
+										return u.text(11, col, "Change")(gtx)
+									})
+								}),
+							)
 						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+						layout.Flexed(1, u.logStrip),
 					)
 				})
 		}),
 	)
+	u.footH = dims.Size.Y
+	return dims
 }
 
 // progress is the job's bar, in Ink like everything else that moves —
@@ -1369,47 +1394,96 @@ func (u *UI) body(gtx C) D {
 // does not notice things by itself.
 func (u *UI) lookingPane(gtx C) D {
 	d := u.st.Device
-	return u.topPlate(gtx, func(gtx C) D {
-		return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			var rows []layout.FlexChild
-			add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
+	// Direction centres within Min, so the pane claims the whole body.
+	gtx.Constraints.Min = gtx.Constraints.Max
+	return layout.Center.Layout(gtx, func(gtx C) D {
+		if w := gtx.Dp(480); gtx.Constraints.Max.X > w {
+			gtx.Constraints.Max.X = w
+		}
+		gtx.Constraints.Min = image.Point{}
+		var rows []layout.FlexChild
+		add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
+		gap := func(h unit.Dp) { rows = append(rows, layout.Rigid(layout.Spacer{Height: h}.Layout)) }
+		centred := func(size unit.Sp, col color.NRGBA, txt string, weight font.Weight) layout.Widget {
+			return func(gtx C) D {
+				l := material.Label(u.th, size, txt)
+				l.Color = col
+				l.Font.Weight = weight
+				l.Alignment = text.Middle
+				l.MaxLines = 3
+				return l.Layout(gtx)
+			}
+		}
 
-			add(func(gtx C) D { return drawMark(gtx, unit.Dp(48), u.pal.Ink, u.pal.Plate) })
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout))
-			add(u.text(18, u.pal.Ink, u.lookingHead()))
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
-			add(u.wrap(12, u.pal.Muted, "Plug the iPod into a port that carries data, then put it in disk mode:"))
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
-			add(u.line(13, u.pal.Ink, "1.  Hold  Select + Menu  until it resets"))
-			add(u.line(13, u.pal.Ink, "2.  At the Apple logo, hold  Select + Play"))
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
-			add(u.wrap(11, u.pal.Muted2, u.lookingNote()))
-			if d.Err != "" {
-				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
-				add(u.line(11, u.pal.Muted2, "last look:  "+d.Err))
-			}
-			if d.ElevationAdviceNeeded {
-				add(u.wrap(11, u.pal.Accent, "Reading a raw disk needs Administrator: close this and start it with Run as administrator."))
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+		add(func(gtx C) D { return drawMark(gtx, unit.Dp(48), u.pal.Ink, u.pal.Surface) })
+		gap(16)
+		add(centred(18, u.pal.Ink, u.lookingHead(), font.Bold))
+		gap(8)
+		add(centred(12.5, u.pal.Muted, "Use a cable that carries data, then put the iPod in disk mode. "+
+			"This window will notice on its own.", font.Normal))
+		gap(16)
+		add(func(gtx C) D {
+			return u.step(gtx, "1.", []string{"Hold", "Select", "+", "Menu", "until it resets"})
 		})
+		gap(8)
+		add(func(gtx C) D {
+			return u.step(gtx, "2.", []string{"At the Apple logo, hold", "Select", "+", "Play"})
+		})
+		if !u.st.Detecting {
+			gap(14)
+			add(centred(11, u.pal.Muted2, "Auto-detect is off in this window (--no-detect).", font.Normal))
+		}
+		if d.Err != "" && d.Err != "the iPod was unplugged" {
+			gap(14)
+			add(centred(11, u.pal.Muted2, "last look:  "+d.Err, font.Normal))
+		}
+		if d.ElevationAdviceNeeded {
+			gap(8)
+			add(centred(11.5, u.pal.Accent, "Reading a raw disk needs Administrator: close this and "+
+				"start it with Run as administrator.", font.Normal))
+		}
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, rows...)
 	})
+}
+
+// keyCaps names the words in a step that are the iPod's buttons.
+var keyCaps = map[string]bool{"Select": true, "Menu": true, "Play": true}
+
+// step is one line of instructions with the button names drawn as caps.
+func (u *UI) step(gtx C, n string, words []string) D {
+	children := []layout.FlexChild{layout.Rigid(u.text(13, u.pal.Muted, n))}
+	for _, w := range words {
+		w := w
+		children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout))
+		if keyCaps[w] {
+			children = append(children, layout.Rigid(func(gtx C) D { return u.keyCap(gtx, w) }))
+			continue
+		}
+		children = append(children, layout.Rigid(u.text(13, u.pal.Ink, w)))
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// keyCap is a button name in a small bordered cap, the way a manual draws
+// a key.
+func (u *UI) keyCap(gtx C, label string) D {
+	return widget.Border{Color: u.pal.Muted2, CornerRadius: unit.Dp(4), Width: unit.Dp(1)}.Layout(gtx,
+		func(gtx C) D {
+			return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(7), Right: unit.Dp(7)}.
+				Layout(gtx, func(gtx C) D {
+					l := material.Label(u.th, unit.Sp(11.5), label)
+					l.Font.Weight = font.SemiBold
+					l.Color = u.pal.Ink
+					return l.Layout(gtx)
+				})
+		})
 }
 
 func (u *UI) lookingHead() string {
 	if u.st.Device.Err == "the iPod was unplugged" {
 		return "The iPod was unplugged"
 	}
-	return "Looking for an iPod…"
-}
-
-func (u *UI) lookingNote() string {
-	if u.st.Detecting {
-		return "This window checks every two seconds. It will find the iPod on its own — " +
-			"there is nothing to press."
-	}
-	return "Auto-detect is off in this window (--no-detect)."
+	return "Plug in your iPod"
 }
 
 // installPane is the one screen a stock iPod gets: what was found, what
@@ -1431,6 +1505,8 @@ func (u *UI) installPane(gtx C) D {
 		return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return drawMark(gtx, unit.Dp(32), u.pal.Ink, u.pal.Plate) }),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 				layout.Rigid(u.line(18, u.pal.Ink, "Core is not installed on this iPod")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 				layout.Rigid(u.line(13, u.pal.Ink, "found  "+model+"  ·  "+disk.HumanSize(d.Size))),
@@ -1546,38 +1622,6 @@ func (u *UI) flashNote() string {
 		return "Runs " + name + " elevated (a UAC prompt appears). The whole partition is backed up first and the write is read back."
 	}
 	return "Needs root — the sudo line goes to the log. The whole partition is backed up first and the write is read back."
-}
-
-// --- the log pane -------------------------------------------------------
-
-func (u *UI) logPane(gtx C) D {
-	return u.plate(gtx, func(gtx C) D {
-		return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx C) D {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx C) D {
-					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(u.text(11, u.pal.Muted2, fmt.Sprintf("Log · %d lines", len(u.st.Log)))),
-						layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
-						layout.Rigid(func(gtx C) D {
-							return u.button(gtx, btn{&u.copyBtn, "Copy", false, len(u.st.Log) > 0})
-						}),
-					)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-				layout.Flexed(1, func(gtx C) D {
-					list := material.List(u.th, &u.logList)
-					list.Indicator.Color = u.pal.SelSub
-					return list.Layout(gtx, len(u.st.Log), func(gtx C, i int) D {
-						l := material.Label(u.th, unit.Sp(11), u.st.Log[i])
-						l.Font = Mono
-						l.Color = u.pal.SelTrk
-						l.MaxLines = 1
-						return l.Layout(gtx)
-					})
-				}),
-			)
-		})
-	})
 }
 
 // --- the modal ----------------------------------------------------------

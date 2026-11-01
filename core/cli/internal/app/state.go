@@ -333,6 +333,8 @@ type State struct {
 	// Advanced is the iPod tab's disclosure. A view field, like Tab: it
 	// is not remembered between runs.
 	Advanced bool
+	// LogOpen is the log drawer. A view field: never saved.
+	LogOpen bool
 	// CheckedAt is when the last update check answered, for the iPod
 	// tab's note ("checked for updates 3 min ago"); zero is never.
 	CheckedAt time.Time

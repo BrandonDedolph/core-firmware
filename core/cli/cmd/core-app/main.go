@@ -19,7 +19,7 @@
 //	core-app --no-detect              do not poll for the iPod
 //	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced]
 //	              [--size 900x600] [--tab albums|library|details]
-//	              [--theme system|linen|onyx]
+//	              [--theme system|linen|onyx] [--drawer]
 //	                                  render one frame headless and exit
 //
 // --screenshot is the review channel: a `-H windowsgui` process cannot
@@ -57,6 +57,7 @@ func main() {
 		logFile  = flag.String("log", "", "Append startup diagnostics to this file")
 		noDetect = flag.Bool("no-detect", false,
 			"Do not poll for the iPod every 2 seconds; the window stays on whatever it last read")
+		drawer    = flag.Bool("drawer", false, "--screenshot with the log drawer open")
 		themeName = flag.String("theme", "",
 			"Palette for this run: system (Onyx when Windows is set to dark apps), linen or onyx; default: the saved choice")
 		showVersion = flag.Bool("version", false, "Print the version and exit")
@@ -82,6 +83,7 @@ func main() {
 		if err != nil {
 			fail(*logFile, err)
 		}
+		st.LogOpen = *drawer
 		switch *tabName {
 		case "":
 		case "albums":

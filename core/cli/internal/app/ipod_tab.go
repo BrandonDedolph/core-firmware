@@ -21,8 +21,8 @@ import (
 // firmware, how full it is, what it is, and where its backups are — each
 // with the one or two things that can be done about it. Everything that is a
 // register-level fact (the disk path, the OSOS entry, the device files, the
-// image flash) is under Advanced, closed by default. The log sits below
-// until A5 moves it into the strip.
+// image flash) is under Advanced, closed by default. The log is the drawer's,
+// as on every screen.
 
 // ipodRow is one row of the plate, as data: what the tests read and what
 // the layout draws.
@@ -34,7 +34,7 @@ type ipodRow struct {
 	actions []btn
 }
 
-// ipodPane is the whole tab: the rows and Advanced above, the log below.
+// ipodPane is the whole tab: the rows, then Advanced.
 func (u *UI) ipodPane(gtx C) D {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
@@ -55,19 +55,7 @@ func (u *UI) ipodPane(gtx C) D {
 				)
 			})
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-		layout.Flexed(u.logWeight(), u.logPane),
 	)
-}
-
-// logWeight is the log's share of the tab: smaller while Advanced is open,
-// which is when the facts above need the room. (A5 moves the log into the
-// strip and this goes.)
-func (u *UI) logWeight() float32 {
-	if u.st.Advanced {
-		return 0.3
-	}
-	return 0.45
 }
 
 // revealAdvanced scrolls the tab to the bottom so a disclosure that has
@@ -522,20 +510,7 @@ func (u *UI) sourceRow(gtx C, busy bool) D {
 	)
 }
 
-// footerLine is the window's bottom strip, left half: what is on the iPod.
-func (u *UI) footerLine() string {
-	lib := u.st.Library
-	if lib.Present {
-		return fmt.Sprintf("%d albums · %d songs · %d genres on the iPod",
-			lib.Albums, lib.Songs, lib.Genres)
-	}
-	if n := len(u.st.Albums); n > 0 {
-		return fmt.Sprintf("%d albums in your music folder", n)
-	}
-	return "no library read yet"
-}
-
-// footerSource is the bottom strip's right half: the music folder, which the
+// footerSource is the bottom strip's left half: the music folder, which the
 // mockup keeps in the footer with a Change beside it.
 func (u *UI) footerSource() string {
 	if src := strings.TrimSpace(u.st.Source); src != "" {

@@ -63,7 +63,7 @@ happen on their own platform:
 ```bash
 # Linux (needs libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev
 #        libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev
-#        libffi-dev libxcursor-dev)
+#        libffi-dev libxcursor-dev, and libasound2-dev for the player)
 go build -tags novulkan -o core-app ./cmd/core-app
 
 # macOS
@@ -105,6 +105,20 @@ So the two files that import `gioui.org/app` and `gioui.org/gpu/headless`
 CI runs both, so the tagged build is not a configuration only one laptop
 ever compiles.
 
+#### `-tags noaudio`, and why the tests always pass it
+
+The album sheet plays tracks through `internal/player` (oto v3 for the
+device, mewkiz/flac and go-mp3 for the decoding — all pure Go on Windows;
+on Linux oto is cgo against ALSA, hence `libasound2-dev`; on macOS it
+loads AudioToolbox at run time). Built with `-tags noaudio`, the device
+half is a stub: `player.Available` is false, `Play` returns
+`ErrUnavailable`, and the sheet says "Playback is not available in this
+build" with no transport. **Every test run passes `noaudio`**, so no test
+ever opens an audio device on a developer's machine or a CI runner; the
+player's own tests drive its decoding, resampling, dithering and
+end-of-track logic against a fake device and synthetic FLAC files. Builds
+for people to run never pass it.
+
 ### Rendering the window without a display
 
 ```bash
@@ -118,6 +132,8 @@ go run -tags novulkan ./cmd/core-app --screenshot out.png --state advanced     #
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state menu         # the ··· menu
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state looking --drawer
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state demo --dialog write   # also holding, remove, about
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state album      # the album sheet, track 3 playing
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state preview    # the sync preview
 ```
 
 `--theme system|linen|onyx` picks the palette (default: the saved choice,
@@ -153,15 +169,19 @@ that is the only way to find out why a window did not appear: a
 
 ```bash
 cd core/cli
-go test ./...
+go test -tags noaudio ./...       # noaudio: never open an audio device (see above)
 go vet ./...
 gofmt -l .        # must print nothing; CI enforces this
 
 # and again with the GUI files in (see -tags novulkan above):
 go build -tags novulkan ./...
 go vet   -tags novulkan ./...
-go test  -tags novulkan ./...     # this run includes TestSnapshot
+go test  -tags "novulkan noaudio" ./...     # this run includes TestSnapshot
 ```
+
+On this project's WSL box the app's tests also run under a memory guard,
+since a layout bug once allocated 40 GB in one frame:
+`(ulimit -v 6000000; timeout 900 go test -count=1 -tags "novulkan noaudio" ./internal/app/)`.
 
 ### Parity env vars
 
@@ -237,6 +257,10 @@ internal/
                   injectable clock), the match score --yes acts on, and
                   the image + negative cache under
                   <user cache dir>/core/art. stdlib net/http only
+  player/         the album sheet's preview listen: one oto context per
+                  process (44.1 kHz, stereo, int16), FLAC and MP3 decoded
+                  on their own goroutine, resampled, mono doubled, 24-bit
+                  dithered to 16. -tags noaudio swaps the device for a stub
   version/        build version info, stamped via -ldflags at release time
 ```
 
@@ -421,3 +445,19 @@ tools/.venv/bin/python3 tools/release.py app-vX.Y.Z --check
 Apache-2.0, like the rest of the repository ([`core/LICENSE`](../LICENSE)).
 Nunito (OFL 1.1) is embedded in `core-app`; its licence is in
 `internal/app/fonts/OFL.txt`.
+
+`core-app` links these for the album sheet's player, each under the licence
+its LICENSE file states:
+
+| Module | Version | Licence |
+|---|---|---|
+| `github.com/ebitengine/oto/v3` | v3.3.3 | Apache License 2.0 |
+| `github.com/ebitengine/purego` (oto's, macOS only) | v0.8.0 | Apache License 2.0 |
+| `github.com/hajimehoshi/go-mp3` | v0.3.4 | Apache License 2.0 |
+| `github.com/mewkiz/flac` | v1.0.12 | The Unlicense (public domain dedication) |
+| `github.com/mewkiz/pkg` (flac's) | 2023-02-26 | The Unlicense (public domain dedication) |
+| `github.com/icza/bitio` (flac's) | v1.1.0 | Apache License 2.0 |
+
+They are the newest releases whose `go.mod` accepts the Go 1.22.10 this
+module is pinned to: oto v3.4+ asks for Go 1.24 and mewkiz/flac v1.0.13+
+for Go 1.23.

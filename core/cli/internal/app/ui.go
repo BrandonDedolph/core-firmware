@@ -28,6 +28,7 @@ import (
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/librarian"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/organizer"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/player"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/version"
 )
@@ -72,6 +73,9 @@ type Options struct {
 	// open fails in complete silence; this is the only way to see why
 	// from a shell.
 	LogFile string
+	// Audio is the album sheet's player; nil is internal/player's, which
+	// opens nothing until the first track is played.
+	Audio audio
 	// Theme overrides Config.Theme for this run (the --theme flag)
 	// without saving it. nil is "use the config", which is itself empty
 	// — System — on a first run.
@@ -118,6 +122,10 @@ type dialogRequest struct {
 	card, items []cardRow
 	total       string
 	note, plan  string
+	// only marks a dialog with one button, which closes it: it says
+	// something and asks nothing ("Everything is on the iPod"). Such a
+	// dialog has no Cancel, and Esc or a click on the scrim closes it.
+	only bool
 	// hold makes the confirming button a press-and-hold (HoldDuration)
 	// that answers holdAnswer when it completes.
 	hold       bool
@@ -126,6 +134,9 @@ type dialogRequest struct {
 	// a job that has already given up cannot wedge the UI goroutine.
 	reply chan string
 }
+
+// solo reports whether the dialog has one button and nothing to cancel.
+func (d *dialogRequest) solo() bool { return d.info || d.only }
 
 // renameResult is what a finished rename job leaves for the next frame:
 // the friendly name that was asked for, the label the volume actually
@@ -171,6 +182,16 @@ type UI struct {
 	planSynced bool
 
 	dlg *dialogRequest // the dialog on screen; UI goroutine only
+	// sheet is the album sheet (album.go), nil when closed; covers is its
+	// larger cover cache and audio the player behind it. newTracks,
+	// trackDone and trackErr are the sheet's results from other
+	// goroutines (ReadTracks, the player's OnEnd and OnError), under mu.
+	sheet     *albumSheet
+	covers    *thumbCache
+	audio     audio
+	newTracks *tracksResult
+	trackDone bool
+	trackErr  error
 
 	// pending is the one-job-at-a-time queue: things to start on a
 	// frame where nothing is running (see later()). UI goroutine only.
@@ -212,6 +233,10 @@ type UI struct {
 	nameClick, nameSaveBtn, nameCancelBtn       widget.Clickable
 	installBtn, installFileBtn, installPickBtn  widget.Clickable
 	dlgOK, dlgCancel                            widget.Clickable
+	// dlgScrim is the click outside a dialog; dlgBlock stops a click on
+	// the plate from being one. itemList scrolls a dialog's list.
+	dlgScrim, dlgBlock widget.Clickable
+	itemList           widget.List
 
 	// The top bar's one primary button, the tabs, and the footer's
 	// "Change" for the music folder.
@@ -312,6 +337,7 @@ func NewUI(o Options) *UI {
 	u.prevList.Axis = layout.Vertical
 	u.dlgBody.Axis = layout.Vertical
 	u.logList.Axis = layout.Vertical
+	u.itemList.Axis = layout.Vertical
 	// The log is a transcript: the interesting end is the bottom, and a
 	// pane that stays at the top while a sync scrolls past is a pane
 	// nobody reads.
@@ -327,6 +353,26 @@ func NewUI(o Options) *UI {
 		}
 		return u.be.Thumbnail(dir)
 	}, u.invalidate)
+	// The album sheet's 160 dp cover: the grid's source at twice its size.
+	u.covers = newThumbCache(func(dir string) (image.Image, error) {
+		return albumCover(dir, 2*ThumbSize)
+	}, u.invalidate)
+	u.audio = o.Audio
+	if u.audio == nil {
+		u.audio = player.New()
+	}
+	u.audio.OnEnd(func() {
+		u.mu.Lock()
+		u.trackDone = true
+		u.mu.Unlock()
+		u.invalidate()
+	})
+	u.audio.OnError(func(err error) {
+		u.mu.Lock()
+		u.trackErr = err
+		u.mu.Unlock()
+		u.invalidate()
+	})
 	u.artThumbs = newThumbCache(func(url string) (image.Image, error) {
 		if u.be == nil {
 			return nil, ErrNoThumb
@@ -433,7 +479,19 @@ func (u *UI) drain() {
 	u.newPlan, u.planSynced = nil, false
 	ask := u.askQueue
 	u.askQueue = nil
+	tracks, ended, playErr := u.newTracks, u.trackDone, u.trackErr
+	u.newTracks, u.trackDone, u.trackErr = nil, false, nil
 	u.mu.Unlock()
+
+	if tracks != nil {
+		u.applyTracks(tracks)
+	}
+	if playErr != nil {
+		u.trackFailed(playErr)
+	}
+	if ended {
+		u.trackEnded()
+	}
 
 	if dev != nil {
 		u.st.Device = *dev
@@ -653,11 +711,16 @@ func (u *UI) saveConfig() {
 // jobs through the Runner.
 func (u *UI) Layout(gtx C) D {
 	u.drain()
-	if u.dlg != nil {
-		// A dialog replaces the menu that opened it.
+	switch {
+	case u.dlg != nil:
+		// A dialog replaces the menu that opened it, and sits over the
+		// album sheet when a job asks while one is open.
 		u.st.MenuOpen = false
 		u.dialogEvents(gtx)
-	} else {
+	case u.sheet != nil:
+		u.st.MenuOpen = false
+		u.sheetEvents(gtx)
+	default:
 		u.events(gtx)
 	}
 
@@ -669,7 +732,7 @@ func (u *UI) Layout(gtx C) D {
 	return layout.Stack{}.Layout(gtx,
 		layout.Stacked(func(gtx C) D {
 			g := gtx
-			if u.dlg != nil {
+			if u.dlg != nil || u.sheet != nil {
 				// A modal that does not actually block the buttons
 				// behind it is a modal that lets somebody start a sync
 				// while a flash confirmation is on screen.
@@ -679,13 +742,16 @@ func (u *UI) Layout(gtx C) D {
 			return u.pageWithDrawer(g)
 		}),
 		layout.Expanded(func(gtx C) D {
+			if u.sheet != nil {
+				u.sheetLayer(gtx)
+			}
 			if u.dlg != nil {
 				return u.dialog(gtx)
 			}
 			if u.st.MenuOpen {
 				return u.menuLayer(gtx)
 			}
-			return D{}
+			return D{Size: gtx.Constraints.Min}
 		}),
 	)
 }
@@ -743,7 +809,8 @@ func (u *UI) events(gtx C) {
 			u.pick(JobFlash)
 		}
 		if u.dryRunBtn.Clicked(gtx) {
-			u.startSync(JobDryRun)
+			// The plan, then the preview sheet — whose button syncs.
+			u.startSyncPreview()
 		}
 		if u.pruneBtn.Clicked(gtx) {
 			u.startSync(JobSyncPrune)
@@ -899,6 +966,27 @@ func (u *UI) dialogEvents(gtx C) {
 	if u.dlgCancel.Clicked(gtx) {
 		u.cancel()
 		return
+	}
+	u.dlgBlock.Clicked(gtx) // a click on the plate is not a click outside it
+	if u.dlg.solo() {
+		// One button and nothing to cancel: Esc and a click outside close
+		// it. Both reply CancelAnswer — closing is never a yes.
+		if u.dlgScrim.Clicked(gtx) {
+			u.cancel()
+			return
+		}
+		for {
+			ev, ok := gtx.Event(key.Filter{Name: key.NameEscape})
+			if !ok {
+				break
+			}
+			if ke, ok := ev.(key.Event); ok && ke.State == key.Press {
+				u.cancel()
+				return
+			}
+		}
+	} else {
+		u.dlgScrim.Clicked(gtx)
 	}
 	if u.planToggle.Clicked(gtx) {
 		u.planOpen = !u.planOpen

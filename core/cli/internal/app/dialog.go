@@ -10,6 +10,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -20,8 +21,13 @@ import (
 // whatever the request carries: the title, the identity card, the removal
 // list, the body, the note, "Show the plan", the typed field, and the
 // buttons, right-aligned with Cancel first.
+//
+// A dialog with one button (dialogRequest.solo) also closes on Esc and on a
+// click on the scrim; one with a Cancel closes only through its buttons.
 func (u *UI) dialog(gtx C) D {
 	paint.FillShape(gtx.Ops, u.pal.Scrim, clip.Rect{Max: gtx.Constraints.Min}.Op())
+	full := gtx.Constraints.Max
+	u.dlgScrim.Layout(gtx, func(gtx C) D { return D{Size: full} })
 	d := u.dlg
 	return layout.Center.Layout(gtx, func(gtx C) D {
 		w := gtx.Constraints.Max.X * 9 / 10
@@ -33,59 +39,73 @@ func (u *UI) dialog(gtx C) D {
 			gtx.Constraints.Max.Y = h
 		}
 		gtx.Constraints.Min.Y = 0
-		return u.plateR(gtx, 8, func(gtx C) D {
-			return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
-				var rows []layout.FlexChild
-				add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
-				gap := func(h unit.Dp) { rows = append(rows, layout.Rigid(layout.Spacer{Height: h}.Layout)) }
+		return u.dlgBlock.Layout(gtx, func(gtx C) D {
+			return u.dialogPlate(gtx, d)
+		})
+	})
+}
 
-				add(func(gtx C) D {
-					l := material.Label(u.th, unit.Sp(15), d.title)
-					l.Font.Weight = font.Bold
-					l.Color = u.pal.Ink
-					return l.Layout(gtx)
-				})
-				gap(12)
-				if len(d.card) > 0 {
-					add(func(gtx C) D { return u.cardBox(gtx, d.card, true) })
-					gap(12)
-				}
-				if len(d.items) > 0 {
-					add(func(gtx C) D { return u.cardBox(gtx, d.items, false) })
-					gap(8)
-					add(u.wrap(12.5, u.pal.Ink, d.total))
-					gap(8)
-				}
-				if d.body != "" {
-					add(u.dialogBody)
-					gap(10)
-				}
-				if d.note != "" {
-					add(u.wrap(12, u.pal.Muted, d.note))
-					gap(10)
-				}
-				if d.plan != "" {
-					add(u.planLink)
-					if u.planOpen {
-						gap(6)
-						add(u.planBox)
-					}
-					gap(10)
-				}
-				if d.prompt != "" {
-					add(u.text(12.5, u.pal.Ink, d.prompt))
-				}
-				if d.want != "" {
-					add(func(gtx C) D {
-						return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx C) D {
-							return u.field(gtx, &u.confirmEd, d.want)
-						})
-					})
-				}
-				gap(14)
-				add(u.dialogButtons)
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+// dialogPlate is the plate and everything on it.
+func (u *UI) dialogPlate(gtx C, d *dialogRequest) D {
+	return u.plateR(gtx, 8, func(gtx C) D {
+		return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
+			var rows []layout.FlexChild
+			add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
+			gap := func(h unit.Dp) { rows = append(rows, layout.Rigid(layout.Spacer{Height: h}.Layout)) }
+
+			add(func(gtx C) D {
+				l := material.Label(u.th, unit.Sp(15), d.title)
+				l.Font.Weight = font.Bold
+				l.Color = u.pal.Ink
+				return l.Layout(gtx)
 			})
+			gap(12)
+			if len(d.card) > 0 {
+				add(func(gtx C) D { return u.cardBox(gtx, d.card, true) })
+				gap(12)
+			}
+			if len(d.items) > 0 {
+				add(func(gtx C) D {
+					// The list scrolls inside what is left once the
+					// total, the note and the buttons have their room.
+					if m := gtx.Constraints.Max.Y - gtx.Dp(150); m > gtx.Dp(60) {
+						gtx.Constraints.Max.Y = m
+					}
+					return u.cardBox(gtx, d.items, false)
+				})
+				gap(8)
+				add(u.wrap(12.5, u.pal.Ink, d.total))
+				gap(8)
+			}
+			if d.body != "" {
+				add(u.dialogBody)
+				gap(10)
+			}
+			if d.note != "" {
+				add(u.wrap(12, u.pal.Muted, d.note))
+				gap(10)
+			}
+			if d.plan != "" {
+				add(u.planLink)
+				if u.planOpen {
+					gap(6)
+					add(u.planBox)
+				}
+				gap(10)
+			}
+			if d.prompt != "" {
+				add(u.text(12.5, u.pal.Ink, d.prompt))
+			}
+			if d.want != "" {
+				add(func(gtx C) D {
+					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx C) D {
+						return u.field(gtx, &u.confirmEd, d.want)
+					})
+				})
+			}
+			gap(14)
+			add(u.dialogButtons)
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 		})
 	})
 }
@@ -144,6 +164,17 @@ func (u *UI) cardBox(gtx C, rows []cardRow, labelled bool) D {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(12), Right: unit.Dp(12)}.
 						Layout(gtx, func(gtx C) D {
+							if !labelled {
+								// A list: scrolls when it is longer than
+								// the room it has.
+								gtx.Constraints.Max.Y -= gtx.Dp(16)
+								gtx.Constraints.Min.Y = 0
+								list := material.List(u.th, &u.itemList)
+								list.Indicator.Color = u.pal.SelSub
+								return list.Layout(gtx, len(rows), func(gtx C, i int) D {
+									return u.listLine(gtx, rows[i])
+								})
+							}
 							var ch []layout.FlexChild
 							for i := range rows {
 								r := rows[i]
@@ -175,7 +206,7 @@ func (u *UI) cardLine(gtx C, r cardRow) D {
 	})
 }
 
-// listLine is "Album ........ 1.2 GB".
+// listLine is "Album ........ 1.2 GB", or "Album · 9 of 12 tracks · 1.2 GB".
 func (u *UI) listLine(gtx C, r cardRow) D {
 	return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
@@ -183,10 +214,26 @@ func (u *UI) listLine(gtx C, r cardRow) D {
 			// long, and its end is the part that says where it is.
 			layout.Flexed(1, u.wrapN(12.5, u.pal.Ink, r.label, 2)),
 			layout.Rigid(func(gtx C) D {
+				if r.mid == "" {
+					return D{}
+				}
+				// A fixed column, so "9 of 12 tracks" lines up row to row.
+				w := gtx.Dp(112)
+				gtx.Constraints.Min.X, gtx.Constraints.Max.X = w, w
+				return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, u.text(12, u.pal.Muted, r.mid))
+			}),
+			layout.Rigid(func(gtx C) D {
 				if r.value == "" {
 					return D{}
 				}
-				return layout.Inset{Left: unit.Dp(10)}.Layout(gtx, u.text(12, u.pal.Muted, r.value))
+				gtx.Constraints.Min.X = gtx.Dp(64)
+				return layout.Inset{Left: unit.Dp(10)}.Layout(gtx, func(gtx C) D {
+					l := material.Label(u.th, unit.Sp(12), r.value)
+					l.Color = u.pal.Muted
+					l.Alignment = text.End
+					l.MaxLines = 1
+					return l.Layout(gtx)
+				})
 			}),
 		)
 	})
@@ -240,7 +287,8 @@ func (u *UI) dialogButtons(gtx C) D {
 	return layout.Flex{}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
 		layout.Rigid(func(gtx C) D {
-			if d.info {
+			if d.solo() {
+				// Nothing to cancel: the one button closes it.
 				return D{}
 			}
 			return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx C) D {

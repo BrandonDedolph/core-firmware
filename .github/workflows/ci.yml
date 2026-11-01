@@ -398,14 +398,15 @@ jobs:
       # internal/app/gpu.go — the two GPU files drop out of a Linux
       # build that has no Vulkan headers), so this step is what makes
       # the difference between CI checking the model and CI checking the
-      # window.
+      # window. libasound2-dev is internal/player's: oto's Linux backend
+      # is cgo against ALSA, so every build of the module needs it.
       - name: Install the Gio GUI build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev pkg-config
+            libffi-dev libxcursor-dev libvulkan-dev libasound2-dev pkg-config
 
       - name: Build
         run: go build ./...
@@ -414,7 +415,9 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        # -tags noaudio: the album sheet's player is a stub in the tests,
+        # so no test ever opens an audio device (core/cli/README.md).
+        run: go test -tags noaudio ./...
 
       # The same three again WITH the GUI files in. -tags novulkan is
       # the flag the whole arrangement turns on: it drops Gio's Vulkan
@@ -433,7 +436,7 @@ jobs:
         run: |
           go build -tags novulkan ./...
           go vet -tags novulkan ./...
-          go test -tags novulkan ./...
+          go test -tags "novulkan noaudio" ./...
 
       - name: Upload the rendered window snapshots
         if: always()

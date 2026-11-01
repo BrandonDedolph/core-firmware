@@ -46,9 +46,10 @@ func (u *UI) gate(title string) writeGate {
 	return writeGate{title: title, dev: u.st.Device, cli: u.st.CLIPath}
 }
 
-// cardRow is one label/value line of the identity card (or one album of
-// the removal list).
-type cardRow struct{ label, value string }
+// cardRow is one label/value line of the identity card (or one row of the
+// removal list or the sync preview, where mid is the muted middle column:
+// "9 of 12 tracks").
+type cardRow struct{ label, mid, value string }
 
 // identityCard is the five lines that say which iPod this is.
 func identityCard(d Device, imageBytes int64) []cardRow {
@@ -62,15 +63,15 @@ func identityCard(d Device, imageBytes int64) []cardRow {
 		writes = v + " " + unit + " of firmware"
 	}
 	rows := []cardRow{
-		{"Name", name},
-		{"Model", modelWords(d.Model)},
+		{label: "Name", value: name},
+		{label: "Model", value: modelWords(d.Model)},
 	}
 	if d.Serial != "" {
-		rows = append(rows, cardRow{"Serial", d.Serial})
+		rows = append(rows, cardRow{label: "Serial", value: d.Serial})
 	}
 	rows = append(rows,
-		cardRow{"Disk", diskLine(d)},
-		cardRow{"Writes", writes + " · the partition is backed up first and read back after"},
+		cardRow{label: "Disk", value: diskLine(d)},
+		cardRow{label: "Writes", value: writes + " · the partition is backed up first and read back after"},
 	)
 	return rows
 }
@@ -211,10 +212,10 @@ func removalDialog(plan *syncer.Plan, info func(string) (int64, bool)) *dialogRe
 			n, unit := humanBinary(size)
 			v = n + " " + unit
 		}
-		rows = append(rows, cardRow{label, v})
+		rows = append(rows, cardRow{label: label, value: v})
 	}
 	if n := len(plan.Prune); n > maxRows {
-		rows = append(rows, cardRow{fmt.Sprintf("… and %d more", n-maxRows), ""})
+		rows = append(rows, cardRow{label: fmt.Sprintf("… and %d more", n-maxRows)})
 	}
 	n := len(plan.Prune)
 	noun := fmt.Sprintf("%d item%s", n, plural(n))

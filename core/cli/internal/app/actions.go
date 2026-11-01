@@ -147,6 +147,54 @@ func (u *UI) startSync(kind JobKind) {
 	})
 }
 
+// startSyncPreview is the sync a person starts: the header's "Sync N
+// albums" and the iPod tab's "Preview sync". It plans first (a dry run,
+// which also refreshes the grid), shows what the plan would copy
+// (previewDialog), and copies only when that sheet's button is pressed.
+// Cancel — or Close on "Everything is on the iPod" — ends the job with
+// nothing written. The plan's lines go to the log as well.
+func (u *UI) startSyncPreview() {
+	src := strings.TrimSpace(u.sourceEd.Text())
+	dst := u.st.Device.Volume
+	tooOld := u.st.FirmwareTooOld()
+	u.start(JobSync, func(ctx context.Context, emit func(Event)) error {
+		if src == "" {
+			return fmt.Errorf("no music folder: choose it on the Library tab")
+		}
+		if dst == "" {
+			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
+		}
+		o := syncer.Options{Src: src, Dst: dst, GenreMap: library.GenreMapEmbedded}
+		dry := o
+		dry.DryRun = true
+		emit(Event{Kind: EventProgress, Text: "working out what to copy", Pct: -1})
+		plan, err := u.be.Sync(ctx, dry, emit)
+		u.publishPlan(plan, false)
+		if err != nil {
+			return err
+		}
+		albums := AlbumsFromPlan(plan)
+		for _, a := range albums {
+			if a.Copy > 0 {
+				emit(Event{Kind: EventLog, Text: fmt.Sprintf("would copy %s — %d of %d tracks, %s",
+					a.Title, a.Copy, a.Tracks, disk.HumanSize(a.Bytes))})
+			}
+		}
+		req := previewDialog(albums, src, tooOld)
+		answer, err := u.ask(ctx, req)
+		if err != nil {
+			return err
+		}
+		if req.only || answer == CancelAnswer {
+			emit(Event{Kind: EventLog, Text: "preview only: nothing was copied"})
+			return nil
+		}
+		plan, err = u.be.Sync(ctx, o, emit)
+		u.publishPlan(plan, err == nil)
+		return err
+	})
+}
+
 // startCheck asks GitHub for the latest release. It runs once by itself
 // after the first Refresh that finds an iPod (see afterJob) and again from
 // the menu. A failure is a line in the log and nothing else: the header is
@@ -466,7 +514,8 @@ func (u *UI) doPrimary() {
 	case ActionInstall:
 		u.startInstall("")
 	case ActionSync:
-		u.startSync(JobSync)
+		// Never straight to the copy: the preview says what will go.
+		u.startSyncPreview()
 	case ActionUpdate:
 		u.startUpdate()
 	case ActionEject:
@@ -614,42 +663,16 @@ func (u *UI) startUndo(journal string) {
 	})
 }
 
-// gridEvents is the Albums tab's half of the frame: a tile click shows
-// what the plan says about that album.
+// gridEvents is the Albums tab's half of the frame: a tile click opens the
+// album sheet (album.go).
 func (u *UI) gridEvents(gtx C, busy bool) {
 	for i := range u.tileClicks {
 		if i >= len(u.st.Albums) {
 			break
 		}
 		if u.tileClicks[i].Clicked(gtx) {
-			u.showAlbum(u.st.Albums[i])
+			u.openSheet(u.st.Albums[i])
 		}
-	}
-}
-
-// showAlbum puts one album's facts on screen, in the modal the write
-// confirmations already use. It is a read: there is no job behind it and
-// the reply channel is buffered, so the OK button simply closes it.
-func (u *UI) showAlbum(a Album) {
-	state := "every track is on the iPod"
-	switch a.State {
-	case TileNew:
-		state = "none of it is on the iPod yet"
-	case TileChanged:
-		state = fmt.Sprintf("%d of %d tracks are about to be copied", a.Copy, a.Tracks)
-	}
-	body := strings.Join([]string{
-		"folder on the iPod   Music/" + a.Device,
-		"folder on this PC    " + a.Dir,
-		fmt.Sprintf("tracks               %d", a.Tracks),
-		fmt.Sprintf("to copy              %d  (%s)", a.Copy, disk.HumanSize(a.Bytes)),
-	}, "\n")
-	u.dlg = &dialogRequest{
-		title:   a.Title,
-		body:    body,
-		prompt:  state,
-		okLabel: "Close",
-		reply:   make(chan string, 1),
 	}
 }
 

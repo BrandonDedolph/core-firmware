@@ -29,5 +29,18 @@ The first release of the app under its own version. The firmware is unchanged.
   --untested-hardware` is the way to take that risk.
 - **Sync and remove lists what goes.** Each album folder, stray file or playlist it would delete,
   with its size, and a button that counts them. Cancel means cancel.
+- **Click an album to see it.** The cover, the artist, how many tracks, how big and how long, what
+  the iPod has of it, and its tracklist — numbers, titles and lengths from the tags, Disc 1 and
+  Disc 2 apart — with a link that shows the folder on this PC. One Close button; Esc or a click
+  outside closes it too.
+- **And to hear it.** Click a track and it plays through the computer's speakers, then the rest of
+  the album after it, with back, pause and next and a bar you can click to jump. FLAC and MP3, any
+  sample rate; closing the album stops it. Pure Go on Windows (oto, mewkiz/flac, go-mp3).
+- **A sync shows what it will copy first.** "Sync 7 albums" and Preview sync open a list of the
+  albums the sync would copy — how many of each one's tracks, their size, the total — and copy
+  only when its "Sync 7 albums" is pressed; Cancel copies nothing. With nothing to copy it says
+  "Everything is on the iPod".
+- **Cancel only where there is something to cancel.** A dialog that just says something (About,
+  "Everything is on the iPod") has one button, and Esc or a click outside closes it.
 - **Words.** Preview sync, Sync and remove, Choose an image…, Rescan, Use this cover; no file
   names, disk paths or register facts outside Advanced and the log.

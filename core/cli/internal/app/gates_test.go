@@ -278,11 +278,11 @@ func TestSyncAndRemoveListsAndDeletes(t *testing.T) {
 func TestIdentityCardForTheDemo(t *testing.T) {
 	card := identityCard(DemoState().Device, 443_392)
 	want := []cardRow{
-		{"Name", "Brandon's iPod"},
-		{"Model", "iPod Video 5.5G, 80 GB"},
-		{"Serial", "000A2700168F1E3C"},
-		{"Disk", "Disk 2 (as Disk Management numbers it) · 74.5 GB"},
-		{"Writes", "433 KB of firmware · the partition is backed up first and read back after"},
+		{label: "Name", value: "Brandon's iPod"},
+		{label: "Model", value: "iPod Video 5.5G, 80 GB"},
+		{label: "Serial", value: "000A2700168F1E3C"},
+		{label: "Disk", value: "Disk 2 (as Disk Management numbers it) · 74.5 GB"},
+		{label: "Writes", value: "433 KB of firmware · the partition is backed up first and read back after"},
 	}
 	if len(card) != len(want) {
 		t.Fatalf("card = %+v", card)

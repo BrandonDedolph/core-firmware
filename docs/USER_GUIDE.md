@@ -423,6 +423,13 @@ written. On the iPod Video 5.5G 80 GB, the hardware Core has been tested on, you
 can write it with `--untested-hardware`, if you mean to take that risk. *Sync and remove* lists the albums it would delete and says how many on its button.
 After any write the window reads the iPod again, so the header shows the new version at once.
 
+Click an album to open it: its cover, what the iPod has of it, and its tracklist. Click a track to
+listen to it on the computer — the album plays on from there, with back, pause and next and a bar
+you can click to jump — and *Show folder on this PC* opens the folder. Closing the album stops the
+music. *Sync N albums* (and *Preview sync* on the iPod tab) first shows what the sync would copy —
+each album, how many of its tracks and their size, and the total — and copies nothing until you
+press the sync button on it; when there is nothing to copy it says *Everything is on the iPod*.
+
 <p align="center"><img src="screens/core_app.png" alt="the core desktop app, Linen" width="640"></p>
 <p align="center"><img src="screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="640"></p>
 <p align="center"><img src="screens/core_app_ipod.png" alt="the iPod tab" width="640"></p>

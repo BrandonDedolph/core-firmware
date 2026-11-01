@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
@@ -11,7 +12,7 @@ import (
 // DialogKinds are the dialogs `core-app --screenshot --dialog KIND` can
 // put on screen, for review. They are drawn and nothing else: a canned
 // dialog has no job behind it, so nothing can be confirmed through one.
-var DialogKinds = []string{"write", "holding", "remove", "about"}
+var DialogKinds = []string{"write", "holding", "remove", "about", "album", "preview"}
 
 // cannedDialog builds one of DialogKinds against the state's device.
 func cannedDialog(u *UI, kind string) error {
@@ -46,6 +47,22 @@ func cannedDialog(u *UI, kind string) error {
 	case "about":
 		u.showAbout()
 		return nil
+	case "album":
+		// The sheet on Remain in Light, its third track playing.
+		for _, a := range u.st.Albums {
+			if a.Device == demoSheetAlbum {
+				u.openSheet(a)
+				break
+			}
+		}
+		if u.sheet == nil {
+			return fmt.Errorf("--dialog album: the state has no %q", demoSheetAlbum)
+		}
+		u.sheet.playing = 2
+		u.sheet.canned = &cannedTransport{pos: 83 * time.Second, total: u.sheet.tracks[2].Length}
+		return nil
+	case "preview":
+		u.dlg = previewDialog(u.st.Albums, u.st.Source, u.st.FirmwareTooOld())
 	default:
 		return fmt.Errorf("--dialog %q: want one of %s", kind, strings.Join(DialogKinds, ", "))
 	}

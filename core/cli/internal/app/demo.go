@@ -146,7 +146,38 @@ func demoAlbums() []Album {
 		default:
 			a.State = TileChanged
 		}
+		if s.name == demoSheetAlbum {
+			a.TrackList = remainInLight()
+		}
 		out = append(out, a)
+	}
+	return out
+}
+
+// demoSheetAlbum is the album `--state album` opens.
+const demoSheetAlbum = "Talking Heads - Remain in Light"
+
+// remainInLight is the canned sheet's tracklist: the record's own titles
+// and running times, each file the size the grid's numbers assume.
+func remainInLight() []Track {
+	type t struct {
+		title string
+		m, s  int
+	}
+	ts := []t{
+		{"Born Under Punches (The Heat Goes On)", 5, 46},
+		{"Crosseyed and Painless", 4, 45},
+		{"The Great Curve", 6, 26},
+		{"Once in a Lifetime", 4, 19},
+		{"Houses in Motion", 4, 30},
+		{"Seen and Not Seen", 3, 20},
+		{"Listening Wind", 4, 42},
+		{"The Overload", 6, 0},
+	}
+	out := make([]Track, len(ts))
+	for i, x := range ts {
+		out[i] = Track{Disc: 1, Number: i + 1, Title: x.title, Size: 31_500_000,
+			Length: time.Duration(x.m*60+x.s) * time.Second}
 	}
 	return out
 }

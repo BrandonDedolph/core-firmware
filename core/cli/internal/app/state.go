@@ -468,6 +468,25 @@ type Album struct {
 	// is the second half of the thumbnail cache key: a cover embedded
 	// by a Fix has to reach the grid without restarting the app.
 	Mod time.Time
+	// TrackList is the album sheet's tracklist when it is already known —
+	// a canned state's, which has no files to read. Empty, the sheet
+	// reads the folder (ReadTracks). (Not "Tracks": that is the count.)
+	TrackList []Track
+}
+
+// Track is one row of the album sheet's tracklist.
+type Track struct {
+	// Path is the file; empty in a canned state, where nothing plays.
+	Path string
+	// Disc is 1 unless the album is in Disc N folders or its tags say
+	// otherwise; Number is the track number (the tag, else the
+	// filename's leading digits; 0 when neither has one).
+	Disc, Number int
+	// Title is the tag's, else the filename's.
+	Title string
+	// Length is 0 when it could not be read.
+	Length time.Duration
+	Size   int64
 }
 
 // Category is one row of the Library tab's problem list.

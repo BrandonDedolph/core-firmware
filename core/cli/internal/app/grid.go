@@ -276,7 +276,12 @@ var ErrNoThumb = errors.New("app: this album has no cover picture")
 // and using it means the grid shows what the iPod shows. Failing that, the
 // album's art source (the first FLAC, which is the file the sidecars and the
 // index read their cover from) is decoded and scaled down.
-func AlbumThumbnail(dir string) (image.Image, error) {
+func AlbumThumbnail(dir string) (image.Image, error) { return AlbumCover(dir, ThumbSize) }
+
+// AlbumCover is AlbumThumbnail at another size: the same sidecar-else-
+// embedded source, an embedded picture scaled to fit size. The album sheet
+// asks for twice the grid's size, for its 160 dp cover on a high-DPI screen.
+func AlbumCover(dir string, size int) (image.Image, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, ErrNoThumb
 	}
@@ -302,7 +307,7 @@ func AlbumThumbnail(dir string) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Downscale(img, ThumbSize), nil
+	return Downscale(img, size), nil
 }
 
 // DecodeCART reads a CoreArt sidecar (folder.art / folder.thm) back into an

@@ -49,6 +49,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
  * in regress/<harness>/ named xfail-*. Same idea as tests/xfail.h: the bug
  * stays visible, it just stops blocking everything else. `why` must name the
  * file that owns the fix.
+ *
+ * Unlike tests/xfail.h, CORE_TEST_STRICT_XFAIL does not turn these into
+ * failures, and there is no XPASS: the marker skips the input before the
+ * assertion runs, so it cannot see the bug being fixed. Whoever fixes it
+ * deletes the marker and renames the input without its xfail- prefix — the
+ * input then holds the fix like any other regression.
  */
 #define FUZZ_XFAIL(cond, why)                                                \
     do {                                                                     \

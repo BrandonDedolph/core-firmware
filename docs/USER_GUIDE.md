@@ -1,6 +1,6 @@
 # Using core
 
-This guide describes Core v0.2.1 and the Core app app-v0.3.0. The device shows its version bottom-right on the boot screen and
+This guide describes Core v0.2.2 and the Core app app-v0.3.0. The device shows its version bottom-right on the boot screen and
 in Settings → About; Boot Details shows the full build string.
 
 This is the guide for the person holding the iPod. It covers the controls, every screen, the `core`

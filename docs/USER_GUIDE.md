@@ -499,8 +499,9 @@ and run `core doctor --boot`, or look at **Last boot** on the desktop app's Summ
 firmware. The check prints when the iPod last started, which build that was, whether the library
 index loaded, and whether the session ended cleanly (sleep, standby, disk mode) or just stopped (a
 reset, a crash, a flat battery). It exits with an error while the iPod still holds firmware it has
-not started. Firmware written by an older `core` or by another tool leaves no note, so the build is
-then reported as unknown.
+not started. Firmware newer than v0.2.2 also names its own build in the log at every boot, and the
+check believes that line over the note. Older firmware written by an older `core` or by another tool
+leaves neither, so the build is then reported as unknown.
 
 ## If something is wrong
 

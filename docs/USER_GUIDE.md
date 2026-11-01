@@ -456,6 +456,8 @@ press the sync button on it; when there is nothing to copy it says *Everything i
 
 <p align="center"><img src="screens/core_app.png" alt="the core desktop app, Linen" width="640"></p>
 <p align="center"><img src="screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="640"></p>
+<p align="center"><img src="screens/core_app_album.png" alt="an album open: cover, facts and tracklist, with the player below" width="640"></p>
+<p align="center"><img src="screens/core_app_fix.png" alt="the Fix tab: what is wrong with the music folder, and the preview of the fix" width="640"></p>
 <p align="center"><img src="screens/core_app_ipod.png" alt="the Summary tab" width="640"></p>
 
 **Connect.** Put the iPod in disk mode — Settings, Disk Mode on the device, or hold Select + Play

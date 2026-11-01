@@ -321,7 +321,7 @@ func makeGroup(a, b *dupAlbum, mab, mba *match, same bool) DuplicateGroup {
 	case g.A.Extra == 0:
 		g.Why = fmt.Sprintf("%s's %d tracks are all in %s", an, len(a.tracks), where)
 	default:
-		g.Why = fmt.Sprintf("%d of %s's %d tracks are in %s", mab.n, an, len(a.tracks), where)
+		g.Why = fmt.Sprintf("%s of %s's %d tracks are in %s", leadCount(mab.n), an, len(a.tracks), where)
 	}
 	return g
 }
@@ -466,4 +466,16 @@ func (o Options) trashDir(root string) (string, error) {
 			"move the albums into a folder first", root, TrashName)
 	}
 	return filepath.Join(parent, TrashName, stamp), nil
+}
+
+// leadCount is a count that starts a sentence: spelled out up to twelve so
+// the sentence keeps its capital ("Nine of SWAG's 21 tracks…"), digits from
+// thirteen up.
+func leadCount(n int) string {
+	words := []string{"None", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+		"Eleven", "Twelve"}
+	if n >= 0 && n < len(words) {
+		return words[n]
+	}
+	return fmt.Sprint(n)
 }

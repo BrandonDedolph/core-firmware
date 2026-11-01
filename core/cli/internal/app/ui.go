@@ -178,6 +178,7 @@ type UI struct {
 	newReport  *librarian.Report
 	newCands   map[librarian.AlbumKey][]artfetch.Candidate
 	newFix     *librarian.Result
+	newCover   *coverResult
 	newUndo    *organizer.UndoReport
 	newPlan    *syncer.Plan
 	planSynced bool
@@ -496,6 +497,8 @@ func (u *UI) drain() {
 	u.newReport, u.newCands = nil, nil
 	fixed, undone := u.newFix, u.newUndo
 	u.newFix, u.newUndo = nil, nil
+	applied := u.newCover
+	u.newCover = nil
 	plan, planSynced := u.newPlan, u.planSynced
 	u.newPlan, u.planSynced = nil, false
 	ask := u.askQueue
@@ -575,6 +578,7 @@ func (u *UI) drain() {
 	}
 	if report != nil {
 		u.st.Report, u.st.Scanned = report, time.Now()
+		u.st.CoversApplied, u.st.CoverTracks = 0, 0
 		u.logReport(report)
 		// A rescan of the same tree (Rescan, or ticking the multi-disc
 		// row) keeps the lookup and the Take/Skip decisions for every
@@ -613,8 +617,15 @@ func (u *UI) drain() {
 		u.st.Logf("cover art: %d album(s) matched, %d accepted at %.2f or better",
 			len(cands), len(u.st.ArtChoices), librarian.DefaultMinScore)
 	}
+	if applied != nil {
+		u.coverApplied(applied)
+	}
 	if fixed != nil {
-		u.st.Journal = fixed.Journal
+		// A Fix that wrote nothing has no journal of its own; the one
+		// before it is still the one Undo takes back.
+		if fixed.Journal != "" {
+			u.st.Journal = fixed.Journal
+		}
 		if fixed.Renamed+fixed.Moved+fixed.ArtWritten+fixed.Trashed > 0 {
 			u.st.LibraryChanged = true
 		}
@@ -626,6 +637,7 @@ func (u *UI) drain() {
 	}
 	if undone != nil {
 		u.st.Journal = ""
+		u.st.CoverNote, u.st.CoverWarn = "", false
 		u.st.LibraryChanged = false
 		src := u.st.Source
 		u.later(func() { u.startInspect(src) })

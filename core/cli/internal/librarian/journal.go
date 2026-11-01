@@ -54,6 +54,9 @@ type fixJournal struct {
 	Sidecars []fileOp `json:"sidecars,omitempty"`
 	// Trash are album folders RemoveDuplicate moved away.
 	Trash []trashOp `json:"trash,omitempty"`
+	// Previous is the journal of the changes made before this one in the
+	// same session; Undo takes it back after this one.
+	Previous string `json:"previous,omitempty"`
 
 	Path string   `json:"-"`
 	f    *os.File `json:"-"`
@@ -367,6 +370,22 @@ func Undo(ctx context.Context, journalPath string, o Options) (*organizer.UndoRe
 		// The dated folder it sat in goes too, when it is now empty.
 		_ = os.Remove(filepath.Dir(op.To))
 		rep.Undone++
+	}
+
+	if j.Previous != "" && j.Previous != journalPath {
+		if _, err := os.Stat(j.Previous); err != nil {
+			skip("journal", j.Previous, j.Previous, "the earlier journal is gone; what it recorded was left as it is")
+			return rep, nil
+		}
+		pr, err := Undo(ctx, j.Previous, o)
+		if pr != nil {
+			rep.Undone += pr.Undone
+			rep.Skipped = append(rep.Skipped, pr.Skipped...)
+			rep.DirsRemoved = append(rep.DirsRemoved, pr.DirsRemoved...)
+		}
+		if err != nil {
+			return rep, err
+		}
 	}
 	return rep, nil
 }

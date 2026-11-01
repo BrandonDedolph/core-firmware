@@ -60,6 +60,8 @@ const (
 	// JobKeepAlbum is "Keep this one" on a duplicate pair: the other
 	// album's folder goes to the trash.
 	JobKeepAlbum
+	// JobApplyCover is "Use this cover": one album's cover written now.
+	JobApplyCover
 )
 
 // String is the label shown in the status line and written into the
@@ -98,6 +100,8 @@ func (k JobKind) String() string {
 		return "undo"
 	case JobKeepAlbum:
 		return "removing a duplicate album"
+	case JobApplyCover:
+		return "writing a cover"
 	default:
 		return "idle"
 	}
@@ -412,7 +416,22 @@ type State struct {
 	// and now reads "Delete <other> anyway": keeping it would delete
 	// songs the other album has and it does not. A view field.
 	DupArmed librarian.AlbumKey
+	// CoverNote is what the last "Use this cover" did — "Cover replaced ·
+	// 500×500 → 1200×1200 — The Royal Scam" — shown at the top of the
+	// pane for CoverNoteFor after CoverNoteAt; CoverWarn makes it a
+	// failure, which stays until the next click.
+	CoverNote   string
+	CoverNoteAt time.Time
+	CoverWarn   bool
+	// CoversApplied counts the covers written by a click since the last
+	// scan, so an emptied row says "All covers chosen" and not that
+	// every album always had one; CoverTracks are their tracks, which
+	// the next sync copies again.
+	CoversApplied, CoverTracks int
 }
+
+// CoverNoteFor is how long a written cover's line stays in the pane.
+const CoverNoteFor = 6 * time.Second
 
 // NowPlaying is what the player has loaded.
 type NowPlaying struct {

@@ -130,7 +130,7 @@ func (u *UI) fixHead() string {
 	if n == 0 {
 		return "Nothing to fix"
 	}
-	return fmt.Sprintf("%d thing%s to fix", n, plural(n))
+	return fmt.Sprintf("%s thing%s to fix", countWord(n), plural(n))
 }
 
 func (u *UI) fixSub() string {
@@ -172,7 +172,9 @@ func (u *UI) costLine() string {
 	// A cover written into a file changes the file, and the sync copies
 	// a changed file again: the albums getting a cover (new or larger)
 	// are part of the cost too.
-	covers := 0
+	// The covers already written by a click are counted too: the files
+	// changed, and copying them is still to come.
+	covers := u.st.CoverTracks
 	for key := range u.choices().Art {
 		if a, ok := rep.Album(key); ok {
 			covers += a.Tracks
@@ -181,14 +183,18 @@ func (u *UI) costLine() string {
 	if rep.RecopyTracks == 0 && rep.NewTracks == 0 && covers == 0 {
 		return "Nothing here changes what the next sync copies."
 	}
-	line := fmt.Sprintf("%d track%s will be re-copied to the iPod on the next sync (%s)",
-		rep.RecopyTracks, plural(rep.RecopyTracks), proseSize(rep.RecopyBytes))
+	if rep.RecopyTracks == 0 && rep.NewTracks == 0 {
+		return fmt.Sprintf("%s track%s will be copied again on the next sync, for the new covers.",
+			countWord(covers), plural(covers))
+	}
+	line := fmt.Sprintf("%s track%s will be re-copied to the iPod on the next sync (%s)",
+		countWord(rep.RecopyTracks), plural(rep.RecopyTracks), proseSize(rep.RecopyBytes))
 	if rep.NewTracks > 0 {
 		line += fmt.Sprintf(", and %d for the first time (%s)",
 			rep.NewTracks, proseSize(rep.NewBytes))
 	}
 	if covers > 0 {
-		line += fmt.Sprintf(", plus the %d track%s of the albums getting a cover", covers, plural(covers))
+		line += fmt.Sprintf(", plus %d for their new covers", covers)
 	}
 	return line + "."
 }
@@ -340,11 +346,11 @@ func (u *UI) previewContent() []layout.Widget {
 
 	switch cat {
 	case CatArt:
-		add(u.wrap(11, u.pal.Muted, "From the iTunes catalogue, then MusicBrainz and the Cover Art "+
-			"Archive. Nothing is written until Fix all, and only for the albums you take."))
+		add(u.wrap(11, u.pal.Muted, artIntro))
 		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
+		u.addCoverNote(add)
 		if len(rep.MissingArt) == 0 {
-			add(u.line(12, u.pal.Muted2, "Every album has a cover."))
+			add(u.line(12, u.pal.Muted2, u.coverRowEmpty(CatArt)))
 			break
 		}
 		if len(u.st.ArtCands) == 0 {
@@ -363,11 +369,11 @@ func (u *UI) previewContent() []layout.Widget {
 			add(func(gtx C) D { return u.artRow(gtx, a, idx) })
 		}
 	case CatLowRes:
-		add(u.wrap(11, u.pal.Muted, "The cover each album has now, beside the one found for it. A cover "+
-			"is only offered when it is larger; the one it replaces is kept, and Undo puts it back."))
+		add(u.wrap(11, u.pal.Muted, lowResIntro))
 		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
+		u.addCoverNote(add)
 		if len(rep.LowResArt) == 0 {
-			add(u.line(12, u.pal.Muted2, "Every cover is at least this size."))
+			add(u.line(12, u.pal.Muted2, u.coverRowEmpty(CatLowRes)))
 			break
 		}
 		if !u.looked() {
@@ -495,10 +501,9 @@ func (u *UI) artRow(gtx C, a librarian.AlbumRef, idx int) D {
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx C) D {
-				take := !decided || dec.Skip
 				return u.buttonRow(gtx,
-					btn{u.artTake[idx], "Use this cover", take, !busy && len(cands) > 0 && take},
-					btn{u.artSkip[idx], "Skip", false, !busy && (!decided || !dec.Skip)},
+					btn{u.artTake[idx], "Use this cover", true, !busy && len(cands) > 0},
+					btn{u.artSkip[idx], skipLabel(dec, decided), false, !busy},
 				)
 			}),
 		)
@@ -512,7 +517,7 @@ func candLine(cands []artfetch.Candidate, dec librarian.Decision, decided bool) 
 	case decided && dec.Skip:
 		return "skipped — this album keeps no cover"
 	case decided:
-		return "using " + dec.Candidate.Artist + " — " + dec.Candidate.Album + ", " +
+		return "Fix all would use " + dec.Candidate.Artist + " — " + dec.Candidate.Album + ", " +
 			providerWords(dec.Candidate.Provider)
 	case len(cands) == 0:
 		return "nothing found yet"
@@ -627,12 +632,12 @@ func (u *UI) libraryEvents(gtx C, busy bool) {
 		}
 		key := u.st.Report.MissingArt[i].Key
 		if u.artTake[i].Clicked(gtx) {
-			if cands := u.st.ArtCands[key]; len(cands) > 0 {
-				u.setChoice(key, librarian.Accept(cands[0]))
+			if c, ok := u.takeCandidate(key); ok {
+				u.startApplyCover(key, c)
 			}
 		}
 		if u.artSkip[i].Clicked(gtx) {
-			u.setChoice(key, librarian.Skip())
+			u.toggleSkip(key)
 		}
 	}
 	u.lowResEvents(gtx)
@@ -656,6 +661,9 @@ func (u *UI) choices() librarian.Choices {
 		FixNames:    u.st.FixNames,
 		Organize:    u.st.Organize,
 		DiscFolders: u.st.DiscFolders,
+		// One Undo takes back this Fix and everything before it in the
+		// session — the covers written by a click included.
+		After: u.st.Journal,
 	}
 	for k, d := range u.st.ArtChoices {
 		if d.Skip {
@@ -682,14 +690,14 @@ func (u *UI) fixSummary() string {
 	ch := u.choices()
 	var parts []string
 	if n := CatNames.Count(rep); ch.FixNames && n > 0 {
-		parts = append(parts, fmt.Sprintf("%d track(s) renamed from their tags", n))
+		parts = append(parts, fmt.Sprintf("%s track%s renamed from their tags", countWord(n), plural(n)))
 	}
 	if n := CatFolders.Count(rep); ch.Organize && n > 0 {
-		parts = append(parts, fmt.Sprintf("%d track(s) moved into \"Album - Artist\" folders"+
-			" (their album's art and playlist follow them)", n))
+		parts = append(parts, fmt.Sprintf("%s track%s moved into \"Album - Artist\" folders"+
+			" (their album's art and playlist follow them)", countWord(n), plural(n)))
 	}
 	if n := CatDiscs.Count(rep); n > 0 && ch.DiscFolders {
-		parts = append(parts, fmt.Sprintf("%d track(s) split into Disc N folders", n))
+		parts = append(parts, fmt.Sprintf("%s track%s split into Disc N folders", countWord(n), plural(n)))
 	}
 	added, replaced := 0, 0
 	for key := range ch.Art {
@@ -700,10 +708,10 @@ func (u *UI) fixSummary() string {
 		}
 	}
 	if added > 0 {
-		parts = append(parts, fmt.Sprintf("%d cover(s) downloaded and written into the FLACs", added))
+		parts = append(parts, fmt.Sprintf("%s cover%s downloaded and written into the FLACs", countWord(added), plural(added)))
 	}
 	if replaced > 0 {
-		parts = append(parts, fmt.Sprintf("%d small cover(s) replaced with larger ones (Undo puts them back)", replaced))
+		parts = append(parts, fmt.Sprintf("%s small cover%s replaced with larger ones (Undo puts them back)", countWord(replaced), plural(replaced)))
 	}
 	if len(parts) == 0 {
 		return "Nothing is ticked."

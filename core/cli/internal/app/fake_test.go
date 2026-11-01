@@ -111,6 +111,9 @@ type fakeBackend struct {
 
 	// keepCalls is every RemoveDuplicate: {keep, drop}.
 	keepCalls [][2]librarian.AlbumKey
+	// applyCalls is every ApplyCover; coverFail makes it fail.
+	applyCalls []applyCall
+	coverFail  string
 }
 
 func (f *fakeBackend) Inspect(ctx context.Context, src string, discFolders bool,
@@ -478,4 +481,24 @@ func (f *fakeBackend) RemoveDuplicate(ctx context.Context, rep *librarian.Report
 	defer f.mu.Unlock()
 	f.keepCalls = append(f.keepCalls, [2]librarian.AlbumKey{keep, drop})
 	return &librarian.Result{Journal: "/journal/keep-fix.json", Trashed: 1}, nil
+}
+
+// ApplyCover records the click and answers with a replacement, or with
+// coverFail as the album's failure.
+func (f *fakeBackend) ApplyCover(ctx context.Context, rep *librarian.Report, key librarian.AlbumKey,
+	c artfetch.Candidate, after string, emit func(Event)) (*librarian.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.applyCalls = append(f.applyCalls, applyCall{key, c, after})
+	if f.coverFail != "" {
+		return &librarian.Result{Failures: []librarian.Failure{{Album: key, Reason: f.coverFail}}}, nil
+	}
+	return &librarian.Result{Journal: "/journal/cover-" + string(rune(0x30+len(f.applyCalls))) + "-fix.json", ArtWritten: 1,
+		Replaced: []librarian.Replacement{{Album: key, From: "500×500", To: "1200×1200"}}}, nil
+}
+
+type applyCall struct {
+	key   librarian.AlbumKey
+	c     artfetch.Candidate
+	after string
 }

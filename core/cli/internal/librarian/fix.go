@@ -67,6 +67,16 @@ type Choices struct {
 	// Art is one decision per album key from Report.MissingArt or
 	// Report.LowResArt. An album with no entry is skipped.
 	Art map[AlbumKey]Decision
+	// After is the undo journal of the changes made before this one in
+	// the same session (an earlier Fix, a cover applied with ApplyCover).
+	// When it is set and this Fix writes anything, its journal names it,
+	// and one Undo takes both back, newest first.
+	After string
+
+	// journalAll records the pre-image of EVERY cover written, an added
+	// one as well as a replaced one, so Undo takes it out again. ApplyCover
+	// sets it; Fix all keeps the old rule (an added cover stays).
+	journalAll bool
 }
 
 // AcceptAbove is the "accept all ≥ min" rule as a Choices.Art map: the top
@@ -119,6 +129,9 @@ type Result struct {
 	// Replaced are the low-resolution covers that were replaced, with the
 	// sizes before and after.
 	Replaced []Replacement `json:"replaced,omitempty"`
+	// Added are the covers written into albums that had none, with their
+	// size (From is empty).
+	Added []Replacement `json:"added,omitempty"`
 	// Skipped is the number of coverless or low-resolution albums the
 	// choices did not accept.
 	Skipped int `json:"skipped"`
@@ -350,7 +363,19 @@ func Fix(ctx context.Context, r *Report, ch Choices, o Options) (*Result, error)
 	// keeps handing back organizer's journal, as it always has.
 	var fj *fixJournal
 	defer func() {
+		// Chained to the session's earlier journal: a Fix that wrote only
+		// renames gets a librarian journal around organizer's, so the
+		// chain has somewhere to be written down.
+		if ch.After != "" && !o.DryRun && fj == nil && res.Journal != "" {
+			if j, err := newFixJournal(r.Root, o); err == nil {
+				j.Moves = res.Journal
+				fj = j
+			}
+		}
 		if fj != nil {
+			if ch.After != "" {
+				fj.Previous = ch.After
+			}
 			res.Journal = fj.Path
 			_ = fj.write()
 			fj.close()
@@ -403,8 +428,53 @@ func Fix(ctx context.Context, r *Report, ch Choices, o Options) (*Result, error)
 		}
 	}
 
-	writeSidecars(r, covered, moved, o, res, fj)
+	writeSidecars(r, covered, moved, o, res, fj, ch.journalAll)
 	return res, nil
+}
+
+// ApplyCover writes one album's chosen cover now — the Fix tab's "Use this
+// cover" — through the same journaled path Fix all uses, with one difference:
+// an album that had no cover gets its (empty) pre-image journaled too, so
+// Undo takes the added cover out again as well as putting a replaced one
+// back. after is the session's previous journal; the new one names it, so
+// one Undo walks back through every click and every Fix.
+//
+// The album is not re-rendered on the iPod: the sync does that, because the
+// files it reads the cover from have just changed.
+func ApplyCover(ctx context.Context, r *Report, key AlbumKey, c artfetch.Candidate, after string,
+	o Options) (*Result, error) {
+	if r == nil {
+		return nil, errors.New("fix: no report")
+	}
+	if _, ok := r.Album(key); !ok {
+		return nil, fmt.Errorf("fix: %s is not an album this report has a cover question about (scan again)", key)
+	}
+	return Fix(ctx, r, Choices{Art: map[AlbumKey]Decision{key: Accept(c)}, After: after, journalAll: true}, o)
+}
+
+// CoverLine is the row's line after the write: "Cover replaced · 500×500 →
+// 1200×1200", or "Cover added · 1200×1200".
+func (r Result) CoverLine() string {
+	switch {
+	case len(r.Replaced) > 0:
+		rp := r.Replaced[0]
+		s := "Cover replaced · " + rp.From + " → "
+		if rp.Source != "" {
+			s += rp.Source + " "
+		}
+		return s + rp.To
+	case len(r.Added) > 0:
+		ad := r.Added[0]
+		s := "Cover added"
+		if ad.Source != "" {
+			s += " from " + ad.Source
+		}
+		if ad.To != "" {
+			s += " · " + ad.To
+		}
+		return s
+	}
+	return ""
 }
 
 // embedArt is the first phase: fetch each accepted cover and write it into
@@ -491,6 +561,29 @@ func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result
 			o.log(JobFix, "%s: %v", key, err)
 			continue
 		}
+		if ch.journalAll && !isLow {
+			if *fj == nil {
+				j, err := newFixJournal(r.Root, o)
+				if err != nil {
+					return covered, err
+				}
+				*fj = j
+			}
+			if err := replace(*fj, key, a, data, mime, writePic, o.meta()); err != nil {
+				res.Failures = append(res.Failures, Failure{Album: key, Path: a.Dir, Reason: err.Error()})
+				o.log(JobFix, "%s: %v", key, err)
+				continue
+			}
+			ad := Replacement{Album: key, Source: sourceName(cand)}
+			if w, h, err := artfetch.ImageSize(data); err == nil {
+				ad.To = dims(w, h)
+			}
+			res.Added = append(res.Added, ad)
+			res.ArtWritten++
+			covered = append(covered, a)
+			o.log(JobFix, "%s: added a %s cover (%s) in %d file(s)", key, ad.To, cand, len(a.Files))
+			continue
+		}
 		if isLow {
 			// The rule that makes a replacement a replacement: the new
 			// cover is bigger than the old one on its shorter side, or
@@ -546,7 +639,7 @@ func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result
 // the job is 400 KB an album, and a thousand-album library would be a fifth of
 // a gigabyte of JPEG kept alive for two file writes.
 func writeSidecars(r *Report, covered []AlbumRef, moved map[string]string, o Options, res *Result,
-	fj *fixJournal) {
+	fj *fixJournal, journalAll bool) {
 	if len(covered) == 0 {
 		return
 	}
@@ -573,7 +666,7 @@ func writeSidecars(r *Report, covered []AlbumRef, moved map[string]string, o Opt
 		// A replacement writes OVER the album's old sidecars, so what
 		// they were goes into the journal first; Undo puts them back.
 		var ops []int
-		if _, low := r.LowRes(a.Key); low && fj != nil {
+		if _, low := r.LowRes(a.Key); (low || journalAll) && fj != nil {
 			var err error
 			if ops, err = fj.snapshot(a.Key, []string{
 				filepath.Join(dir, coreartArt), filepath.Join(dir, coreartThumb),

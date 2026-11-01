@@ -541,3 +541,89 @@ func TestASmallerFolderFileDoesNotStopTheLookup(t *testing.T) {
 		t.Errorf("candidates = %+v after %d fetches", c, *fetches)
 	}
 }
+
+// --- Use this cover, applied at once ----------------------------------------------
+
+// ApplyCover writes one album now, through the journal; a second click is
+// chained to the first, and one Undo takes both back — the replaced cover
+// returns and the added one comes out again.
+func TestApplyCoverWritesNowAndOneUndoTakesEveryClickBack(t *testing.T) {
+	src, old := lowResFixture(t)
+	canon := filepath.Join(src, "Canon - Artist A")
+	writeTrack(t, canon, "01 - Artist A - One.flac", map[string]string{
+		"album": "Canon", "artist": "Artist A", "title": "One", "tracknumber": "1"}, nil)
+	if err := os.WriteFile(filepath.Join(canon, "cover.png"), pngSquare(t, 700), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	big := jpegSquare(t, 1200)
+	client, _ := sizedArt(t, big)
+	o := opts(t)
+	o.Art = client
+	rep, err := Inspect(context.Background(), src, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cands, err := Candidates(context.Background(), rep, client, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := ApplyCover(context.Background(), rep, "Small - Artist S", cands["Small - Artist S"][0], "", o)
+	if err != nil || first.Journal == "" {
+		t.Fatalf("first click: %+v, %v", first, err)
+	}
+	if got := first.CoverLine(); got != "Cover replaced · 300×300 → 1200×1200" {
+		t.Errorf("line = %q", got)
+	}
+	small := filepath.Join(src, "Small - Artist S", "01 - Artist S - One.flac")
+	if !bytes.Equal(frontCover(t, small), big) {
+		t.Fatal("the click did not write the cover")
+	}
+	second, err := ApplyCover(context.Background(), rep, "Canon - Artist A", cands["Canon - Artist A"][0], first.Journal, o)
+	if err != nil || second.Journal == "" || second.Journal == first.Journal {
+		t.Fatalf("second click: %+v, %v", second, err)
+	}
+	if got := second.CoverLine(); got != "Cover added from cover.png · 700×700" {
+		t.Errorf("line = %q", got)
+	}
+	added := filepath.Join(canon, "01 - Artist A - One.flac")
+	if !hasCover(t, added) {
+		t.Fatal("the second click did not add the cover")
+	}
+
+	// The scan agrees: neither album is a question any more.
+	rep2, _ := Inspect(context.Background(), src, o)
+	if len(rep2.LowResArt) != 0 || len(keys(rep2)) != 1 { // only the undecodable one is left
+		t.Errorf("after the clicks: low-res %d, missing %v", len(rep2.LowResArt), keys(rep2))
+	}
+
+	undo, err := Undo(context.Background(), second.Journal, o)
+	if err != nil || len(undo.Skipped) != 0 {
+		t.Fatalf("Undo: %+v, %v", undo, err)
+	}
+	if hasCover(t, added) {
+		t.Error("the added cover is still there after the undo")
+	}
+	if !bytes.Equal(frontCover(t, small), old) {
+		t.Error("the replaced cover did not come back through the chain")
+	}
+}
+
+// A Fix all after a click names the click's journal, even when it only
+// renamed files, so Undo still reaches the click.
+func TestFixAllAfterAClickKeepsTheChain(t *testing.T) {
+	src := fixture(t)
+	o := opts(t)
+	rep, err := Inspect(context.Background(), src, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Fix(context.Background(), rep, Choices{FixNames: true, After: "/earlier/click-fix.json"}, o)
+	if err != nil || res.Renamed == 0 {
+		t.Fatalf("Fix: %+v, %v", res, err)
+	}
+	j, isFix, err := readFixJournal(res.Journal)
+	if err != nil || !isFix || j.Previous != "/earlier/click-fix.json" || j.Moves == "" {
+		t.Fatalf("journal %s: fix=%v %+v %v", res.Journal, isFix, j, err)
+	}
+}

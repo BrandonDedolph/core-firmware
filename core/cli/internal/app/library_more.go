@@ -162,7 +162,6 @@ func (u *UI) lowResRow(gtx C, a librarian.ArtRef, idx int) D {
 			layout.Rigid(u.coverWithSize(cand, candOK, candCap)),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 			layout.Flexed(1, func(gtx C) D {
-				take := !decided || dec.Skip
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(u.wrapN(13, u.pal.Ink, a.Album, 2)),
 					layout.Rigid(u.line(11, u.pal.Muted, a.Artist)),
@@ -170,8 +169,8 @@ func (u *UI) lowResRow(gtx C, a librarian.ArtRef, idx int) D {
 					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 					layout.Rigid(func(gtx C) D {
 						return u.buttonRow(gtx,
-							btn{u.lowTake[idx], "Use this cover", take, !busy && len(cands) > 0 && take},
-							btn{u.lowSkip[idx], "Skip", false, !busy && (!decided || !dec.Skip)},
+							btn{u.lowTake[idx], "Use this cover", true, !busy && len(cands) > 0},
+							btn{u.lowSkip[idx], skipLabel(dec, decided), false, !busy},
 						)
 					}),
 				)
@@ -195,7 +194,7 @@ func lowResLine(cands []artfetch.Candidate, dec librarian.Decision, decided bool
 	case decided && dec.Skip:
 		return "skipped — this album keeps the cover it has"
 	case decided:
-		return "using the " + candSize(dec.Candidate) + " cover, " + providerWords(dec.Candidate.Provider)
+		return "Fix all would use the " + candSize(dec.Candidate) + " cover, " + providerWords(dec.Candidate.Provider)
 	case len(cands) == 0:
 		return "a lookup finds a larger cover, if there is one"
 	default:
@@ -303,12 +302,12 @@ func (u *UI) lowResEvents(gtx C) {
 		}
 		key := rep.LowResArt[i].Key
 		if u.lowTake[i].Clicked(gtx) {
-			if cands := u.st.ArtCands[key]; len(cands) > 0 {
-				u.setChoice(key, librarian.Accept(cands[0]))
+			if c, ok := u.takeCandidate(key); ok {
+				u.startApplyCover(key, c)
 			}
 		}
 		if u.lowSkip[i].Clicked(gtx) {
-			u.setChoice(key, librarian.Skip())
+			u.toggleSkip(key)
 		}
 	}
 }

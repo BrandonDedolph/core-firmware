@@ -76,7 +76,7 @@ func TestTheLowResTickGatesItsCovers(t *testing.T) {
 	if _, ok := on.Art["Believe - Justin Bieber"]; !ok {
 		t.Fatal("a chosen larger cover is not handed to Fix")
 	}
-	if !strings.Contains(u.fixSummary(), "2 small cover(s) replaced") {
+	if !strings.Contains(u.fixSummary(), "Two small covers replaced") {
 		t.Errorf("summary:\n%s", u.fixSummary())
 	}
 	u.st.FixLowRes = false

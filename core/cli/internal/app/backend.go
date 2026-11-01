@@ -134,6 +134,10 @@ type Backend interface {
 	// journaled, so UndoFix brings it back.
 	RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
 		emit func(Event)) (*librarian.Result, error)
+	// ApplyCover writes one album's chosen cover now ("Use this cover"),
+	// journaled and chained to after, the session's previous journal.
+	ApplyCover(ctx context.Context, rep *librarian.Report, key librarian.AlbumKey, c artfetch.Candidate,
+		after string, emit func(Event)) (*librarian.Result, error)
 }
 
 // RealBackend is the production wiring. Its fields are the two paths
@@ -861,4 +865,14 @@ func scanBackups(dir, serial string) (time.Time, int) {
 func (b *RealBackend) RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
 	emit func(Event)) (*librarian.Result, error) {
 	return librarian.RemoveDuplicate(ctx, rep, keep, drop, librarian.Options{Progress: libEvents(emit)})
+}
+
+// ApplyCover is librarian.ApplyCover with the shared art client (a chosen
+// candidate is downloaded here, from the cache the lookup filled).
+func (b *RealBackend) ApplyCover(ctx context.Context, rep *librarian.Report, key librarian.AlbumKey,
+	c artfetch.Candidate, after string, emit func(Event)) (*librarian.Result, error) {
+	return librarian.ApplyCover(ctx, rep, key, c, after, librarian.Options{
+		Art:      b.artClient(),
+		Progress: libEvents(emit),
+	})
 }

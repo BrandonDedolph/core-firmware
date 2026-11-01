@@ -355,6 +355,27 @@ func LowResState() State {
 	return st
 }
 
+// LowResAppliedState is LowResState a moment after "Use this cover" on The
+// Royal Scam: the album has left the row, the count and the cost line have
+// followed, and the line at the top says what was written.
+func LowResAppliedState() State {
+	st := LowResState()
+	const key = "The Royal Scam (Remastered) - Steely Dan"
+	if a, ok := st.Report.Album(key); ok {
+		st.CoverTracks += a.Tracks
+	}
+	st.Report = withoutAlbum(st.Report, key)
+	delete(st.ArtCands, key)
+	delete(st.ArtChoices, key)
+	st.CoversApplied = 1
+	st.CoverNote = "Cover replaced · 500×500 → 1200×1200 — The Royal Scam (Remastered)"
+	st.CoverNoteAt = time.Now()
+	st.Journal = "journal/20261101-101500-fix.json"
+	st.LibraryChanged = true
+	st.Logf("10:15:00  The Royal Scam (Remastered): cover replaced · 500×500 → 1200×1200")
+	return st
+}
+
 // DuplicatesState is the duplicate chooser with SWAG's Keep pressed once:
 // keeping the smaller album would delete SWAG II's other 23 songs, so the
 // button asks again.

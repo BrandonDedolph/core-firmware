@@ -274,7 +274,7 @@ func (u *UI) tickOrDot(gtx C, c Category, n int) D {
 	}
 	cb := material.CheckBox(u.th, b, "")
 	cb.Color = u.pal.Ink
-	cb.IconColor = u.pal.Accent
+	cb.IconColor = u.pal.Ink
 	cb.Size = unit.Dp(18)
 	return cb.Layout(gtx)
 }
@@ -398,7 +398,7 @@ func (u *UI) moveRow(gtx C, root string, m organizer.Move) D {
 		return layout.Flex{Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
 				gtx.Constraints.Min.X = gtx.Dp(52)
-				l := material.Label(u.th, unit.Sp(9), strings.ToUpper(m.Reason))
+				l := material.Label(u.th, unit.Sp(10), strings.ToUpper(m.Reason))
 				l.Color = u.pal.Muted2
 				l.MaxLines = 1
 				return l.Layout(gtx)

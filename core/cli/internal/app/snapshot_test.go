@@ -118,6 +118,33 @@ func TestSnapshotTheTabs(t *testing.T) {
 	}
 }
 
+// TestSnapshotOnyx renders the main screen, the Library tab and the
+// Looking screen in the dark palette, so both themes are looked at on every
+// run and not only the one the machine happens to be set to.
+func TestSnapshotOnyx(t *testing.T) {
+	dir := snapshotDir(t)
+	cases := []struct {
+		name string
+		st   State
+	}{
+		{"onyx-grid", DemoState()},
+		{"onyx-library", LibraryState()},
+		{"onyx-looking", LookingState()},
+	}
+	for _, c := range cases {
+		out := filepath.Join(dir, c.name+"-900x600.png")
+		err := SnapshotTheme(c.st, ThemeOnyx, 900, 600, out)
+		if errors.Is(err, ErrNoHeadless) || errors.Is(err, ErrNoGPU) {
+			t.Skipf("no headless GPU surface on this machine: %v", err)
+		}
+		if err != nil {
+			t.Fatalf("SnapshotTheme(%s): %v", c.name, err)
+		}
+		checkPNG(t, out, 900, 600)
+		t.Logf("wrote %s", out)
+	}
+}
+
 // TestSnapshotEmptyState renders the first-run screen: no device, no
 // source, every button that needs one disabled. It is the state a user
 // sees first and the one easiest to leave untested.

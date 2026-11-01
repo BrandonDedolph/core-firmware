@@ -10,7 +10,7 @@ import (
 )
 
 // Config is what the app remembers between runs. It is deliberately
-// two fields: everything else on screen is read from the device or from
+// small: everything else on screen is read from the device or from
 // GitHub, and a settings file that caches facts about hardware is a
 // settings file that will one day disagree with the hardware.
 type Config struct {
@@ -28,6 +28,9 @@ type Config struct {
 	// there to replace. `core name` writes the same map, through the
 	// same file.
 	Names map[string]string `json:"names,omitempty"`
+	// Theme is the palette choice: "" (System — Onyx when Windows is
+	// set to dark apps, Linen otherwise), "linen" or "onyx".
+	Theme Theme `json:"theme,omitempty"`
 }
 
 // NameFor is the friendly name remembered for one iPod, or "".

@@ -18,7 +18,9 @@
 //	core-app --log FILE               append startup diagnostics to FILE
 //	core-app --no-detect              do not poll for the iPod
 //	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled]
-//	              [--size 900x600]    render one frame headless and exit
+//	              [--size 900x600] [--tab albums|library|details]
+//	              [--theme system|linen|onyx]
+//	                                  render one frame headless and exit
 //
 // --screenshot is the review channel: a `-H windowsgui` process cannot
 // show anyone anything from a shell, and this writes the exact frame
@@ -26,10 +28,11 @@
 // Windows: cmd/core-app/rsrc_windows_*.syso carries the application manifest
 // (cmd/core-app/winres/winres.json): requireAdministrator, so the window asks
 // for elevation at launch through UAC and then reads the disk and flashes
-// in-process — no second process, no console. Regenerate after editing the
-// JSON (pure Go, no mingw):
+// in-process — no second process, no console. The same file carries the
+// window icon (RT_GROUP_ICON #1, the id Gio loads; PNGs from
+// tools/app_icon.py). Regenerate after editing the JSON (pure Go, no mingw):
 //
-//go:generate go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --out rsrc
+//go:generate go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --out rsrc --arch amd64,386
 package main
 
 import (
@@ -54,6 +57,8 @@ func main() {
 		logFile  = flag.String("log", "", "Append startup diagnostics to this file")
 		noDetect = flag.Bool("no-detect", false,
 			"Do not poll for the iPod every 2 seconds; the window stays on whatever it last read")
+		themeName = flag.String("theme", "",
+			"Palette for this run: system (Onyx when Windows is set to dark apps), linen or onyx; default: the saved choice")
 		showVersion = flag.Bool("version", false, "Print the version and exit")
 	)
 	flag.Parse()
@@ -61,6 +66,11 @@ func main() {
 	if *showVersion {
 		fmt.Println("core-app", version.Full())
 		return
+	}
+
+	theme, err := app.ParseTheme(*themeName)
+	if err != nil {
+		fail(*logFile, fmt.Errorf("--theme: %w", err))
 	}
 
 	if *screenshot != "" {
@@ -83,7 +93,7 @@ func main() {
 		default:
 			fail(*logFile, fmt.Errorf("--tab %q: want albums, library or details", *tabName))
 		}
-		if err := app.Snapshot(st, w, h, *screenshot); err != nil {
+		if err := app.SnapshotTheme(st, theme, w, h, *screenshot); err != nil {
 			fail(*logFile, err)
 		}
 		fmt.Printf("wrote %s (%dx%d, state %s)\n", *screenshot, w, h, *stateName)
@@ -106,6 +116,9 @@ func main() {
 		Source:     *source,
 		LogFile:    *logFile,
 		NoDetect:   *noDetect,
+	}
+	if *themeName != "" {
+		o.Theme = &theme
 	}
 	if cfgErr != nil {
 		writeLog(*logFile, "config: %v", cfgErr)

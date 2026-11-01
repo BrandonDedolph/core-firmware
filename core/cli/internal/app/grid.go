@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"gioui.org/f32"
+	"gioui.org/font"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -542,7 +543,8 @@ func veil(c color.NRGBA) color.NRGBA {
 // states draw, so the grid has something to be reviewed against with no files
 // on the machine at all.
 func (u *UI) plainTile(gtx C, a Album, sz image.Point) {
-	paint.FillShape(gtx.Ops, tileColor(a.Title+a.Dir), clip.Rect{Max: sz}.Op())
+	bg := tileColor(u.pal, a.Title+a.Dir)
+	paint.FillShape(gtx.Ops, bg, clip.Rect{Max: sz}.Op())
 	letter := initial(tileTitle(a))
 	if letter == "" {
 		return
@@ -550,7 +552,7 @@ func (u *UI) plainTile(gtx C, a Album, sz image.Point) {
 	gtx.Constraints = layout.Exact(sz)
 	layout.Center.Layout(gtx, func(gtx C) D {
 		l := material.Label(u.th, unit.Sp(float32(sz.Y)/gtx.Metric.PxPerSp/2.6), letter)
-		l.Color = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x9A}
+		l.Color = letterColor(u.pal, bg)
 		l.MaxLines = 1
 		return l.Layout(gtx)
 	})
@@ -566,45 +568,56 @@ func initial(s string) string {
 	return ""
 }
 
-// tileColor is a deterministic muted colour per album: the same album is the
-// same colour on every run, and nothing is ever the accent, which belongs to
-// the one primary button and the progress bar.
-func tileColor(seed string) color.NRGBA {
+// tileColor is a deterministic colour per album out of the palette's own
+// muted family: Muted, MutedD and Muted2, each blended toward Surface at
+// three strengths. The same album is the same tile on every run, a screen of
+// tiles reads as the device's greys rather than as a paint chart, and
+// nothing is ever the accent, which is for warnings. On a dark palette the
+// muted tokens are the LIGHT end, so the blends are weaker: Onyx gets dark
+// tiles, not Linen's pastels turned up.
+func tileColor(pal Palette, seed string) color.NRGBA {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(seed))
 	v := h.Sum32()
-	// Six dusty hues from the Linen family, each with three values, so a
-	// screen of tiles reads as one palette rather than as a paint chart.
-	hues := [][3]uint8{
-		{0x8A, 0x6A, 0x5A}, {0x5C, 0x6B, 0x7A}, {0xB8, 0xA6, 0x8A},
-		{0x4D, 0x5A, 0x4A}, {0x9A, 0x8B, 0x9C}, {0xC9, 0xA4, 0x7A},
-		{0x6B, 0x7C, 0x8A}, {0x8C, 0x6F, 0x66}, {0x7D, 0x8A, 0x6A},
-		{0xA5, 0x80, 0x60}, {0x6E, 0x6A, 0x80}, {0x58, 0x6B, 0x6E},
+	bases := []color.NRGBA{pal.Muted, pal.MutedD, pal.Muted2}
+	strengths := []float32{0.45, 0.62, 0.80}
+	if luma(pal.Surface) < 0x80 {
+		strengths = []float32{0.25, 0.37, 0.50}
 	}
-	base := hues[v%uint32(len(hues))]
-	shade := int(v/uint32(len(hues))%3) - 1 // -1, 0, +1
-	adj := func(c uint8) uint8 {
-		n := int(c) + shade*14
-		if n < 0 {
-			n = 0
-		}
-		if n > 255 {
-			n = 255
-		}
-		return uint8(n)
-	}
-	return color.NRGBA{R: adj(base[0]), G: adj(base[1]), B: adj(base[2]), A: 0xFF}
+	base := bases[v%uint32(len(bases))]
+	t := strengths[v/uint32(len(bases))%uint32(len(strengths))]
+	return mix(pal.Surface, base, t)
 }
 
-// badge is the NEW / CHANGED chip in the tile's top right corner.
+// letterColor is the initial on a plain tile: whichever end of the palette
+// (Ink or Surface) stands further from the tile, at two-thirds strength.
+func letterColor(pal Palette, bg color.NRGBA) color.NRGBA {
+	c := pal.Surface
+	if d, e := luma(pal.Ink)-luma(bg), luma(pal.Surface)-luma(bg); abs(d) > abs(e) {
+		c = pal.Ink
+	}
+	return withAlpha(c, 0xB0)
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// badge is the NEW / CHANGED chip in the tile's top right corner: NEW is an
+// Ink chip with Surface text (the selected row again), CHANGED is the same
+// chip outlined — Surface with an Ink hairline and Ink text — so the two
+// read apart without a second colour.
 func (u *UI) badge(gtx C, a Album, sz image.Point) {
 	text := a.State.Badge()
 	if text == "" {
 		return
 	}
-	bg, fg := u.pal.Accent, u.pal.Surface
+	bg, fg := u.pal.Ink, u.pal.Surface
 	if a.State == TileChanged {
-		bg, fg = u.pal.Ink, u.pal.Surface
+		bg, fg = u.pal.Surface, u.pal.Ink
 	}
 	gtx.Constraints = layout.Exact(sz)
 	layout.NE.Layout(gtx, func(gtx C) D {
@@ -612,14 +625,18 @@ func (u *UI) badge(gtx C, a Album, sz image.Point) {
 			return layout.Stack{}.Layout(gtx,
 				layout.Expanded(func(gtx C) D {
 					r := gtx.Dp(3)
+					box := image.Rectangle{Max: gtx.Constraints.Min}
+					paint.FillShape(gtx.Ops, u.pal.Ink, clip.UniformRRect(box, r).Op(gtx.Ops))
+					w := gtx.Dp(1)
 					paint.FillShape(gtx.Ops, bg,
-						clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, r).Op(gtx.Ops))
+						clip.UniformRRect(box.Inset(w), r-w).Op(gtx.Ops))
 					return D{Size: gtx.Constraints.Min}
 				}),
 				layout.Stacked(func(gtx C) D {
 					return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1),
 						Left: unit.Dp(4), Right: unit.Dp(4)}.Layout(gtx, func(gtx C) D {
-						l := material.Label(u.th, unit.Sp(9), text)
+						l := material.Label(u.th, unit.Sp(10), text)
+						l.Font.Weight = font.Bold
 						l.Color = fg
 						l.MaxLines = 1
 						return l.Layout(gtx)

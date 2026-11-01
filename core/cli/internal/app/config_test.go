@@ -10,7 +10,7 @@ import (
 func TestConfigRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "config.json")
 	want := Config{Source: `C:\Users\you\Music\MC`, BackupDir: `D:\backups`,
-		Names: map[string]string{"000A2700168F1E3C": "Brandon's iPod"}}
+		Names: map[string]string{"000A2700168F1E3C": "Brandon's iPod"}, Theme: ThemeOnyx}
 	if err := SaveConfig(path, want); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}

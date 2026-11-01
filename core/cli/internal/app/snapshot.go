@@ -30,21 +30,34 @@ import (
 // there is no EGL at all, headless.NewWindow fails and the caller
 // (TestSnapshot) skips rather than fails: a machine with no GPU stack
 // is not a broken layout.
+//
+// Snapshot draws in Linen whatever the machine's own setting is, so the
+// same test renders the same picture on every box; SnapshotTheme picks.
 func Snapshot(st State, w, h int, out string) error {
 	return snapshotWith(st, w, h, out, nil)
+}
+
+// SnapshotTheme is Snapshot in a chosen palette (`--theme`). System
+// resolves the way the window would on this machine.
+func SnapshotTheme(st State, t Theme, w, h int, out string) error {
+	return snapshotThemed(st, t, w, h, out, nil)
 }
 
 // snapshotWith is Snapshot with a hook that runs after the State is set
 // and before the frame is laid out, for the test that needs a modal on
 // screen.
 func snapshotWith(st State, w, h int, out string, tweak func(*UI)) error {
+	return snapshotThemed(st, ThemeLinen, w, h, out, tweak)
+}
+
+func snapshotThemed(st State, t Theme, w, h int, out string, tweak func(*UI)) error {
 	hw, err := headless.NewWindow(w, h)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrNoHeadless, err)
 	}
 	defer hw.Release()
 
-	ui := NewUI(Options{})
+	ui := NewUI(Options{Theme: &t})
 	ui.SetState(st)
 	if tweak != nil {
 		tweak(ui)

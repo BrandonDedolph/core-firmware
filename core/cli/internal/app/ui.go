@@ -12,11 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"gioui.org/font"
 	"gioui.org/io/clipboard"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -71,6 +74,10 @@ type Options struct {
 	// open fails in complete silence; this is the only way to see why
 	// from a shell.
 	LogFile string
+	// Theme overrides Config.Theme for this run (the --theme flag)
+	// without saving it. nil is "use the config", which is itself empty
+	// — System — on a first run.
+	Theme *Theme
 }
 
 // logf appends one line to Options.LogFile, if there is one.
@@ -118,9 +125,12 @@ type renameResult struct{ friendly, label, serial string }
 type UI struct {
 	th  *material.Theme
 	pal Palette
-	st  State
-	run *Runner
-	be  Backend
+	// theme is the choice (System, Linen, Onyx); pal is what it
+	// resolved to. applyTheme changes both.
+	theme Theme
+	st    State
+	run   *Runner
+	be    Backend
 
 	cfg        Config
 	cfgPath    string
@@ -213,10 +223,15 @@ type UI struct {
 
 // NewUI builds the window's state.
 func NewUI(o Options) *UI {
-	th, pal := newTheme()
+	choice := o.Config.Theme
+	if o.Theme != nil {
+		choice = *o.Theme
+	}
+	th, pal := newTheme(choice)
 	u := &UI{
 		th:         th,
 		pal:        pal,
+		theme:      choice,
 		run:        NewRunner(),
 		be:         o.Backend,
 		cfg:        o.Config,
@@ -799,12 +814,19 @@ func (u *UI) page(gtx C) D {
 // should not need another screen.
 func (u *UI) topBar(gtx C) D {
 	head, sub := u.topStatus()
+	headCol := u.pal.Ink
+	if u.st.Job != nil && u.st.Job.Failed && !u.st.Busy() {
+		// A job that failed is a warning: its line is the accent.
+		headCol = u.pal.Accent
+	}
 	act := u.st.Primary()
 	busy := u.st.Busy()
 	return layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.
 		Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(u.brand),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(18)}.Layout),
 				layout.Rigid(func(gtx C) D {
 					gtx.Constraints.Max.X = gtx.Constraints.Max.X / 3
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -816,7 +838,7 @@ func (u *UI) topBar(gtx C) D {
 					return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx C) D {
 						gtx.Constraints.Min.X = gtx.Constraints.Max.X
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(u.line(13, u.pal.Ink, head)),
+							layout.Rigid(u.line(13, headCol, head)),
 							layout.Rigid(u.line(11, u.pal.Muted, sub)),
 						)
 					})
@@ -839,6 +861,22 @@ func (u *UI) topBar(gtx C) D {
 				}),
 			)
 		})
+}
+
+// brand is the lockup at the left of the top bar: the boot screen's mark and
+// the word.
+func (u *UI) brand(gtx C) D {
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx C) D { return drawMark(gtx, unit.Dp(22), u.pal.Ink, u.pal.Surface) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx C) D {
+			l := material.Label(u.th, unit.Sp(16), "Core")
+			l.Font.Weight = font.Bold
+			l.Color = u.pal.Ink
+			l.MaxLines = 1
+			return l.Layout(gtx)
+		}),
+	)
 }
 
 // deviceHead is the iPod's name, or what the window is looking for.
@@ -1090,7 +1128,7 @@ func (u *UI) footer(gtx C) D {
 								return D{}
 							}
 							return u.changeBtn.Layout(gtx, func(gtx C) D {
-								col := u.pal.Accent
+								col := u.pal.Ink
 								if u.st.Busy() {
 									col = u.pal.SelSub
 								}
@@ -1103,18 +1141,20 @@ func (u *UI) footer(gtx C) D {
 	)
 }
 
-// progress is the one place Accent is allowed to move. An indeterminate
+// progress is the job's bar, in Ink like everything else that moves —
+// except a failed job, which keeps its full bar in Accent: that is a
+// warning, the one thing terracotta is for. An indeterminate
 // job draws the full track in the muted colour rather than a fake
 // fraction: a bar that claims 40 % when nothing knows the total is a bar
 // that teaches people to distrust it.
 func (u *UI) progress(gtx C) D {
 	pct := float32(0)
-	col := u.pal.Accent
+	col := u.pal.Ink
 	switch {
 	case u.st.Job == nil:
 		col = u.pal.Trk
 	case u.st.Job.Failed:
-		pct, col = 1, u.pal.Muted2
+		pct, col = 1, u.pal.Accent
 	case u.st.Job.Pct < 0:
 		pct, col = 1, u.pal.Muted2
 	default:
@@ -1164,6 +1204,8 @@ func (u *UI) lookingPane(gtx C) D {
 			var rows []layout.FlexChild
 			add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
 
+			add(func(gtx C) D { return drawMark(gtx, unit.Dp(48), u.pal.Ink, u.pal.Plate) })
+			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout))
 			add(u.text(18, u.pal.Ink, u.lookingHead()))
 			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
 			add(u.wrap(12, u.pal.Muted, "Plug the iPod into a port that carries data, then put it in disk mode:"))
@@ -1420,8 +1462,7 @@ func (u *UI) logPane(gtx C) D {
 func (u *UI) dialog(gtx C) D {
 	// The scrim. It is drawn over the whole window, dims what is behind
 	// it, and is the visual half of the input block set up in Layout.
-	paint.FillShape(gtx.Ops, color.NRGBA{R: 0x19, G: 0x14, B: 0x10, A: 0x99},
-		clip.Rect{Max: gtx.Constraints.Min}.Op())
+	paint.FillShape(gtx.Ops, u.pal.Scrim, clip.Rect{Max: gtx.Constraints.Min}.Op())
 
 	return layout.Center.Layout(gtx, func(gtx C) D {
 		if w := gtx.Constraints.Max.X - gtx.Dp(64); w < gtx.Constraints.Max.X {
@@ -1558,7 +1599,7 @@ func (u *UI) card(gtx C, title string, body layout.Widget) D {
 		return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx C) D {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {
-					l := material.Label(u.th, unit.Sp(9), title)
+					l := material.Label(u.th, unit.Sp(10), title)
 					l.Color = u.pal.Muted2
 					l.MaxLines = 1
 					return l.Layout(gtx)
@@ -1623,21 +1664,57 @@ func (u *UI) buttonRow(gtx C, bs ...btn) D {
 // button draws one. A disabled button keeps its shape and loses its
 // contrast rather than disappearing: a row whose buttons come and go
 // while a job runs is a row that moves under the pointer.
+//
+// The three looks are the device's. Primary is the iPod's selected row:
+// an Ink bar with Surface text. Secondary is a Surface button with a
+// hairline Border, Ink text. Disabled is the iPod's greyed row: the
+// secondary shape with Muted text — a button that is off, not a slab of
+// fill (PillOff vanishes into Onyx's plates). None of them is terracotta — that
+// is kept for warnings.
 func (u *UI) button(gtx C, b btn) D {
-	s := material.Button(u.th, b.click, b.label)
-	s.CornerRadius = unit.Dp(5)
-	s.TextSize = unit.Sp(12)
-	s.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(10), Right: unit.Dp(10)}
+	bg, fg, edge := u.pal.Surface, u.pal.Ink, u.pal.Border
 	switch {
 	case !b.enabled:
-		s.Background, s.Color = u.pal.PillOff, u.pal.Surface
+		bg, fg, edge = u.pal.Surface, u.pal.Muted, u.pal.Border
 		gtx = gtx.Disabled()
 	case b.primary:
-		s.Background, s.Color = u.pal.Accent, u.pal.Surface
-	default:
-		s.Background, s.Color = u.pal.Trk, u.pal.Ink
+		bg, fg, edge = u.pal.Ink, u.pal.Surface, u.pal.Ink
 	}
-	return s.Layout(gtx)
+	return b.click.Layout(gtx, func(gtx C) D {
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Expanded(func(gtx C) D {
+				sz := gtx.Constraints.Min
+				if b.enabled {
+					defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+					pointer.CursorPointer.Add(gtx.Ops)
+				}
+				r := gtx.Dp(5)
+				paint.FillShape(gtx.Ops, edge,
+					clip.UniformRRect(image.Rectangle{Max: sz}, r).Op(gtx.Ops))
+				w := gtx.Dp(1)
+				inner := image.Rectangle{Min: image.Pt(w, w), Max: sz.Sub(image.Pt(w, w))}
+				paint.FillShape(gtx.Ops, bg, clip.UniformRRect(inner, r-w).Op(gtx.Ops))
+				if b.click.Hovered() && b.enabled {
+					// The hover is the fill moved a step toward the
+					// text colour, the same for all three looks.
+					paint.FillShape(gtx.Ops, withAlpha(fg, 0x18),
+						clip.UniformRRect(inner, r-w).Op(gtx.Ops))
+				}
+				return D{Size: sz}
+			}),
+			layout.Stacked(func(gtx C) D {
+				return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(11), Right: unit.Dp(11)}.
+					Layout(gtx, func(gtx C) D {
+						l := material.Label(u.th, unit.Sp(12), b.label)
+						l.Font.Weight = font.Bold
+						l.Color = fg
+						l.MaxLines = 1
+						l.Alignment = text.Middle
+						return l.Layout(gtx)
+					})
+			}),
+		)
+	})
 }
 
 // --- formatting ---------------------------------------------------------

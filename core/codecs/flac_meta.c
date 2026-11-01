@@ -403,5 +403,16 @@ int flac_meta_read(decoder_source_t *src, flac_meta_t *out)
         }
     }
 
-    return out->have ? 0 : -1;
+    if (!out->have) {
+        /* No STREAMINFO, so not a FLAC we can play — but the blocks before
+         * the walk gave up may already have written a seek-point count or a
+         * whole Vorbis comment. The header promises a zeroed *out on -1 (the
+         * "fall back to the filename" state), so make it true rather than
+         * hand back tags from a file we just called unreadable. */
+        for (uint32_t i = 0; i < sizeof *out; i++) {
+            z[i] = 0;
+        }
+        return -1;
+    }
+    return 0;
 }

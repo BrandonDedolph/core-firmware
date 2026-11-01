@@ -312,6 +312,16 @@ int main(int argc, char **argv)
         static const uint8_t tiny[2] = { 'f', 'L' };
         src_init(&ms, &src, tiny, sizeof tiny);
         check("truncated-magic", flac_meta_read(&src, &m) == -1);
+
+        /* No STREAMINFO: a SEEKTABLE whose length runs off the end, then
+         * nothing. -1, and nothing left behind — the seek-point count used
+         * to survive into the "zeroed" result (found by fuzz_flac_meta;
+         * regress/flac_meta/no-streaminfo-seektable). */
+        static const uint8_t nosi[8] = { 'f', 'L', 'a', 'C', 0x03, 0x02, 0, 0 };
+        static const flac_meta_t zero;
+        src_init(&ms, &src, nosi, sizeof nosi);
+        check("no-streaminfo-is-zeroed",
+              flac_meta_read(&src, &m) == -1 && memcmp(&m, &zero, sizeof m) == 0);
     }
 
     /* --- Test 4: a VORBIS_COMMENT lying about its size can't run away --- */

@@ -27,8 +27,9 @@
  *     or failing without zeroing the out-param;
  *   - a flush writing anything outside the file, any block 0 write, or a
  *     write that is not one whole aligned block (fuzzvol_write + below);
- *   - a mount that reports ON with a boot id of 0, or a flush reporting
- *     WROTE with nothing written / FAILED without a refused write.
+ *   - a mount that finds no block yet reports other than boot 1 / seq 0,
+ *     or a flush reporting WROTE with nothing written / FAILED without a
+ *     refused write.
  */
 
 #include "fuzz.h"
@@ -109,8 +110,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         FUZZ_CHECK(lba == 0);
     }
     if (!on) return 0;
-    FUZZ_CHECK(evlog_boot_id() != 0);
+    /* A fresh ring (no block found) is boot 1 at seq 0. Otherwise the boot
+     * id is the newest block's + 1 and may legitimately wrap to 0 after
+     * 65535 boots — nothing treats 0 as special, so it is not checked. */
     FUZZ_CHECK(evlog_prev_final() >= -1 && evlog_prev_final() <= 1);
+    if (evlog_prev_final() == -1) {
+        FUZZ_CHECK(evlog_boot_id() == 1 && evlog_seq() == 0);
+    }
 
     for (uint32_t k = 0; k < 3u; k++) {
         uint32_t seq = evlog_seq() + k;

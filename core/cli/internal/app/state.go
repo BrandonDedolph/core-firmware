@@ -394,7 +394,33 @@ type State struct {
 	// the last sync, which is what makes Sync the primary button even
 	// when the grid's plan is stale.
 	LibraryChanged bool
+
+	// NowPlaying is the preview listen (nowplaying.go): the album and
+	// track loaded in the player, nil when nothing is. Kept in step with
+	// the player every frame.
+	NowPlaying *NowPlaying
 }
+
+// NowPlaying is what the player has loaded.
+type NowPlaying struct {
+	// AlbumIndex is the album's place in State.Albums (-1 when a new plan
+	// no longer has it); TrackIndex is the track's in Album.TrackList.
+	AlbumIndex, TrackIndex int
+	// Playing is false while paused (and once the album has ended).
+	Playing bool
+	// Pos and Total are where the track is and its length (0: unknown).
+	Pos, Total time.Duration
+	// Album is the album playing, its TrackList the tracks in play order:
+	// the footer, the sheet and the next track all read it.
+	Album Album
+	// Ended is set when the last track has played; the footer says
+	// "ended" until EndedAt + EndedFor, and then Now Playing clears.
+	Ended   bool
+	EndedAt time.Time
+}
+
+// EndedFor is how long an album that has played out stays in the footer.
+const EndedFor = 3 * time.Second
 
 // Tab is one of the three screens in the body.
 type Tab int

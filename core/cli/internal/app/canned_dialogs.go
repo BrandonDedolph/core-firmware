@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
@@ -49,17 +48,14 @@ func cannedDialog(u *UI, kind string) error {
 		return nil
 	case "album":
 		// The sheet on Remain in Light, its third track playing.
-		for _, a := range u.st.Albums {
-			if a.Device == demoSheetAlbum {
-				u.openSheet(a)
-				break
-			}
+		if u.st.NowPlaying == nil {
+			setDemoPlaying(&u.st)
 		}
-		if u.sheet == nil {
+		np := u.st.NowPlaying
+		if np == nil {
 			return fmt.Errorf("--dialog album: the state has no %q", demoSheetAlbum)
 		}
-		u.sheet.playing = 2
-		u.sheet.canned = &cannedTransport{pos: 83 * time.Second, total: u.sheet.tracks[2].Length}
+		u.openSheet(u.st.Albums[np.AlbumIndex])
 		return nil
 	case "preview":
 		u.dlg = previewDialog(u.st.Albums, u.st.Source, u.st.FirmwareTooOld())

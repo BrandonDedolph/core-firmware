@@ -133,6 +133,7 @@ go run -tags novulkan ./cmd/core-app --screenshot out.png --state menu         #
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state looking --drawer
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state demo --dialog write   # also holding, remove, about
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state album      # the album sheet, track 3 playing
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state playing    # the same, sheet closed: the footer's Now Playing
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state preview    # the sync preview
 ```
 

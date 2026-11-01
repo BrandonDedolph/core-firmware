@@ -69,6 +69,9 @@ func runWindow(o Options) error {
 	for {
 		switch e := w.Event().(type) {
 		case gio.DestroyEvent:
+			// The preview listen ends with the window, its stream closed
+			// rather than cut off by the process exiting under it.
+			u.StopAudio()
 			return e.Err
 		case gio.ConfigEvent:
 			if e.Config.Focused && !focused {

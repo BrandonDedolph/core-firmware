@@ -154,6 +154,30 @@ func demoAlbums() []Album {
 	return out
 }
 
+// PlayingState is the demo with Remain in Light's third track playing at
+// 1:23 and the album sheet closed: the footer's Now Playing bar and the
+// tile's ▶.
+func PlayingState() State {
+	st := DemoState()
+	setDemoPlaying(&st)
+	return st
+}
+
+// setDemoPlaying puts the canned album's third track in Now Playing.
+func setDemoPlaying(st *State) {
+	for i, a := range st.Albums {
+		if a.Device != demoSheetAlbum {
+			continue
+		}
+		st.NowPlaying = &NowPlaying{
+			AlbumIndex: i, TrackIndex: 2, Playing: true,
+			Pos: 83 * time.Second, Total: a.TrackList[2].Length,
+			Album: a,
+		}
+		return
+	}
+}
+
 // demoSheetAlbum is the album `--state album` opens.
 const demoSheetAlbum = "Talking Heads - Remain in Light"
 

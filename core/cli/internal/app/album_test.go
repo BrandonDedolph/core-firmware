@@ -26,6 +26,8 @@ type fakeAudio struct {
 	stops   int
 	seeks   []time.Duration
 	playErr error
+	errFor  map[string]error
+	pos     time.Duration
 	onEnd   func()
 	onError func(error)
 }
@@ -35,6 +37,9 @@ func (f *fakeAudio) Play(p string) error {
 	defer f.mu.Unlock()
 	if f.playErr != nil {
 		return f.playErr
+	}
+	if err := f.errFor[p]; err != nil {
+		return err
 	}
 	f.played = append(f.played, p)
 	f.state = player.Playing
@@ -49,10 +54,17 @@ func (f *fakeAudio) Seek(d time.Duration) error {
 	f.mu.Unlock()
 	return nil
 }
-func (f *fakeAudio) Position() (time.Duration, time.Duration) { return 5 * time.Second, time.Minute }
-func (f *fakeAudio) State() player.State                      { f.mu.Lock(); defer f.mu.Unlock(); return f.state }
-func (f *fakeAudio) OnEnd(fn func())                          { f.onEnd = fn }
-func (f *fakeAudio) OnError(fn func(error))                   { f.onError = fn }
+func (f *fakeAudio) Position() (time.Duration, time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pos == 0 {
+		return 5 * time.Second, time.Minute
+	}
+	return f.pos, time.Minute
+}
+func (f *fakeAudio) State() player.State    { f.mu.Lock(); defer f.mu.Unlock(); return f.state }
+func (f *fakeAudio) OnEnd(fn func())        { f.onEnd = fn }
+func (f *fakeAudio) OnError(fn func(error)) { f.onError = fn }
 
 func sheetUI(t *testing.T) (*UI, *fakeAudio) {
 	t.Helper()
@@ -107,76 +119,106 @@ func TestTheSheetReadsTheFolder(t *testing.T) {
 	}
 }
 
-// A row click plays it; the end of a track plays the next; the end of the
-// last stops; Close stops the music.
-func TestPlaybackAdvancesAndCloseStops(t *testing.T) {
+// A row click plays it; the end of a track plays the next; closing the sheet
+// leaves it playing; the end of the last track is "ended", then nothing.
+func TestPlaybackAdvancesAndOutlivesTheSheet(t *testing.T) {
 	u, fa := sheetUI(t)
-	u.openSheet(Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()})
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.openSheet(a)
 	u.Layout(newTestContext(900, 600))
 	u.sheet.rows[1].Click()
 	u.Layout(newTestContext(900, 600))
-	if u.sheet.playing != 1 || len(fa.played) != 1 || fa.played[0] != "/m/a/02.flac" {
-		t.Fatalf("after a click on row 2: playing %d, played %v", u.sheet.playing, fa.played)
+	np := u.st.NowPlaying
+	if np == nil || np.TrackIndex != 1 || len(fa.played) != 1 || fa.played[0] != "/m/a/02.flac" {
+		t.Fatalf("after a click on row 2: %+v, played %v", np, fa.played)
 	}
-	fa.onEnd()
-	u.Layout(newTestContext(900, 600))
-	if u.sheet.playing != 2 || fa.played[len(fa.played)-1] != "/m/a/03.flac" {
-		t.Fatalf("OnEnd did not advance: playing %d, played %v", u.sheet.playing, fa.played)
-	}
-	fa.onEnd()
-	u.Layout(newTestContext(900, 600))
-	if u.sheet.playing != -1 || len(fa.played) != 2 {
-		t.Fatalf("after the last track: playing %d, played %v", u.sheet.playing, fa.played)
-	}
-	u.sheet.rows[0].Click()
-	u.Layout(newTestContext(900, 600))
 	u.sheet.closeBtn.Click()
 	u.Layout(newTestContext(900, 600))
-	if u.sheet != nil || fa.stops == 0 {
-		t.Errorf("Close: sheet %v, stops %d", u.sheet != nil, fa.stops)
+	if u.sheet != nil || u.st.NowPlaying == nil || fa.stops != 0 {
+		t.Fatalf("Close: sheet open %v, now playing %v, stops %d", u.sheet != nil, u.st.NowPlaying, fa.stops)
+	}
+	fa.onEnd()
+	u.Layout(newTestContext(900, 600))
+	if np := u.st.NowPlaying; np == nil || np.TrackIndex != 2 || fa.played[len(fa.played)-1] != "/m/a/03.flac" {
+		t.Fatalf("OnEnd did not advance with the sheet closed: %+v, played %v", np, fa.played)
+	}
+	fa.onEnd()
+	u.Layout(newTestContext(900, 600))
+	if np := u.st.NowPlaying; np == nil || !np.Ended || u.timeText() != "ended" {
+		t.Fatalf("after the last track: %+v", np)
+	}
+	u.now = func() time.Time { return time.Now().Add(EndedFor + time.Second) }
+	u.Layout(newTestContext(900, 600))
+	if u.st.NowPlaying != nil {
+		t.Errorf("an ended album outlived %v: %+v", EndedFor, u.st.NowPlaying)
 	}
 }
 
-// The transport's buttons: pause, resume, next, and back (which restarts a
-// track under way — the fake is always 5 s in).
+// The sheet's transport: pause, resume, next, back (which restarts a track
+// under way — the fake is always 5 s in) and ✕.
 func TestTransportButtons(t *testing.T) {
 	u, fa := sheetUI(t)
-	u.openSheet(Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()})
-	u.playRow(0)
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.openSheet(a)
+	u.playFrom(a, a.TrackList, 0, false)
 	u.Layout(newTestContext(900, 600))
 	u.sheet.playBtn.Click()
 	u.Layout(newTestContext(900, 600))
-	if fa.State() != player.Paused {
+	if fa.State() != player.Paused || u.st.NowPlaying.Playing {
 		t.Fatalf("play/pause did not pause: %v", fa.State())
 	}
 	u.sheet.playBtn.Click()
 	u.Layout(newTestContext(900, 600))
-	if fa.State() != player.Playing {
+	if fa.State() != player.Playing || !u.st.NowPlaying.Playing {
 		t.Fatalf("play/pause did not resume: %v", fa.State())
 	}
 	u.sheet.nextBtn.Click()
 	u.Layout(newTestContext(900, 600))
-	if u.sheet.playing != 1 {
-		t.Fatalf("next: playing %d", u.sheet.playing)
+	if u.st.NowPlaying.TrackIndex != 1 {
+		t.Fatalf("next: %+v", u.st.NowPlaying)
 	}
 	u.sheet.prevBtn.Click()
 	u.Layout(newTestContext(900, 600))
-	if u.sheet.playing != 1 || len(fa.seeks) != 1 || fa.seeks[0] != 0 {
-		t.Errorf("back 5 s in: playing %d, seeks %v — want a restart", u.sheet.playing, fa.seeks)
+	if u.st.NowPlaying.TrackIndex != 1 || len(fa.seeks) != 1 || fa.seeks[0] != 0 {
+		t.Errorf("back 5 s in: %+v, seeks %v — want a restart", u.st.NowPlaying, fa.seeks)
+	}
+	u.sheet.stopBtn.Click()
+	u.Layout(newTestContext(900, 600))
+	if u.st.NowPlaying != nil || fa.stops == 0 {
+		t.Errorf("✕: now playing %+v, stops %d", u.st.NowPlaying, fa.stops)
 	}
 }
 
-// Esc closes the sheet, and so does a click outside it.
+// A track in another album switches albums.
+func TestAnotherAlbumSwitches(t *testing.T) {
+	u, fa := sheetUI(t)
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.playFrom(a, a.TrackList, 0, false)
+	b := Album{Dir: "/m/b", Device: "Y - B", Title: "Y - B", TrackList: []Track{{Path: "/m/b/01.flac", Title: "Bee"}}}
+	u.openSheet(b)
+	u.Layout(newTestContext(900, 600))
+	if u.sheetPlaying() != -1 {
+		t.Fatal("another album's sheet shows a playing row")
+	}
+	u.sheet.rows[0].Click()
+	u.Layout(newTestContext(900, 600))
+	if np := u.st.NowPlaying; np == nil || np.Album.Device != "Y - B" || fa.played[len(fa.played)-1] != "/m/b/01.flac" {
+		t.Errorf("now playing %+v", np)
+	}
+}
+
+// Esc closes the sheet, and so does a click outside it; the music plays on.
 func TestEscAndTheScrimCloseTheSheet(t *testing.T) {
 	u, fa := sheetUI(t)
-	u.openSheet(Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()})
-	u.playRow(0)
-	pressEsc(u)
-	if u.sheet != nil || fa.stops == 0 {
-		t.Fatalf("Esc: sheet open %v, stops %d", u.sheet != nil, fa.stops)
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.openSheet(a)
+	u.playFrom(a, a.TrackList, 0, false)
+	pressKey(u, key.NameEscape, 0)
+	if u.sheet != nil || u.st.NowPlaying == nil || fa.stops != 0 {
+		t.Fatalf("Esc: sheet open %v, now playing %v, stops %d", u.sheet != nil, u.st.NowPlaying, fa.stops)
 	}
 
-	u.openSheet(Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()})
+	u.openSheet(a)
 	u.Layout(newTestContext(900, 600))
 	u.sheet.scrim.Click()
 	u.Layout(newTestContext(900, 600))
@@ -185,24 +227,135 @@ func TestEscAndTheScrimCloseTheSheet(t *testing.T) {
 	}
 }
 
-// A file that will not play says so on the transport, in the log, and
-// plays nothing.
+// A file that will not play says so — in the log, and for warnFor on the
+// transport and the footer — and plays nothing.
 func TestAFailedPlayWarns(t *testing.T) {
 	u, fa := sheetUI(t)
-	fa.playErr = errors.New("the file is not there: 01.flac")
-	u.openSheet(Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()})
-	u.playRow(0)
-	if u.sheet.playing != -1 || !strings.HasPrefix(u.sheet.warn, "could not play: the file is not there") {
-		t.Fatalf("playing %d, warn %q", u.sheet.playing, u.sheet.warn)
+	fa.playErr = errors.New("not a FLAC stream this decoder reads")
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.openSheet(a)
+	u.playFrom(a, a.TrackList, 0, false)
+	if u.st.NowPlaying != nil || !strings.HasPrefix(u.warning(), "could not play: not a FLAC") {
+		t.Fatalf("now playing %+v, warn %q", u.st.NowPlaying, u.warning())
 	}
 	if last := u.st.Log[len(u.st.Log)-1]; !strings.Contains(last, "could not play") {
 		t.Errorf("log: %q", last)
 	}
-	u.Layout(newTestContext(900, 600))
 	u.now = func() time.Time { return time.Now().Add(warnFor + time.Second) }
-	u.Layout(newTestContext(900, 600))
-	if u.sheet.warn != "" {
+	if u.warning() != "" {
 		t.Errorf("the warning outlived %v", warnFor)
+	}
+}
+
+// A file a Fix renamed mid-album is skipped with a line in the log.
+func TestAMissingFileIsSkipped(t *testing.T) {
+	u, fa := sheetUI(t)
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	fa.errFor = map[string]error{"/m/a/02.flac": player.ErrMissing}
+	u.playFrom(a, a.TrackList, 0, false)
+	fa.onEnd()
+	u.Layout(newTestContext(900, 600))
+	if np := u.st.NowPlaying; np == nil || np.TrackIndex != 2 {
+		t.Fatalf("now playing %+v — want the third track", np)
+	}
+	found := false
+	for _, l := range u.st.Log {
+		if strings.Contains(l, "skipping 02.flac") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no skip line in the log: %q", u.st.Log[len(u.st.Log)-3:])
+	}
+	// The same from the player's own error, after a Play that started.
+	fa.errFor = nil
+	u.playFrom(a, a.TrackList, 0, false)
+	fa.onError(&os.PathError{Op: "open", Path: "/m/a/01.flac", Err: os.ErrNotExist})
+	u.Layout(newTestContext(900, 600))
+	if np := u.st.NowPlaying; np == nil || np.TrackIndex != 1 {
+		t.Errorf("after OnError(not there): %+v", np)
+	}
+}
+
+// The footer's bar: drawn while a track is loaded (its seek line is laid
+// out), its time, ✕ clears, and the title opens the album with the
+// playing row scrolled to.
+func TestTheFooterBar(t *testing.T) {
+	u, fa := sheetUI(t)
+	var tracks []Track
+	for i := 0; i < 30; i++ {
+		tracks = append(tracks, Track{Path: "/m/a/" + itoa(i) + ".flac", Disc: 1, Number: i + 1, Title: "T" + itoa(i)})
+	}
+	a := u.st.Albums[3]
+	a.TrackList = tracks
+	u.playFrom(a, tracks, 20, false)
+	fa.pos = 83 * time.Second
+	u.Layout(newTestContext(900, 600))
+	if u.npBarW <= 0 {
+		t.Fatal("the footer bar was not drawn")
+	}
+	if got := u.timeText(); got != "1:23 / 1:00" && got != "1:23 / 1:00:00" {
+		// The fake says one minute long; what matters is the clock.
+		if !strings.HasPrefix(got, "1:23 / ") {
+			t.Errorf("time %q", got)
+		}
+	}
+	if u.st.NowPlaying.AlbumIndex != 3 {
+		t.Errorf("album index %d, want 3", u.st.NowPlaying.AlbumIndex)
+	}
+	u.npTitleBtn.Click()
+	u.Layout(newTestContext(900, 600))
+	if u.sheet == nil || u.sheet.album.Device != a.Device || u.sheet.list.Position.First != 18 {
+		t.Fatalf("title click: sheet %v, first row %d", u.sheet != nil, u.sheet.list.Position.First)
+	}
+	u.closeSheet()
+	u.npStopBtn.Click()
+	u.Layout(newTestContext(900, 600))
+	if u.st.NowPlaying != nil || fa.stops == 0 {
+		t.Errorf("✕: %+v, stops %d", u.st.NowPlaying, fa.stops)
+	}
+}
+
+// Space plays and pauses, ctrl+→ is next — unless a text field has the
+// keyboard, where Space is a space.
+func TestSpaceTogglesOnlyWithoutAFocusedEditor(t *testing.T) {
+	u, fa := sheetUI(t)
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.playFrom(a, a.TrackList, 0, false)
+	pressKey(u, key.NameSpace, 0)
+	if fa.State() != player.Paused {
+		t.Fatalf("Space did not pause: %v", fa.State())
+	}
+	pressKey(u, key.NameSpace, 0)
+	if fa.State() != player.Playing {
+		t.Fatalf("Space did not resume: %v", fa.State())
+	}
+	pressKey(u, key.NameRightArrow, key.ModShortcut)
+	if u.st.NowPlaying.TrackIndex != 1 {
+		t.Fatalf("ctrl+→: %+v", u.st.NowPlaying)
+	}
+
+	// The Library tab's music-folder field, focused.
+	u.st.Tab = TabLibrary
+	var r input.Router
+	g := newTestContext(900, 600)
+	g.Source = r.Source()
+	u.Layout(g)
+	r.Frame(g.Ops)
+	g = newTestContext(900, 600)
+	g.Source = r.Source()
+	g.Execute(key.FocusCmd{Tag: &u.sourceEd})
+	u.Layout(g)
+	r.Frame(g.Ops)
+	r.Queue(key.Event{Name: key.NameSpace, State: key.Press})
+	g = newTestContext(900, 600)
+	g.Source = r.Source()
+	if !g.Focused(&u.sourceEd) {
+		t.Fatal("the field did not take the focus")
+	}
+	u.Layout(g)
+	if fa.State() != player.Playing {
+		t.Errorf("Space in a text field paused the music")
 	}
 }
 
@@ -396,7 +549,7 @@ func TestEverythingOnTheIPodClosesWithEsc(t *testing.T) {
 	if !d.solo() {
 		t.Fatalf("not one button: %+v", d)
 	}
-	pressEsc(u)
+	pressKey(u, key.NameEscape, 0)
 	settle(u)
 	if u.dlg != nil {
 		t.Fatal("Esc left the dialog open")
@@ -436,17 +589,45 @@ func TestCancelOnlyWhenThereIsSomethingToCancel(t *testing.T) {
 	}
 }
 
-// pressEsc is the Esc key, through Gio's router the way the window gets
-// it: one frame so the router knows who asks for keys, then the key, then
-// the frame that reads it.
-func pressEsc(u *UI) {
+// pressKey is one key, through Gio's router the way the window gets it:
+// one frame so the router knows who asks for keys, then the key, then the
+// frame that reads it.
+func pressKey(u *UI, name key.Name, mods key.Modifiers) {
 	var r input.Router
 	g := newTestContext(900, 600)
 	g.Source = r.Source()
 	u.Layout(g)
 	r.Frame(g.Ops)
-	r.Queue(key.Event{Name: key.NameEscape, State: key.Press})
+	r.Queue(key.Event{Name: name, Modifiers: mods, State: key.Press})
 	g = newTestContext(900, 600)
 	g.Source = r.Source()
 	u.Layout(g)
+}
+
+// With the build's own player — the noaudio stub in a test run — a click
+// on a track is the "not available" warning and no Now Playing, and the
+// rest of the window is unaffected.
+func TestTheStubPlayerSaysItCannotPlay(t *testing.T) {
+	if player.Available {
+		t.Skip("built with audio: this test is for the noaudio stub")
+	}
+	u := NewUI(Options{Backend: &fakeBackend{}})
+	u.SetState(DemoState())
+	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
+	u.openSheet(a)
+	u.Layout(newTestContext(900, 600))
+	u.sheet.rows[0].Click()
+	u.Layout(newTestContext(900, 600))
+	if u.st.NowPlaying != nil {
+		t.Fatalf("the stub played: %+v", u.st.NowPlaying)
+	}
+	if !strings.Contains(u.warning(), "not available in this build") {
+		t.Errorf("warning %q", u.warning())
+	}
+	pressKey(u, key.NameSpace, 0) // nothing loaded: Space does nothing
+	u.closeSheet()
+	u.StopAudio()
+	if u.Layout(newTestContext(900, 600)).Size.X != 900 {
+		t.Error("the window did not lay out")
+	}
 }

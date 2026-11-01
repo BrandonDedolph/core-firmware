@@ -424,9 +424,13 @@ can write it with `--untested-hardware`, if you mean to take that risk. *Sync an
 After any write the window reads the iPod again, so the header shows the new version at once.
 
 Click an album to open it: its cover, what the iPod has of it, and its tracklist. Click a track to
-listen to it on the computer — the album plays on from there, with back, pause and next and a bar
-you can click to jump — and *Show folder on this PC* opens the folder. Closing the album stops the
-music. *Sync N albums* (and *Preview sync* on the iPod tab) first shows what the sync would copy —
+listen to it on the computer — the album plays on from there, with back, pause, next and stop and a
+bar you can click to jump — and *Show folder on this PC* opens the folder. Closing the album leaves
+the music playing: the bottom left of the window shows what is on, with pause, next and ✕ (stop),
+and a click on its title opens the album again; the album's cover carries a small ▶. Space plays
+and pauses, and Ctrl+→ / Ctrl+← go to the next and previous track (not while you are typing in a
+field). When the album ends the bar says so for a moment and goes away. A sync or a library fix
+does not stop the music; a track a fix has renamed is skipped. *Sync N albums* (and *Preview sync* on the iPod tab) first shows what the sync would copy —
 each album, how many of its tracks and their size, and the total — and copies nothing until you
 press the sync button on it; when there is nothing to copy it says *Everything is on the iPod*.
 

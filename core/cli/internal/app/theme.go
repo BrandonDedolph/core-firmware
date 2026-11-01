@@ -3,8 +3,15 @@ package app
 import (
 	_ "embed"
 	"fmt"
+	"image"
 	"image/color"
+	"math"
 	"strings"
+
+	"gioui.org/op"
+	xfont "golang.org/x/image/font"
+	"golang.org/x/image/font/sfnt"
+	"golang.org/x/image/math/fixed"
 
 	"gioui.org/font"
 	"gioui.org/font/opentype"
@@ -268,4 +275,72 @@ func (u *UI) applyTheme(t Theme) {
 	u.pal = t.Palette()
 	setMaterial(u.th, u.pal)
 	u.invalidate()
+}
+
+// --- centring text on a row by its capitals --------------------------------
+
+// nunitoCap and monoCap are the faces' cap heights as a fraction of the
+// em: the OS/2 table's sCapHeight, read once from the embedded face, or —
+// when a font leaves that field zero — the ink height of "H".
+var (
+	nunitoCap = capHeight(nunitoRegular)
+	monoCap   = capHeight(gomono.TTF)
+)
+
+// capHeight is one face's cap height per em.
+func capHeight(ttf []byte) float32 {
+	f, err := sfnt.Parse(ttf)
+	if err != nil {
+		return 0.7
+	}
+	var b sfnt.Buffer
+	upem := fixed.Int26_6(f.UnitsPerEm())
+	m, err := f.Metrics(&b, upem<<6, xfont.HintingNone)
+	if err == nil && m.CapHeight > 0 {
+		return float32(m.CapHeight) / float32(upem<<6)
+	}
+	if gi, err := f.GlyphIndex(&b, 'H'); err == nil {
+		if r, _, err := f.GlyphBounds(&b, gi, upem<<6, xfont.HintingNone); err == nil {
+			return float32(-r.Min.Y) / float32(upem<<6)
+		}
+	}
+	return 0.7
+}
+
+// rowText lays one line of text out so that its CAPITALS are centred
+// vertically in a band h px tall — gtx.Constraints.Min.Y when h is 0, and
+// never less than the line's own box. A material.Label is a box of
+// ascent + descent with its text at the top, and centring that box (or
+// letting a Flex hand the label a tall Min.Y, which puts the text at the
+// top of it) centres the wrong thing: Nunito's ascender is tall, so the
+// letters ride high. Here the baseline goes where the band's middle is
+// half a cap height above it. The returned Baseline is the label's, so a
+// Baseline-aligned Flex still lines rows of mixed sizes up.
+func rowText(gtx C, l material.LabelStyle, h int) D {
+	l.MaxLines = 1
+	if h <= 0 {
+		h = gtx.Constraints.Min.Y
+	}
+	g := gtx
+	g.Constraints.Min.Y = 0
+	m := op.Record(gtx.Ops)
+	d := l.Layout(g)
+	call := m.Stop()
+	if h < d.Size.Y {
+		h = d.Size.Y
+	}
+	capPx := nunitoCap * float32(l.TextSize) * gtx.Metric.PxPerSp
+	if l.Font.Typeface == Mono.Typeface {
+		capPx = monoCap * float32(l.TextSize) * gtx.Metric.PxPerSp
+	}
+	want := int(math.Round(float64((float32(h) + capPx) / 2)))
+	off := want - (d.Size.Y - d.Baseline)
+	st := op.Offset(image.Pt(0, off)).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	st.Pop()
+	w := d.Size.X
+	if gtx.Constraints.Min.X > w {
+		w = gtx.Constraints.Min.X
+	}
+	return D{Size: image.Pt(w, h), Baseline: h - want}
 }

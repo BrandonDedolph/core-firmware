@@ -15,7 +15,9 @@ package player
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +29,9 @@ var (
 	ErrUnavailable = errors.New("playback is not available in this build")
 	// ErrUnsupported is a file this package does not decode.
 	ErrUnsupported = errors.New("not a format this player decodes")
+	// ErrMissing is a file that is not there (any more): a Fix renamed
+	// it, or it was deleted. It wraps os.ErrNotExist.
+	ErrMissing = fmt.Errorf("the file is not there: %w", os.ErrNotExist)
 	// ErrNoSeek is a Seek with nothing to seek in.
 	ErrNoSeek = errors.New("this track cannot seek")
 )

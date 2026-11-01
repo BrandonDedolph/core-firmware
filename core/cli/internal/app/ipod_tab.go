@@ -216,24 +216,31 @@ func (u *UI) rowFrame(gtx C, label string, body layout.Widget, actions []btn) D 
 	return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(14), Right: unit.Dp(12)}.
 		Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx C) D {
-					w := gtx.Dp(150)
+			w := gtx.Dp(150)
+			// The label is laid out after the row, over its first 150 dp,
+			// so it knows the row's height and can centre its capitals on
+			// it (rowText) rather than its line box.
+			return layout.Stack{}.Layout(gtx,
+				layout.Stacked(func(gtx C) D {
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(layout.Spacer{Width: unit.Dp(150)}.Layout),
+						layout.Flexed(1, body),
+						layout.Rigid(func(gtx C) D {
+							if len(actions) == 0 {
+								return D{}
+							}
+							return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx C) D {
+								return u.buttonRow(gtx, actions...)
+							})
+						}),
+					)
+				}),
+				layout.Expanded(func(gtx C) D {
 					gtx.Constraints.Min.X, gtx.Constraints.Max.X = w, w
 					l := material.Label(u.th, unit.Sp(12.5), label)
 					l.Font.Weight = font.SemiBold
 					l.Color = u.pal.Muted
-					l.MaxLines = 1
-					return l.Layout(gtx)
-				}),
-				layout.Flexed(1, body),
-				layout.Rigid(func(gtx C) D {
-					if len(actions) == 0 {
-						return D{}
-					}
-					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx C) D {
-						return u.buttonRow(gtx, actions...)
-					})
+					return rowText(gtx, l, gtx.Constraints.Min.Y)
 				}),
 			)
 		})

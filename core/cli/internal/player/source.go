@@ -50,7 +50,7 @@ func checkPath(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("the file is not there: %s", filepath.Base(path))
+			return fmt.Errorf("%w: %s", ErrMissing, filepath.Base(path))
 		}
 		return err
 	}

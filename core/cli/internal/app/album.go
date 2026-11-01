@@ -3,7 +3,6 @@ package app
 import (
 	"image"
 	"image/color"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,14 +26,15 @@ import (
 // The album sheet: what a click on a tile opens. It is the album the way a
 // music app shows one — the cover, the title and artist, what the iPod has
 // of it, and the tracklist — and a track in the list plays on this
-// computer's speakers (internal/player), so a person can listen to what
-// they are about to copy.
+// computer's speakers. Playing is the app's, not the sheet's
+// (nowplaying.go): closing the sheet leaves the music on, the footer
+// carries it, and opening the playing album again shows it live.
 //
 // It is a panel over the window with the dialogs' chrome, not a dialog: it
 // asks nothing, so it has one button (Close), and Esc or a click outside it
-// closes it too. Closing stops the music.
+// closes it too.
 
-// audio is what the sheet needs of internal/player. A test passes its own.
+// audio is what the app needs of internal/player. A test passes its own.
 type audio interface {
 	Play(path string) error
 	Pause()
@@ -54,27 +54,15 @@ type albumSheet struct {
 	// loaded is false while ReadTracks is running; err is its failure.
 	loaded bool
 	err    string
-	// playing is the loaded row (playing or paused), -1 for none.
-	playing int
-	// warn is "could not play: …", shown for warnFor after warnAt.
-	warn   string
-	warnAt time.Time
-	// canned pins the transport for a screenshot: position, length and
-	// paused, with no player behind it.
-	canned *cannedTransport
 
 	rows                      []widget.Clickable
 	list                      widget.List
 	closeBtn, scrim, block    widget.Clickable
 	folderBtn                 widget.Clickable
 	prevBtn, playBtn, nextBtn widget.Clickable
+	stopBtn                   widget.Clickable
 	seek                      gesture.Click
 	barW                      int
-}
-
-type cannedTransport struct {
-	pos, total time.Duration
-	paused     bool
 }
 
 // tracksResult is ReadTracks's answer for one folder, crossing back from
@@ -85,9 +73,6 @@ type tracksResult struct {
 	err    error
 }
 
-// warnFor is how long "could not play" stays on the transport.
-const warnFor = 3 * time.Second
-
 // readTracks and albumCover are ReadTracks and AlbumCover, variables for
 // the tests.
 var (
@@ -95,15 +80,20 @@ var (
 	albumCover = AlbumCover
 )
 
-// openSheet opens the sheet on one album. Its tracklist is the album's own
-// when it carries one (a canned state) and is otherwise read off the folder
-// on a goroutine — the sheet says "Reading the tracks…" until it lands.
+// openSheet opens the sheet on one album. Its tracklist is the playing
+// album's when this is it, the album's own when it carries one (a canned
+// state), and is otherwise read off the folder on a goroutine — the sheet
+// says "Reading the tracks…" until it lands. The playing row is scrolled
+// into view.
 func (u *UI) openSheet(a Album) {
-	s := &albumSheet{album: a, playing: -1}
+	s := &albumSheet{album: a}
 	s.list.Axis = layout.Vertical
-	if len(a.TrackList) > 0 {
+	switch np := u.st.NowPlaying; {
+	case np != nil && np.Album.Device == a.Device && len(np.Album.TrackList) > 0:
+		s.tracks, s.loaded = np.Album.TrackList, true
+	case len(a.TrackList) > 0:
 		s.tracks, s.loaded = a.TrackList, true
-	} else {
+	default:
 		dir := a.Dir
 		go func() {
 			ts, err := readTracks(dir)
@@ -114,18 +104,30 @@ func (u *UI) openSheet(a Album) {
 		}()
 	}
 	u.sheet = s
+	u.scrollToPlaying()
 }
 
-// closeSheet closes it, and the music with it.
-func (u *UI) closeSheet() {
-	if u.sheet == nil {
+// scrollToPlaying puts the playing row near the top of the sheet's list,
+// with two rows above it for context.
+func (u *UI) scrollToPlaying() {
+	s := u.sheet
+	i := u.sheetPlaying()
+	if s == nil || i < 0 {
 		return
 	}
-	if u.sheet.playing >= 0 && u.sheet.canned == nil {
-		u.audio.Stop()
+	for n, it := range sheetItems(s.tracks) {
+		if it.track == i {
+			if n -= 2; n < 0 {
+				n = 0
+			}
+			s.list.Position.First, s.list.Position.Offset = n, 0
+			return
+		}
 	}
-	u.sheet = nil
 }
+
+// closeSheet closes it. The music plays on.
+func (u *UI) closeSheet() { u.sheet = nil }
 
 // applyTracks folds a finished ReadTracks into the sheet it was for.
 func (u *UI) applyTracks(r *tracksResult) {
@@ -138,67 +140,17 @@ func (u *UI) applyTracks(r *tracksResult) {
 		s.err = r.err.Error()
 		u.st.Logf("could not read %s: %v", r.dir, r.err)
 	}
+	u.scrollToPlaying()
 }
 
-// trackEnded is the player's OnEnd, on the UI goroutine: the next row, and
-// after the last one, nothing.
-func (u *UI) trackEnded() {
-	s := u.sheet
-	if s == nil || s.playing < 0 {
-		return
+// sheetPlaying is the sheet's row that is loaded in the player, or -1 when
+// the player holds another album or nothing.
+func (u *UI) sheetPlaying() int {
+	np := u.st.NowPlaying
+	if u.sheet == nil || np == nil || np.Ended || np.Album.Device != u.sheet.album.Device {
+		return -1
 	}
-	if next := s.playing + 1; next < len(s.tracks) {
-		u.playRow(next)
-		return
-	}
-	s.playing = -1
-}
-
-// trackFailed is the player's OnError, on the UI goroutine.
-func (u *UI) trackFailed(err error) {
-	if u.sheet == nil {
-		return
-	}
-	u.sheetWarn(err)
-	u.sheet.playing = -1
-}
-
-func (u *UI) sheetWarn(err error) {
-	msg := "could not play: " + firstLine(err.Error())
-	u.st.Logf("%s", msg)
-	u.sheet.warn, u.sheet.warnAt = msg, u.now()
-}
-
-// playRow starts one row.
-func (u *UI) playRow(i int) {
-	s := u.sheet
-	if s == nil || i < 0 || i >= len(s.tracks) {
-		return
-	}
-	t := s.tracks[i]
-	if t.Path == "" {
-		return
-	}
-	if err := u.audio.Play(t.Path); err != nil {
-		u.sheetWarn(err)
-		return
-	}
-	s.playing, s.warn = i, ""
-	u.st.Logf("playing %s", filepath.Base(t.Path))
-}
-
-// transport is what the transport shows: where the track is, its length,
-// and whether it is paused.
-func (u *UI) transport() (pos, total time.Duration, paused bool) {
-	s := u.sheet
-	if s.canned != nil {
-		return s.canned.pos, s.canned.total, s.canned.paused
-	}
-	pos, total = u.audio.Position()
-	if total == 0 && s.playing >= 0 {
-		total = s.tracks[s.playing].Length
-	}
-	return pos, total, u.audio.State() == player.Paused
+	return np.TrackIndex
 }
 
 // sheetEvents is the sheet's half of the frame.
@@ -226,56 +178,32 @@ func (u *UI) sheetEvents(gtx C) {
 		}
 	}
 	for i := range s.rows {
-		if s.rows[i].Clicked(gtx) {
-			u.playRow(i)
+		if s.rows[i].Clicked(gtx) && i < len(s.tracks) {
+			u.playFrom(s.album, s.tracks, i, false)
 		}
 	}
-	if s.playing >= 0 && s.canned == nil {
-		if s.playBtn.Clicked(gtx) {
-			switch u.audio.State() {
-			case player.Playing:
-				u.audio.Pause()
-			case player.Paused:
-				u.audio.Resume()
-			default:
-				u.playRow(s.playing)
-			}
+	if u.sheetPlaying() < 0 {
+		return
+	}
+	if s.playBtn.Clicked(gtx) {
+		u.togglePlay()
+	}
+	if s.prevBtn.Clicked(gtx) {
+		u.previous()
+	}
+	if s.nextBtn.Clicked(gtx) {
+		u.next()
+	}
+	if s.stopBtn.Clicked(gtx) {
+		u.stopPlaying()
+	}
+	for {
+		ev, ok := s.seek.Update(gtx.Source)
+		if !ok {
+			break
 		}
-		if s.prevBtn.Clicked(gtx) {
-			// The iPod's rule: back restarts a track that is under way,
-			// and goes to the one before only from its first seconds.
-			if pos, _ := u.audio.Position(); pos > 3*time.Second || s.playing == 0 {
-				if err := u.audio.Seek(0); err != nil {
-					u.playRow(s.playing)
-				}
-			} else {
-				u.playRow(s.playing - 1)
-			}
-		}
-		if s.nextBtn.Clicked(gtx) {
-			if s.playing+1 < len(s.tracks) {
-				u.playRow(s.playing + 1)
-			} else {
-				u.audio.Stop()
-				s.playing = -1
-			}
-		}
-		for {
-			ev, ok := s.seek.Update(gtx.Source)
-			if !ok {
-				break
-			}
-			if ev.Kind != gesture.KindClick || s.barW <= 0 {
-				continue
-			}
-			_, total, _ := u.transport()
-			frac := float64(ev.Position.X) / float64(s.barW)
-			if frac < 0 {
-				frac = 0
-			}
-			if err := u.audio.Seek(time.Duration(frac * float64(total))); err != nil {
-				u.sheetWarn(err)
-			}
+		if ev.Kind == gesture.KindClick && s.barW > 0 {
+			u.seekTo(float64(ev.Position.X) / float64(s.barW))
 		}
 	}
 }
@@ -319,16 +247,6 @@ func (u *UI) sheetLayer(gtx C) D {
 	bg.Constraints = layout.Exact(sz)
 	s.block.Layout(bg, func(gtx C) D { return D{Size: sz} })
 	body.Add(gtx.Ops)
-	if s.playing >= 0 && (s.canned == nil && u.audio.State() == player.Playing) {
-		gtx.Execute(op.InvalidateCmd{At: u.now().Add(100 * time.Millisecond)})
-	}
-	if s.warn != "" {
-		if left := warnFor - u.now().Sub(s.warnAt); left > 0 {
-			gtx.Execute(op.InvalidateCmd{At: s.warnAt.Add(warnFor)})
-		} else {
-			s.warn = ""
-		}
-	}
 	return D{Size: full}
 }
 
@@ -417,24 +335,20 @@ func (u *UI) sheetHead(gtx C) D {
 			gap(6)
 			add(func(gtx C) D {
 				return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-					layout.Flexed(1, func(gtx C) D {
-						return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-							layout.Rigid(func(gtx C) D {
-								l := material.Label(u.th, unit.Sp(11), "in Music/"+a.Device)
-								l.Color = u.pal.Muted2
-								l.MaxLines = 1
-								l.Truncator = "…"
-								gtx.Constraints.Max.X -= gtx.Dp(150)
-								if gtx.Constraints.Max.X < 0 {
-									gtx.Constraints.Max.X = 0
-								}
-								return l.Layout(gtx)
-							}),
-							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-							layout.Rigid(func(gtx C) D {
-								return u.link(gtx, &s.folderBtn, "Show folder on this PC", 11)
-							}),
-						)
+					layout.Rigid(func(gtx C) D {
+						l := material.Label(u.th, unit.Sp(11), "in Music/"+a.Device)
+						l.Color = u.pal.Muted2
+						l.MaxLines = 1
+						l.Truncator = "…"
+						gtx.Constraints.Max.X -= gtx.Dp(150)
+						if gtx.Constraints.Max.X < 0 {
+							gtx.Constraints.Max.X = 0
+						}
+						return l.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Rigid(func(gtx C) D {
+						return u.link(gtx, &s.folderBtn, "Show folder on this PC", 11)
 					}),
 				)
 			})
@@ -555,20 +469,21 @@ func (u *UI) discRow(gtx C, disc int) D {
 }
 
 // trackRow is one track: number, title, length, with the iPod's selected
-// row for the one that is loaded.
+// row for the one that is loaded. Every piece of text in it is centred on
+// the row by its capitals (rowText), the glyph on the row's middle.
 func (u *UI) trackRow(gtx C, i int, rule bool) D {
 	s := u.sheet
 	t := s.tracks[i]
 	click := &s.rows[i]
 	sz := image.Pt(gtx.Constraints.Max.X, gtx.Dp(rowH))
 	gtx.Constraints = layout.Exact(sz)
-	loaded := s.playing == i
-	_, _, paused := u.transportIf(loaded)
+	loaded := u.sheetPlaying() == i
+	paused := loaded && !u.st.NowPlaying.Playing
 	fg, num, sub := u.pal.Ink, u.pal.Muted, u.pal.Muted
 	if loaded {
 		fg, num, sub = u.pal.Surface, u.pal.Surface, withAlpha(u.pal.Surface, 0xB0)
 	}
-	playable := t.Path != "" || s.canned != nil
+	playable := t.Path != ""
 	return click.Layout(gtx, func(gtx C) D {
 		hovered := click.Hovered()
 		switch {
@@ -577,7 +492,7 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 		case hovered && playable:
 			paint.FillShape(gtx.Ops, withAlpha(u.pal.Ink, 0x0E), clip.Rect{Max: sz}.Op())
 		}
-		if rule && !loaded && s.playing != i+1 {
+		if rule && !loaded && u.sheetPlaying() != i+1 {
 			paint.FillShape(gtx.Ops, u.pal.Border, clip.Rect{
 				Min: image.Pt(0, sz.Y-gtx.Dp(1)), Max: sz}.Op())
 		}
@@ -586,17 +501,15 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 			pointer.CursorPointer.Add(gtx.Ops)
 			st.Pop()
 		}
+		h := sz.Y
 		return layout.Inset{Left: unit.Dp(4), Right: unit.Dp(10)}.Layout(gtx, func(gtx C) D {
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			return layout.Flex{}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {
-					w := gtx.Dp(28)
-					cs := image.Pt(w, gtx.Constraints.Max.Y)
+					cs := image.Pt(gtx.Dp(28), h)
 					gtx.Constraints = layout.Exact(cs)
-					// The glyph sits a little above the box's middle, on the
-					// text's: a line box carries the descender below it.
 					mark := func(g glyph) D {
 						return layout.E.Layout(gtx, func(gtx C) D {
-							return layout.Inset{Bottom: unit.Dp(2), Right: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
+							return layout.Inset{Right: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
 								return u.glyph(gtx, g, 9, num)
 							})
 						})
@@ -610,12 +523,10 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 					if t.Number <= 0 {
 						return D{Size: cs}
 					}
-					return layout.E.Layout(gtx, func(gtx C) D {
-						l := material.Label(u.th, unit.Sp(12), itoa(t.Number))
-						l.Color = num
-						l.Alignment = text.End
-						return l.Layout(gtx)
-					})
+					l := material.Label(u.th, unit.Sp(12), itoa(t.Number))
+					l.Color = num
+					l.Alignment = text.End
+					return rowText(gtx, l, h)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(14)}.Layout),
 				layout.Flexed(1, func(gtx C) D {
@@ -624,9 +535,8 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 					if loaded {
 						l.Font.Weight = font.SemiBold
 					}
-					l.MaxLines = 1
 					l.Truncator = "…"
-					return l.Layout(gtx)
+					return rowText(gtx, l, h)
 				}),
 				layout.Rigid(func(gtx C) D {
 					if t.Length <= 0 {
@@ -635,8 +545,7 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 					return layout.Inset{Left: unit.Dp(10)}.Layout(gtx, func(gtx C) D {
 						l := material.Label(u.th, unit.Sp(12), clock(t.Length))
 						l.Color = sub
-						l.MaxLines = 1
-						return l.Layout(gtx)
+						return rowText(gtx, l, h)
 					})
 				}),
 			)
@@ -644,38 +553,31 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 	})
 }
 
-// transportIf is transport() for the loaded row and nothing otherwise.
-func (u *UI) transportIf(loaded bool) (time.Duration, time.Duration, bool) {
-	if !loaded {
-		return 0, 0, false
-	}
-	return u.transport()
-}
-
-// sheetFoot is the transport (while a track is loaded) or the note that
-// this build cannot play, and Close.
+// sheetFoot is the transport (while this album is the one playing), the
+// warning when a track would not play, or a hint; and Close.
 func (u *UI) sheetFoot(gtx C) D {
 	s := u.sheet
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	playing := u.sheetPlaying() >= 0
 	return layout.Flex{Alignment: layout.End}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
 			var rows []layout.FlexChild
-			if s.playing >= 0 {
+			if playing {
 				rows = append(rows, layout.Rigid(u.transportRow))
 			}
-			if s.warn != "" {
+			if w := u.warning(); w != "" {
 				rows = append(rows, layout.Rigid(func(gtx C) D {
-					return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, u.wrapN(12, u.pal.Accent, s.warn, 2))
+					return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, u.wrapN(12, u.pal.Accent, w, 2))
 				}))
 			}
-			if s.playing >= 0 {
+			if playing {
 				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(u.progressBar))
+					layout.Rigid(func(gtx C) D { return u.progressBar(gtx, gtx.Dp(4), &s.seek, &s.barW) }))
 			}
-			if len(rows) == 0 && !player.Available && s.canned == nil {
+			if len(rows) == 0 && !player.Available {
 				rows = append(rows, layout.Rigid(u.text(12, u.pal.Muted2, "Playback is not available in this build.")))
 			}
-			if len(rows) == 0 && player.Available && s.loaded && len(s.tracks) > 0 && s.canned == nil {
+			if len(rows) == 0 && player.Available && s.loaded && len(s.tracks) > 0 {
 				rows = append(rows, layout.Rigid(u.text(12, u.pal.Muted2, "Click a track to listen to it here.")))
 			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
@@ -685,42 +587,44 @@ func (u *UI) sheetFoot(gtx C) D {
 	)
 }
 
-// transportRow is ⏮ ▶/❚❚ ⏭, then "03 · THE GREAT CURVE  1:23 / 6:26".
+// transportRow is ⏮ ▶/❚❚ ⏭ ✕, then "03 · THE GREAT CURVE  1:23 / 6:26".
 func (u *UI) transportRow(gtx C) D {
 	s := u.sheet
-	t := s.tracks[s.playing]
-	pos, total, paused := u.transport()
+	np := u.st.NowPlaying
+	t := np.Album.TrackList[np.TrackIndex]
 	toggle := glyphPause
-	if paused {
+	if !np.Playing {
 		toggle = glyphPlay
 	}
+	h := gtx.Dp(28)
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.prevBtn, glyphPrev) }),
+		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.prevBtn, glyphPrev, 28) }),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.playBtn, toggle) }),
+		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.playBtn, toggle, 28) }),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.nextBtn, glyphNext) }),
+		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.nextBtn, glyphNext, 28) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.stopBtn, glyphStop, 28) }),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx C) D {
 			name := strings.ToUpper(t.Title)
 			if t.Number > 0 {
 				name = twoDigits(t.Number) + " · " + name
 			}
-			times := clock(pos)
-			if total > 0 {
-				times += " / " + clock(total)
-			}
-			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+			return layout.Flex{}.Layout(gtx,
 				layout.Flexed(1, func(gtx C) D {
 					l := material.Label(u.th, unit.Sp(12.5), name)
 					l.Font.Weight = font.Bold
 					l.Color = u.pal.Ink
-					l.MaxLines = 1
 					l.Truncator = "…"
-					return l.Layout(gtx)
+					return rowText(gtx, l, h)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-				layout.Rigid(u.text(12, u.pal.Muted, times)),
+				layout.Rigid(func(gtx C) D {
+					l := material.Label(u.th, unit.Sp(12), u.timeText())
+					l.Color = u.pal.Muted
+					return rowText(gtx, l, h)
+				}),
 			)
 		}),
 	)
@@ -733,30 +637,30 @@ func twoDigits(n int) string {
 	return itoa(n)
 }
 
-// progressBar is the thin bar under the transport: Trk, with the played
-// part in Ink. A click on it seeks.
-func (u *UI) progressBar(gtx C) D {
-	s := u.sheet
-	pos, total, _ := u.transport()
-	sz := image.Pt(gtx.Constraints.Max.X, gtx.Dp(4))
-	// The hit area is taller than the bar: four pixels is not a target.
-	hit := image.Rect(0, -gtx.Dp(5), sz.X, sz.Y+gtx.Dp(5))
-	s.barW = sz.X
-	r := gtx.Dp(2)
+// progressBar is a thin bar h px tall: Trk, with the played part in Ink. A
+// click on it seeks (seek, with *barW the width it was drawn at), when the
+// player is really playing something.
+func (u *UI) progressBar(gtx C, h int, seek *gesture.Click, barW *int) D {
+	np := u.st.NowPlaying
+	sz := image.Pt(gtx.Constraints.Max.X, h)
+	r := h / 2
 	paint.FillShape(gtx.Ops, u.pal.Trk, clip.UniformRRect(image.Rectangle{Max: sz}, r).Op(gtx.Ops))
-	if total > 0 {
-		f := float32(pos) / float32(total)
-		if f > 1 {
+	if np != nil && np.Total > 0 {
+		f := float32(np.Pos) / float32(np.Total)
+		if f > 1 || np.Ended {
 			f = 1
 		}
 		if w := int(f * float32(sz.X)); w > 0 {
 			paint.FillShape(gtx.Ops, u.pal.Ink, clip.UniformRRect(image.Rectangle{Max: image.Pt(w, sz.Y)}, r).Op(gtx.Ops))
 		}
 	}
-	if s.canned == nil && total > 0 {
+	if seek != nil && u.npLive && np != nil && np.Total > 0 && !np.Ended {
+		*barW = sz.X
+		// The hit area is taller than the bar: four pixels is not a target.
+		hit := image.Rect(0, -gtx.Dp(5), sz.X, sz.Y+gtx.Dp(5))
 		st := clip.Rect(hit).Push(gtx.Ops)
 		pointer.CursorPointer.Add(gtx.Ops)
-		s.seek.Add(gtx.Ops)
+		seek.Add(gtx.Ops)
 		st.Pop()
 	}
 	return D{Size: sz}
@@ -771,11 +675,12 @@ const (
 	glyphPause
 	glyphPrev
 	glyphNext
+	glyphStop
 )
 
-// iconButton is a 28 dp square secondary button holding one glyph.
-func (u *UI) iconButton(gtx C, click *widget.Clickable, g glyph) D {
-	s := gtx.Dp(28)
+// iconButton is a square secondary button, size dp, holding one glyph.
+func (u *UI) iconButton(gtx C, click *widget.Clickable, g glyph, size unit.Dp) D {
+	s := gtx.Dp(size)
 	sz := image.Pt(s, s)
 	return click.Layout(gtx, func(gtx C) D {
 		r := gtx.Dp(5)
@@ -791,7 +696,11 @@ func (u *UI) iconButton(gtx C, click *widget.Clickable, g glyph) D {
 		}
 		gc := gtx
 		gc.Constraints = layout.Exact(sz)
-		layout.Center.Layout(gc, func(gtx C) D { return u.glyph(gtx, g, 10, u.pal.Ink) })
+		gs := size * 10 / 28
+		if g == glyphStop {
+			gs = size * 8 / 28
+		}
+		layout.Center.Layout(gc, func(gtx C) D { return u.glyph(gtx, g, gs, u.pal.Ink) })
 		return D{Size: sz}
 	})
 }
@@ -830,6 +739,16 @@ func (u *UI) glyph(gtx C, g glyph, size unit.Dp, col color.NRGBA) D {
 	case glyphNext:
 		tri(0, s*0.82, true)
 		bar(s*0.82, s)
+	case glyphStop:
+		// ✕: two strokes corner to corner.
+		w := s * 0.16
+		for _, d := range [2][2]f32.Point{{f32.Pt(0, 0), f32.Pt(s, s)}, {f32.Pt(s, 0), f32.Pt(0, s)}} {
+			var p clip.Path
+			p.Begin(gtx.Ops)
+			p.MoveTo(d[0])
+			p.LineTo(d[1])
+			paint.FillShape(gtx.Ops, col, clip.Stroke{Path: p.End(), Width: w}.Op())
+		}
 	}
 	return D{Size: sz}
 }

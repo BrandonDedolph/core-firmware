@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gioui.org/font"
+	"gioui.org/gesture"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -192,6 +193,15 @@ type UI struct {
 	newTracks *tracksResult
 	trackDone bool
 	trackErr  error
+	// npLive says State.NowPlaying is the player's (a canned state's is
+	// a picture with no player behind it); npWarn is "could not play",
+	// up for warnFor after npWarnAt. The footer bar's buttons follow.
+	npLive                                      bool
+	npWarn                                      string
+	npWarnAt                                    time.Time
+	npPlayBtn, npNextBtn, npStopBtn, npTitleBtn widget.Clickable
+	npSeek                                      gesture.Click
+	npBarW                                      int
 
 	// pending is the one-job-at-a-time queue: things to start on a
 	// frame where nothing is running (see later()). UI goroutine only.
@@ -614,6 +624,7 @@ func (u *UI) drain() {
 		if planSynced {
 			markSynced(u.st.Albums)
 		}
+		u.reindexNowPlaying()
 	}
 	if detected != nil {
 		u.applyDetect(detected)
@@ -711,6 +722,11 @@ func (u *UI) saveConfig() {
 // jobs through the Runner.
 func (u *UI) Layout(gtx C) D {
 	u.drain()
+	u.syncNowPlaying(gtx)
+	u.playKeys(gtx)
+	if u.st.NowPlaying != nil && u.dlg == nil {
+		u.nowPlayingEvents(gtx)
+	}
 	switch {
 	case u.dlg != nil:
 		// A dialog replaces the menu that opened it, and sits over the
@@ -1149,6 +1165,16 @@ func (u *UI) deviceBlock(gtx C) D {
 		nameCol, weight = u.pal.Muted, font.SemiBold
 	}
 	status, statusCol := u.statusLine()
+	// 1 dp above and below: the bar keeps its height, and the two lines
+	// sit on the buttons' middle.
+	return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
+		return u.deviceLines(gtx, name, model, nameCol, weight, status, statusCol)
+	})
+}
+
+// deviceLines is the device block's two lines.
+func (u *UI) deviceLines(gtx C, name, model string, nameCol color.NRGBA, weight font.Weight,
+	status string, statusCol color.NRGBA) D {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
 			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
@@ -1179,7 +1205,15 @@ func (u *UI) deviceBlock(gtx C) D {
 			)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
-		layout.Rigid(u.line(11.5, statusCol, status)),
+		// Not u.line: its 2 dp under the line would hang below the block
+		// and lift both lines off the buttons' middle.
+		layout.Rigid(func(gtx C) D {
+			l := material.Label(u.th, unit.Sp(11.5), status)
+			l.Color = statusCol
+			l.MaxLines = 1
+			l.Truncator = " "
+			return l.Layout(gtx)
+		}),
 	)
 }
 
@@ -1507,13 +1541,25 @@ func (u *UI) footer(gtx C) D {
 	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(u.hairline),
 		layout.Rigid(func(gtx C) D {
-			return layout.Inset{Top: unit.Dp(9), Bottom: unit.Dp(9), Left: unit.Dp(14), Right: unit.Dp(14)}.
+			pad := unit.Dp(9)
+			if u.st.NowPlaying != nil {
+				// The bar's 28 dp buttons: less air, nearly the same footer.
+				pad = 5
+			}
+			return layout.Inset{Top: pad, Bottom: pad, Left: unit.Dp(14), Right: unit.Dp(14)}.
 				Layout(gtx, func(gtx C) D {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					half := gtx.Constraints.Max.X / 2
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 						layout.Rigid(func(gtx C) D {
 							gtx.Constraints.Max.X = half - gtx.Dp(12)
+							if np := u.st.NowPlaying; np != nil && np.TrackIndex < len(np.Album.TrackList) {
+								// While a track is loaded the left half is
+								// Now Playing; the music folder is on the
+								// Library tab.
+								gtx.Constraints.Min.X = gtx.Constraints.Max.X
+								return u.nowPlayingBar(gtx)
+							}
 							if u.st.Phase() != PhaseReady {
 								// No Library tab to go to.
 								return u.line(11, u.pal.Muted, u.footerSource())(gtx)

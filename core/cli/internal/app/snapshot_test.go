@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -250,4 +251,145 @@ func layoutSize(t *testing.T, st State, w, h int) image.Point {
 	ui := NewUI(Options{})
 	ui.SetState(st)
 	return ui.Layout(newTestContext(w, h)).Size
+}
+
+// readPNG decodes a snapshot back for the pixel tests.
+func readPNG(t *testing.T, path string) image.Image {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
+}
+
+// near reports whether two colours are within tol per channel.
+func near(c color.Color, want color.NRGBA, tol int) bool {
+	r, g, b, _ := c.RGBA()
+	d := func(a uint32, w uint8) bool { x := int(a>>8) - int(w); return x <= tol && x >= -tol }
+	return d(r, want.R) && d(g, want.G) && d(b, want.B)
+}
+
+// TestTrackRowCentresItsCapitals is the pixel check for the row-centring
+// fix: in the album sheet, the playing row's title capitals are centred on
+// its ink bar to within half a pixel. (They rode 4.5 px high when the
+// label was handed the row's height as its Min.Y and drew at the top.)
+func TestTrackRowCentresItsCapitals(t *testing.T) {
+	out := filepath.Join(snapshotDir(t), "centring-album-linen-900x600.png")
+	err := SnapshotDialog(DemoState(), ThemeLinen, "album", 900, 600, out)
+	if errors.Is(err, ErrNoHeadless) || errors.Is(err, ErrNoGPU) {
+		t.Skipf("no headless GPU surface on this machine: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := readPNG(t, out)
+	ink, surface := LinenPalette().Ink, LinenPalette().Surface
+
+	// The bar: the run of Ink down a column in the middle of the list.
+	top, bot := -1, -1
+	for y := 200; y < 500; y++ {
+		if near(img.At(600, y), ink, 4) {
+			if top < 0 {
+				top = y
+			}
+			bot = y
+		} else if top >= 0 {
+			break
+		}
+	}
+	if top < 0 || bot-top < 20 {
+		t.Fatalf("no playing row found (ink rows %d..%d)", top, bot)
+	}
+	mid := (top + bot) / 2
+	left := -1
+	for x := 100; x < 600; x++ {
+		if near(img.At(x, mid), ink, 4) {
+			left = x
+			break
+		}
+	}
+	// The title starts 46 dp in (4 + the 28 dp number column + 14).
+	coverage := func(x, y int) float64 {
+		r, g, b, _ := img.At(x, y).RGBA()
+		got := float64(int(r>>8)+int(g>>8)+int(b>>8)) - float64(int(ink.R)+int(ink.G)+int(ink.B))
+		full := float64(int(surface.R)+int(surface.G)+int(surface.B)) - float64(int(ink.R)+int(ink.G)+int(ink.B))
+		return got / full
+	}
+	x0 := left + 44
+	for ; x0 < left+80; x0++ {
+		hit := false
+		for y := top; y <= bot; y++ {
+			if coverage(x0, y) > 0.5 {
+				hit = true
+			}
+		}
+		if hit {
+			break
+		}
+	}
+	capTop, capBot := -1, -1
+	for y := top; y <= bot; y++ {
+		for x := x0; x < x0+6; x++ {
+			if coverage(x, y) > 0.5 {
+				if capTop < 0 {
+					capTop = y
+				}
+				capBot = y
+				break
+			}
+		}
+	}
+	band := float64(top+bot+1) / 2
+	caps := float64(capTop+capBot+1) / 2
+	t.Logf("row %d..%d (centre %.1f), title capitals %d..%d (centre %.1f)", top, bot, band, capTop, capBot, caps)
+	if d := caps - band; d > 0.5 || d < -0.5 {
+		t.Errorf("the title's capitals are %.1f px off the row's middle", d)
+	}
+}
+
+// TestThePlayingTileHasItsBadge renders the grid with a track playing: the
+// first tile (Remain in Light) carries an Ink chip in its bottom-right
+// corner, the second does not.
+func TestThePlayingTileHasItsBadge(t *testing.T) {
+	out := filepath.Join(snapshotDir(t), "playing-linen-900x600.png")
+	err := SnapshotTheme(PlayingState(), ThemeLinen, 900, 600, out)
+	if errors.Is(err, ErrNoHeadless) || errors.Is(err, ErrNoGPU) {
+		t.Skipf("no headless GPU surface on this machine: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := readPNG(t, out)
+	pal := LinenPalette()
+	_, tile := gridMetrics(900-28, 1)
+	y0 := -1
+	for y := 90; y < 200; y++ {
+		if !near(img.At(20, y), pal.Surface, 2) {
+			y0 = y
+			break
+		}
+	}
+	inkIn := func(x0 int) int {
+		n := 0
+		for y := y0 + tile/2; y < y0+tile; y++ {
+			for x := x0 + tile/2; x < x0+tile; x++ {
+				if near(img.At(x, y), pal.Ink, 6) {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	if n := inkIn(14); n < 40 {
+		t.Errorf("the playing tile's bottom right has %d ink pixels: no ▶ badge", n)
+	}
+	if n := inkIn(14 + tile + 12); n != 0 {
+		t.Errorf("the next tile has %d ink pixels in its corner", n)
+	}
 }

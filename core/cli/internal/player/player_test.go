@@ -322,8 +322,8 @@ func TestPositionPauseAndSeek(t *testing.T) {
 func TestPlayRefusesWhatItCannotPlay(t *testing.T) {
 	p := newWith(&fakeDevice{voices: make(chan *fakeVoice, 4)})
 	dir := t.TempDir()
-	if err := p.Play(filepath.Join(dir, "gone.flac")); err == nil {
-		t.Error("a missing file played")
+	if err := p.Play(filepath.Join(dir, "gone.flac")); !errors.Is(err, ErrMissing) || !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a missing file: %v, want ErrMissing", err)
 	}
 	m4a := filepath.Join(dir, "x.m4a")
 	_ = os.WriteFile(m4a, []byte("x"), 0o644)

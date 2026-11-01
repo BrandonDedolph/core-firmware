@@ -532,6 +532,7 @@ func (u *UI) tileArt(gtx C, a Album) D {
 			clip.Rect{Max: sz}.Op())
 	}
 	u.badge(gtx, a, sz)
+	u.playingBadge(gtx, a, sz)
 	return D{Size: sz}
 }
 

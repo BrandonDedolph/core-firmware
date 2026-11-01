@@ -5,6 +5,17 @@ the boot screen and Settings → About show the one the device runs.
 The desktop app and the `core` CLI have their own changelog at
 [core/cli/CHANGELOG.md](core/cli/CHANGELOG.md) and their own `app-v…` tags.
 
+## v0.2.2 — 2026-11-01
+
+- **The playing track's bars stop when the music does.** The three bouncing
+  bars beside the playing track, in an album's tracklist and in the queue,
+  kept bouncing through a pause because they were keyed on "a track is
+  loaded" rather than "a track is playing". They now keep their own clock,
+  which stands still while the player is paused, so a pause freezes them
+  mid-bounce and a resume carries on from the same shape. The desktop app's
+  bars behave the same way since app-v0.3.0. Nothing else on the device
+  changed.
+
 ## v0.2.1 — 2026-10-31
 
 - **Smoother list rows.** The selection bar's corners are anti-aliased instead

@@ -1552,6 +1552,31 @@ static int nowplaying_bar_h(uint32_t t_ms, int phase)
     return 3 + (tri * 6) / 380;                          /* 3..9 px               */
 }
 
+/* The bars' own clock: the USEC_TIMER less every pause so far. While the
+ * player is paused it stands still, so the bars freeze mid-bounce and carry
+ * on from the same shape when the music does — the owner's rule, "the bars
+ * should only be moving if music is actually playing", which the desktop app
+ * follows too (its NowPlaying.BarsPausedAt). Before this they were keyed on
+ * player_active(), which stays 1 across a pause, so a paused track's bars
+ * kept bouncing. Self-contained: every caller reads the time through here. */
+static uint32_t bars_clock(void)
+{
+    static uint32_t hold_us, pause_at;
+    static int      was_paused;
+    uint32_t now = mmio_read32(USEC_TIMER_ADDR);
+    int paused = player_paused();
+    if (paused) {
+        if (!was_paused) pause_at = now;
+        was_paused = 1;
+        return pause_at - hold_us;
+    }
+    if (was_paused) {
+        hold_us += now - pause_at;
+        was_paused = 0;
+    }
+    return now - hold_us;
+}
+
 static void nowplaying_bars(int x, int y, uint16_t c, uint32_t t_us)
 {
     uint32_t ms = t_us / 1000u;
@@ -1594,7 +1619,7 @@ static void detail_row_draw(int r, int vi)
     const char *playing = player_active() ? player_track_name() : 0;
     if (playing && name_eq_ci(e->name, playing)) {
         nowplaying_bars(15, ry + 6, is_sel ? LINEN_SEL_FG : LINEN_INK,
-                        mmio_read32(USEC_TIMER_ADDR));
+                        bars_clock());
     } else {
         char num[6];
         u32_to_dec(num, (unsigned)(g_track_num[idx] ? g_track_num[idx]
@@ -3329,7 +3354,7 @@ static void queue_row_draw(int r, int idx)
         int ry = LIST_Y0 + r * ROW_H;
         nowplaying_bars(LCD_WIDTH - 22, ry + 7,
                         is_sel ? LINEN_SEL_FG : LINEN_INK,
-                        mmio_read32(USEC_TIMER_ADDR));
+                        bars_clock());
     }
 }
 
@@ -10257,9 +10282,11 @@ _Noreturn static void run_ui(fat32_t *fs)
 
         /* Animate the now-playing 3-bar indicator in the album detail: redraw
          * only its ~10px box and partial-present just that, ~9fps. A tiny pixel
-         * push (unlike a full repaint) so it can't starve the audio DMA. */
+         * push (unlike a full repaint) so it can't starve the audio DMA. Not
+         * while paused: the bars stand still (bars_clock) and nothing need be
+         * pushed. */
         if (bl_state != BL_OFF && scr_cur() == SCR_BROWSER && g_dir_depth > 0
-            && player_active()) {
+            && player_active() && !player_paused()) {
             uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
             if ((uint32_t)(nowb - last_bars) >= 110000u) {
                 int sv = 0;
@@ -10278,7 +10305,8 @@ _Noreturn static void run_ui(fat32_t *fs)
                     int is_sel = (v == g_det_sel);
                     console_fill_rect(15, ry + 6, NP_BARS_W, NP_BARS_H,
                                       is_sel ? LINEN_SEL_BG : LINEN_SURFACE);
-                    nowplaying_bars(15, ry + 6, is_sel ? LINEN_SEL_FG : LINEN_INK, nowb);
+                    nowplaying_bars(15, ry + 6, is_sel ? LINEN_SEL_FG : LINEN_INK,
+                                    bars_clock());
                     lcd_present_rect(console_framebuffer(),
                                      15, ry + 6, NP_BARS_W + 1, NP_BARS_H);
                     break;
@@ -10288,7 +10316,8 @@ _Noreturn static void run_ui(fat32_t *fs)
         }
 
         /* Same animated bars on the queue view (the currently-playing row). */
-        if (bl_state != BL_OFF && scr_cur() == SCR_QUEUE && player_active()) {
+        if (bl_state != BL_OFF && scr_cur() == SCR_QUEUE && player_active()
+            && !player_paused()) {
             uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
             if ((uint32_t)(nowb - last_bars) >= 110000u) {
                 int n = player_queue_len();
@@ -10301,7 +10330,8 @@ _Noreturn static void run_ui(fat32_t *fs)
                     int is_sel = (cur == g_queue_sel);
                     console_fill_rect(bx, by, NP_BARS_W, NP_BARS_H,
                                       is_sel ? LINEN_SEL_BG : LINEN_SURFACE);
-                    nowplaying_bars(bx, by, is_sel ? LINEN_SEL_FG : LINEN_INK, nowb);
+                    nowplaying_bars(bx, by, is_sel ? LINEN_SEL_FG : LINEN_INK,
+                                    bars_clock());
                     lcd_present_rect(console_framebuffer(),
                                      bx, by, NP_BARS_W + 1, NP_BARS_H);
                 }

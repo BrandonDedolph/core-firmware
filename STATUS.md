@@ -3,7 +3,22 @@
 The README is the canonical public story; this doc is the running list of
 what works, what doesn't, and what to pick up next.
 
-## 2026-10-31 — list rows: smooth bar corners, a drawn chevron, caps centred — UNFLASHED
+## 2026-11-01 — the now-playing bars stop when paused — UNFLASHED
+
+`nowplaying_bars()` was fed the raw USEC_TIMER wherever it was drawn, and its
+repaint tick was gated on `player_active()`, which stays 1 across a pause, so a
+paused track's bars kept bouncing. The owner's rule (set first for the desktop
+app the same night): "the bars should only be moving if music is actually
+playing". `bars_clock()` in main.c is now the only time the bars read — the
+USEC_TIMER less every pause so far, standing still while `player_paused()` —
+and the two repaint ticks (album detail, queue) skip while paused. Also:
+`tests/scripts/check_version_marker.sh` now describes `--match 'v[0-9]*'`, the
+one `git describe` the version split (app-v… tags on the same history) had
+missed; it failed `make verify-hw` the moment app-v0.3.0 was tagged. Bench: pause
+on the album detail and on the queue — the bars must freeze where they are and
+resume from there; nothing else moved.
+
+
 
 Three things about the list row, all measured on the host through the real
 `ui/chrome.c` (the `render_rows` harness in the session scratchpad draws a

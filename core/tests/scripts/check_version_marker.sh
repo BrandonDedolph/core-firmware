@@ -19,7 +19,9 @@
 #   1. EXACTLY ONE marker in the flat image. Zero = the linker collected it.
 #      More than one = a second definition crept in and the host would have to
 #      guess which is the running version.
-#   2. The <tag> half equals `git describe --tags --abbrev=0` — the same
+#   2. The <tag> half equals `git describe --tags --abbrev=0 --match 'v[0-9]*'`
+#      (the FIRMWARE's nearest tag: the app has its own `app-v…` tags on the
+#      same history and must never be mistaken for it) — the same
 #      command meson's vcs_tag runs for CORE_VERSION — so a stale build
 #      directory cannot ship an image that claims the wrong release. Skipped
 #      (not failed) outside a git checkout, in a tree with no tags, or without
@@ -71,7 +73,7 @@ fi
 
 expected=''
 if command -v git >/dev/null 2>&1; then
-    expected=$(git -C "$(dirname -- "$0")" describe --tags --abbrev=0 2>/dev/null || true)
+    expected=$(git -C "$(dirname -- "$0")" describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
 fi
 
 if [ -z "$expected" ]; then
@@ -81,7 +83,7 @@ if [ -z "$expected" ]; then
 fi
 
 if [ "$version" != "$expected" ]; then
-    printf 'FAIL: marker says version %s, `git describe --tags --abbrev=0` says %s\n' \
+    printf 'FAIL: marker says version %s, the nearest firmware tag (`git describe --match v*`) is %s\n' \
            "$version" "$expected" >&2
     printf '  stale build directory? re-run `ninja -C build-hw` so vcs_tag re-stamps CORE_VERSION\n' >&2
     exit 1

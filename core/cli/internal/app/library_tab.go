@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -157,12 +156,7 @@ func (u *UI) canFix() bool {
 	if u.st.DiscFolders && len(DiscMoves(rep)) > 0 {
 		return true
 	}
-	for _, d := range u.st.ArtChoices {
-		if !d.Skip {
-			return true
-		}
-	}
-	return false
+	return len(u.choices().Art) > 0
 }
 
 // costLine is decision 7 on screen: a rename is a re-copy, because the
@@ -175,7 +169,16 @@ func (u *UI) costLine() string {
 	if rep == nil {
 		return "A scan says what would change, and what it would cost to sync."
 	}
-	if rep.RecopyTracks == 0 && rep.NewTracks == 0 {
+	// A cover written into a file changes the file, and the sync copies
+	// a changed file again: the albums getting a cover (new or larger)
+	// are part of the cost too.
+	covers := 0
+	for key := range u.choices().Art {
+		if a, ok := rep.Album(key); ok {
+			covers += a.Tracks
+		}
+	}
+	if rep.RecopyTracks == 0 && rep.NewTracks == 0 && covers == 0 {
 		return "Nothing here changes what the next sync copies."
 	}
 	line := fmt.Sprintf("%d track%s will be re-copied to the iPod on the next sync (%s)",
@@ -184,7 +187,19 @@ func (u *UI) costLine() string {
 		line += fmt.Sprintf(", and %d for the first time (%s)",
 			rep.NewTracks, proseSize(rep.NewBytes))
 	}
+	if covers > 0 {
+		line += fmt.Sprintf(", plus the %d track%s of the albums getting a cover", covers, plural(covers))
+	}
 	return line + "."
+}
+
+// catSub is a row's sub line. The low-resolution row names the line the
+// report was measured against, which config.json can move.
+func (u *UI) catSub(c Category) string {
+	if c == CatLowRes && u.st.Report != nil && u.st.Report.MinArtPx > 0 {
+		return lowResSub(u.st.Report.MinArtPx)
+	}
+	return c.Sub()
 }
 
 // proseSize is a size inside a sentence: ONE number, in the unit a person
@@ -237,7 +252,7 @@ func (u *UI) problemRow(gtx C, c Category, n int) D {
 								layout.Flexed(1, func(gtx C) D {
 									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 										layout.Rigid(u.line(13, u.pal.Ink, c.Title())),
-										layout.Rigid(u.line(11, u.pal.Muted, c.Sub())),
+										layout.Rigid(u.wrapN(11, u.pal.Muted, u.catSub(c), 2)),
 									)
 								}),
 								layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
@@ -263,6 +278,8 @@ func (u *UI) tickOrDot(gtx C, c Category, n int) D {
 		b = &u.organizeTick
 	case CatDiscs:
 		b = &u.discTick
+	case CatLowRes:
+		b = &u.lowResTick
 	}
 	if b == nil || n == 0 {
 		size := gtx.Dp(14)
@@ -344,6 +361,41 @@ func (u *UI) previewContent() []layout.Widget {
 			a := rep.MissingArt[i]
 			idx := i
 			add(func(gtx C) D { return u.artRow(gtx, a, idx) })
+		}
+	case CatLowRes:
+		add(u.wrap(11, u.pal.Muted, "The cover each album has now, beside the one found for it. A cover "+
+			"is only offered when it is larger; the one it replaces is kept, and Undo puts it back."))
+		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
+		if len(rep.LowResArt) == 0 {
+			add(u.line(12, u.pal.Muted2, "Every cover is at least this size."))
+			break
+		}
+		if !u.looked() {
+			add(func(gtx C) D {
+				return u.buttonRow(gtx, btn{&u.artFindBtn, "Look for larger covers", true, !u.st.Busy()})
+			})
+			add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
+		}
+		u.ensureLowButtons(len(rep.LowResArt))
+		for i := range rep.LowResArt {
+			a := rep.LowResArt[i]
+			idx := i
+			add(func(gtx C) D { return u.lowResRow(gtx, a, idx) })
+		}
+	case CatDuplicates:
+		add(u.wrap(11, u.pal.Muted, "The same songs in two album folders, so the iPod has them twice. "+
+			"Nothing here is changed by Fix all: keep one, and the other folder goes to "+
+			librarian.TrashName+" beside your music folder, where Undo can bring it back."))
+		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
+		if len(rep.Duplicates) == 0 {
+			add(u.line(12, u.pal.Muted2, "No album is in two folders."))
+			break
+		}
+		u.ensureDupButtons(len(rep.Duplicates))
+		for i := range rep.Duplicates {
+			g := rep.Duplicates[i]
+			idx := i
+			add(func(gtx C) D { return u.dupGroup(gtx, g, idx) })
 		}
 	case CatAttention:
 		add(u.wrap(11, u.pal.Muted, "These are never changed automatically: the tags do not say "+
@@ -474,6 +526,8 @@ func candLine(cands []artfetch.Candidate, dec librarian.Decision, decided bool) 
 // provider id and the match score are the log's (see drain).
 func providerWords(id string) string {
 	switch id {
+	case librarian.ProviderFile:
+		return "the cover file already in the album's folder"
 	case "itunes":
 		return "found on iTunes"
 	case "musicbrainz":
@@ -492,10 +546,10 @@ func (u *UI) candThumb(gtx C, cands []artfetch.Candidate) D {
 	sz := image.Pt(size, size)
 	defer clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(3)).Push(gtx.Ops).Pop()
 	paint.FillShape(gtx.Ops, u.pal.Trk, clip.Rect{Max: sz}.Op())
-	if len(cands) == 0 || cands[0].ThumbURL == "" {
+	if len(cands) == 0 || (cands[0].ThumbURL == "" && cands[0].Provider != librarian.ProviderFile) {
 		return D{Size: sz}
 	}
-	if img, ok := u.artThumbs.get(cands[0].ThumbURL, time.Time{}); ok {
+	if img, ok := u.candImage(cands[0]); ok {
 		if b := img.Size(); b.X > 0 && b.Y > 0 {
 			s := float32(size) / float32(b.X)
 			if sy := float32(size) / float32(b.Y); sy > s {
@@ -524,11 +578,14 @@ func (u *UI) ensureArtButtons(n int) {
 // changes and jobs. Everything that writes goes through the Runner; the
 // decisions themselves are model edits on the UI goroutine.
 func (u *UI) libraryEvents(gtx C, busy bool) {
-	for i, c := range Categories {
-		if u.catClicks[i].Clicked(gtx) {
+	for _, c := range Categories {
+		if u.catClicks[c].Clicked(gtx) {
 			u.st.Category = c
 			u.st.Tab = TabLibrary
 		}
+	}
+	if u.lowResTick.Update(gtx) {
+		u.st.FixLowRes = u.lowResTick.Value
 	}
 	if u.namesTick.Update(gtx) {
 		u.st.FixNames = u.namesTick.Value
@@ -578,6 +635,8 @@ func (u *UI) libraryEvents(gtx C, busy bool) {
 			u.setChoice(key, librarian.Skip())
 		}
 	}
+	u.lowResEvents(gtx)
+	u.dupEvents(gtx)
 }
 
 // setChoice records one album's art decision.
@@ -601,6 +660,9 @@ func (u *UI) choices() librarian.Choices {
 	for k, d := range u.st.ArtChoices {
 		if d.Skip {
 			continue
+		}
+		if _, low := u.st.Report.LowRes(k); low && !u.st.FixLowRes {
+			continue // the row is unticked
 		}
 		if ch.Art == nil {
 			ch.Art = map[librarian.AlbumKey]librarian.Decision{}
@@ -629,8 +691,19 @@ func (u *UI) fixSummary() string {
 	if n := CatDiscs.Count(rep); n > 0 && ch.DiscFolders {
 		parts = append(parts, fmt.Sprintf("%d track(s) split into Disc N folders", n))
 	}
-	if n := len(ch.Art); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d cover(s) downloaded and written into the FLACs", n))
+	added, replaced := 0, 0
+	for key := range ch.Art {
+		if _, low := rep.LowRes(key); low {
+			replaced++
+		} else {
+			added++
+		}
+	}
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("%d cover(s) downloaded and written into the FLACs", added))
+	}
+	if replaced > 0 {
+		parts = append(parts, fmt.Sprintf("%d small cover(s) replaced with larger ones (Undo puts them back)", replaced))
 	}
 	if len(parts) == 0 {
 		return "Nothing is ticked."
@@ -683,6 +756,12 @@ func (u *UI) logReport(r *librarian.Report) {
 		len(r.NeedsAttention))
 	for _, a := range r.MissingArt {
 		u.st.Logf("  no cover   %s — %s", a.Artist, a.Album)
+	}
+	for _, a := range r.LowResArt {
+		u.st.Logf("  small art  %s — %s, %s", a.Artist, a.Album, a.Size())
+	}
+	for _, g := range r.Duplicates {
+		u.st.Logf("  duplicate  %s", g.Why)
 	}
 	for _, group := range [][]organizer.Move{TrackMoves(r.Misnamed), TrackMoves(FolderMoves(r)), DiscMoves(r)} {
 		for _, m := range group {

@@ -10,7 +10,15 @@ import (
 	"strings"
 
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/artfetch"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/coreart"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flac"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/organizer"
+)
+
+// The two sidecar names, as coreart writes them.
+const (
+	coreartArt   = coreart.ArtName
+	coreartThumb = coreart.ThumbName
 )
 
 // DefaultMinScore is the bar an unattended accept clears: artist and album
@@ -56,8 +64,8 @@ type Choices struct {
 	// where the apply order lives. Fix says so rather than quietly doing
 	// nothing.
 	DiscFolders bool
-	// Art is one decision per album key from Report.MissingArt. An album
-	// with no entry is skipped.
+	// Art is one decision per album key from Report.MissingArt or
+	// Report.LowResArt. An album with no entry is skipped.
 	Art map[AlbumKey]Decision
 }
 
@@ -105,10 +113,18 @@ type Result struct {
 	// files that changed folder.
 	Renamed int `json:"renamed"`
 	Moved   int `json:"moved"`
-	// ArtWritten is the number of albums whose cover was embedded.
+	// ArtWritten is the number of albums whose cover was embedded,
+	// replacements included.
 	ArtWritten int `json:"art_written"`
-	// Skipped is the number of coverless albums the choices did not accept.
+	// Replaced are the low-resolution covers that were replaced, with the
+	// sizes before and after.
+	Replaced []Replacement `json:"replaced,omitempty"`
+	// Skipped is the number of coverless or low-resolution albums the
+	// choices did not accept.
 	Skipped int `json:"skipped"`
+	// Trashed is the number of album folders RemoveDuplicate moved to the
+	// trash.
+	Trashed int `json:"trashed,omitempty"`
 	// Failures are the albums the art phase could not finish.
 	Failures []Failure `json:"failures,omitempty"`
 	// Deferred are moves that were ticked but cannot run yet, because the
@@ -120,8 +136,51 @@ type Result struct {
 	DryRun bool `json:"dry_run"`
 }
 
-// Candidates is the network step: for every album in the report with no cover,
-// ask the providers and keep the ranked matches.
+// Replacement is one low-resolution cover and what replaced it.
+type Replacement struct {
+	Album AlbumKey `json:"album"`
+	// From and To are "300×300" and "1200×1200"; To is "" in a dry run
+	// whose candidate has not been fetched.
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Source is the folder's cover file the new one came from
+	// ("cover.jpg"), or "" for a download.
+	Source string `json:"source,omitempty"`
+}
+
+// String is the report line: "replaced 300×300 → 1200×1200", or, from the
+// album's own file, "replaced embedded 500×500 → cover.jpg 1400×1400".
+func (r Replacement) String() string {
+	to := r.To
+	if to == "" {
+		to = "a larger cover"
+	}
+	if r.Source != "" {
+		return "replaced embedded " + r.From + " → " + r.Source + " " + to
+	}
+	if r.To == "" {
+		return "replaced " + r.From + " with a larger cover"
+	}
+	return "replaced " + r.From + " → " + r.To
+}
+
+func sourceName(c artfetch.Candidate) string {
+	if c.Provider == ProviderFile {
+		return filepath.Base(c.FullURL)
+	}
+	return ""
+}
+
+// Candidates is the network step: for every album in the report with no
+// cover, or with a cover below the report's MinArtPx, ask the providers and
+// keep the ranked matches.
+//
+// A low-resolution album only keeps candidates that are LARGER than what it
+// has, on the shorter side, and the only way to know a picture's size is to
+// fetch it: so for those albums the top few candidates are downloaded here
+// (into artfetch's cache, where Fix finds them again), measured, and the
+// ones that are not bigger are dropped. Each kept candidate carries its real
+// Width and Height for the screen that shows the two side by side.
 //
 // It is separate from Inspect because it is the slow, cancellable, failable
 // part — an inspect of a thousand albums must not wait on iTunes, and a user
@@ -138,15 +197,31 @@ func Candidates(ctx context.Context, r *Report, art ArtClient, o Options) (map[A
 	if art == nil {
 		art = o.Art
 	}
-	if art == nil {
-		return nil, errors.New("fix: no cover-art client")
+	// The album's own cover file comes first, and an album that has a
+	// usable one never reaches the network.
+	out := LocalCandidates(r)
+	var targets []AlbumRef
+	for _, a := range r.MissingArt {
+		if _, ok := out[a.Key]; !ok {
+			targets = append(targets, a)
+		}
 	}
-	out := map[AlbumKey][]artfetch.Candidate{}
-	for i, a := range r.MissingArt {
+	for _, a := range r.LowResArt {
+		if _, ok := out[a.Key]; !ok {
+			targets = append(targets, a.AlbumRef)
+		}
+	}
+	for key, c := range out {
+		o.log(JobArt, "%s: the folder's own %s (%s), no lookup needed", key, c[0].ID, dims(c[0].Width, c[0].Height))
+	}
+	if len(targets) > 0 && art == nil {
+		return out, errors.New("fix: no cover-art client")
+	}
+	for i, a := range targets {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		o.progress(JobArt, "looking for "+describe(a), i, len(r.MissingArt))
+		o.progress(JobArt, "looking for "+describe(a), i, len(targets))
 		cands, err := art.Find(ctx, artfetch.Query{Artist: a.Artist, Album: a.Album})
 		switch {
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -160,11 +235,69 @@ func Candidates(ctx context.Context, r *Report, art ArtClient, o Options) (map[A
 		case len(cands) == 0:
 			continue
 		}
+		if low, ok := r.LowRes(a.Key); ok {
+			cands, err = largerOnly(ctx, art, low, cands, o)
+			if err != nil {
+				return out, err
+			}
+			if len(cands) == 0 {
+				continue
+			}
+		}
 		out[a.Key] = cands
 		o.log(JobArt, "%s: %s", describe(a), cands[0])
 	}
-	o.progress(JobArt, "", len(r.MissingArt), len(r.MissingArt))
+	o.progress(JobArt, "", len(targets), len(targets))
 	return out, nil
+}
+
+// largerTries is how many candidates of one low-resolution album are fetched
+// to find a bigger cover. The list is sorted best match first, so the first
+// one nearly always settles it; three is room for an iTunes match whose
+// 1200 px original does not exist.
+const largerTries = 3
+
+// largerOnly fetches the top candidates of a low-resolution album, records
+// each one's real size, and keeps only those larger than the album's cover.
+func largerOnly(ctx context.Context, art ArtClient, low ArtRef, cands []artfetch.Candidate,
+	o Options) ([]artfetch.Candidate, error) {
+	var keep []artfetch.Candidate
+	best := ""
+	for i := range cands {
+		if i >= largerTries {
+			break
+		}
+		c := cands[i]
+		data, _, err := art.Fetch(ctx, c)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return keep, err
+		}
+		if err != nil {
+			o.log(JobArt, "%s: %v", describe(low.AlbumRef), err)
+			continue
+		}
+		w, h, err := artfetch.ImageSize(data)
+		if err != nil {
+			continue
+		}
+		c.Width, c.Height = w, h
+		if min(w, h) <= low.Short() {
+			if best == "" {
+				best = dims(w, h)
+			}
+			continue
+		}
+		keep = append(keep, c)
+	}
+	if len(keep) == 0 {
+		if best != "" {
+			o.log(JobArt, "%s: no larger cover than its %s (the best found is %s)",
+				describe(low.AlbumRef), low.Size(), best)
+		} else {
+			o.log(JobArt, "%s: no larger cover than its %s found", describe(low.AlbumRef), low.Size())
+		}
+	}
+	return keep, nil
 }
 
 func describe(a AlbumRef) string {
@@ -212,7 +345,19 @@ func Fix(ctx context.Context, r *Report, ch Choices, o Options) (*Result, error)
 			rel(r.Root, m.From), rel(r.Root, m.To))
 	}
 
-	covered, err := embedArt(ctx, r, ch, o, res)
+	// The librarian journal is made only when a cover is REPLACED (or,
+	// via RemoveDuplicate, an album is trashed); a Fix of renames alone
+	// keeps handing back organizer's journal, as it always has.
+	var fj *fixJournal
+	defer func() {
+		if fj != nil {
+			res.Journal = fj.Path
+			_ = fj.write()
+			fj.close()
+		}
+	}()
+
+	covered, err := embedArt(ctx, r, ch, o, res, &fj)
 	if err != nil {
 		return res, err
 	}
@@ -239,6 +384,10 @@ func Fix(ctx context.Context, r *Report, ch Choices, o Options) (*Result, error)
 			})
 			if j != nil {
 				res.Journal = j.Path
+				if fj != nil && j.Path != "" {
+					fj.Moves = j.Path
+					_ = fj.write()
+				}
 				moved = journalMoves(j)
 				for _, op := range j.Ops {
 					if op.Done {
@@ -254,7 +403,7 @@ func Fix(ctx context.Context, r *Report, ch Choices, o Options) (*Result, error)
 		}
 	}
 
-	writeSidecars(r, covered, moved, o, res)
+	writeSidecars(r, covered, moved, o, res, fj)
 	return res, nil
 }
 
@@ -265,7 +414,8 @@ func Fix(ctx context.Context, r *Report, ch Choices, o Options) (*Result, error)
 // the loop carries on; the one error it returns is a cancelled context or a
 // missing client, which are about the job, not about an album. It returns the
 // albums whose tracks now carry a cover, for the sidecar phase.
-func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result) ([]AlbumRef, error) {
+func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result,
+	fj **fixJournal) ([]AlbumRef, error) {
 	accepted := make([]AlbumKey, 0, len(ch.Art))
 	for key, d := range ch.Art {
 		if d.Skip {
@@ -274,7 +424,7 @@ func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result
 		accepted = append(accepted, key)
 	}
 	sort.Slice(accepted, func(i, j int) bool { return accepted[i] < accepted[j] })
-	res.Skipped = len(r.MissingArt) - len(accepted)
+	res.Skipped = len(r.MissingArt) + len(r.LowResArt) - len(accepted)
 	if res.Skipped < 0 {
 		res.Skipped = 0
 	}
@@ -283,7 +433,11 @@ func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result
 	}
 	art := o.Art
 	if art == nil && !o.DryRun {
-		return nil, errors.New("fix: art was accepted but there is no cover-art client to fetch it with")
+		for _, key := range accepted {
+			if ch.Art[key].Candidate.Provider != ProviderFile {
+				return nil, errors.New("fix: art was accepted but there is no cover-art client to fetch it with")
+			}
+		}
 	}
 
 	writePic := o.writePicture()
@@ -299,23 +453,75 @@ func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result
 			continue
 		}
 		cand := ch.Art[key].Candidate
+		low, isLow := r.LowRes(key)
 		o.progress(JobFix, "cover for "+describe(a), i, len(accepted))
 
 		if o.DryRun {
-			o.log(JobFix, "%s: would embed %s into %d file(s) and render the sidecars (dry run)",
-				key, cand, len(a.Files))
+			if isLow {
+				rp := Replacement{Album: key, From: low.Size(), Source: sourceName(cand)}
+				if cand.Width > 0 && cand.Height > 0 {
+					rp.To = dims(cand.Width, cand.Height)
+				}
+				res.Replaced = append(res.Replaced, rp)
+				o.log(JobFix, "%s: would have %s, %s (dry run)", key, cand, rp)
+			} else {
+				o.log(JobFix, "%s: would embed %s into %d file(s) and render the sidecars (dry run)",
+					key, cand, len(a.Files))
+			}
 			res.ArtWritten++
 			covered = append(covered, a)
 			continue
 		}
 
-		data, mime, err := art.Fetch(ctx, cand)
+		var (
+			data []byte
+			mime string
+			err  error
+		)
+		if cand.Provider == ProviderFile {
+			data, mime, err = readLocal(cand)
+		} else {
+			data, mime, err = art.Fetch(ctx, cand)
+		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return covered, err
 			}
 			res.Failures = append(res.Failures, Failure{Album: key, Reason: err.Error()})
 			o.log(JobFix, "%s: %v", key, err)
+			continue
+		}
+		if isLow {
+			// The rule that makes a replacement a replacement: the new
+			// cover is bigger than the old one on its shorter side, or
+			// the album keeps what it has. Measured on the bytes that
+			// would be written, not on what the provider claimed.
+			w, h, err := artfetch.ImageSize(data)
+			if err == nil && min(w, h) <= low.Short() {
+				err = fmt.Errorf("the cover found is %s, %w (%s); kept", dims(w, h), errNotLarger, low.Size())
+			}
+			if err != nil {
+				res.Failures = append(res.Failures, Failure{Album: key, Reason: err.Error()})
+				o.log(JobFix, "%s: %v", key, err)
+				continue
+			}
+			if *fj == nil {
+				j, err := newFixJournal(r.Root, o)
+				if err != nil {
+					return covered, err
+				}
+				*fj = j
+			}
+			if err := replace(*fj, key, a, data, mime, writePic, o.meta()); err != nil {
+				res.Failures = append(res.Failures, Failure{Album: key, Path: a.Dir, Reason: err.Error()})
+				o.log(JobFix, "%s: %v", key, err)
+				continue
+			}
+			rp := Replacement{Album: key, From: low.Size(), To: dims(w, h), Source: sourceName(cand)}
+			res.Replaced = append(res.Replaced, rp)
+			res.ArtWritten++
+			covered = append(covered, a)
+			o.log(JobFix, "%s: %s (%s) in %d file(s)", key, rp, cand, len(a.Files))
 			continue
 		}
 		if err := embed(a.FirstFLAC, a.Files, data, mime, writePic); err != nil {
@@ -339,7 +545,8 @@ func embedArt(ctx context.Context, r *Report, ch Choices, o Options, res *Result
 // over from the fetch: holding every accepted cover in memory until the end of
 // the job is 400 KB an album, and a thousand-album library would be a fifth of
 // a gigabyte of JPEG kept alive for two file writes.
-func writeSidecars(r *Report, covered []AlbumRef, moved map[string]string, o Options, res *Result) {
+func writeSidecars(r *Report, covered []AlbumRef, moved map[string]string, o Options, res *Result,
+	fj *fixJournal) {
 	if len(covered) == 0 {
 		return
 	}
@@ -363,15 +570,33 @@ func writeSidecars(r *Report, covered []AlbumRef, moved map[string]string, o Opt
 				Reason: "the cover is not in the file it was just written to"})
 			continue
 		}
+		// A replacement writes OVER the album's old sidecars, so what
+		// they were goes into the journal first; Undo puts them back.
+		var ops []int
+		if _, low := r.LowRes(a.Key); low && fj != nil {
+			var err error
+			if ops, err = fj.snapshot(a.Key, []string{
+				filepath.Join(dir, coreartArt), filepath.Join(dir, coreartThumb),
+				filepath.Join(dir, coverName(pic.MIME)),
+			}); err != nil {
+				res.Failures = append(res.Failures, Failure{Album: a.Key, Path: dir,
+					Reason: "the cover is embedded but the old sidecars could not be kept for an undo, " +
+						"so they were left as they are: " + err.Error()})
+				continue
+			}
+		}
 		if err := write(dir, m); err != nil {
 			res.Failures = append(res.Failures, Failure{Album: a.Key, Path: dir,
 				Reason: "the cover is embedded but the sidecars could not be rendered: " + err.Error()})
+			fj.stamp(ops)
 			continue
 		}
 		if err := os.WriteFile(filepath.Join(dir, coverName(pic.MIME)), pic.Data, 0o644); err != nil {
 			res.Failures = append(res.Failures, Failure{Album: a.Key, Path: dir, Reason: err.Error()})
+			fj.stamp(ops)
 			continue
 		}
+		fj.stamp(ops)
 		o.log(JobFix, "%s: folder.art + folder.thm + %s in %s",
 			a.Key, coverName(pic.MIME), rel(r.Root, dir))
 	}
@@ -405,33 +630,67 @@ func embed(src string, files []string, data []byte, mime string,
 	return nil
 }
 
+// replace is embed for a low-resolution album: the same order (the art
+// source last), with each file's old front cover kept beside the journal and
+// recorded BEFORE the new one is written, and the file's new size and mtime
+// recorded after — what Undo checks before it puts the old one back.
+func replace(j *fixJournal, key AlbumKey, a AlbumRef, data []byte, mime string,
+	writePic func(string, []byte, string) error, read func(string) (*flac.Meta, error)) error {
+	order := make([]string, 0, len(a.Files))
+	for _, f := range a.Files {
+		if f != a.FirstFLAC {
+			order = append(order, f)
+		}
+	}
+	order = append(order, a.FirstFLAC)
+	for i, f := range order {
+		op := pictureOp{Album: key, Path: f}
+		m, err := read(f)
+		if err != nil {
+			return fmt.Errorf("%s: %w (%d of %d file(s) were written)", filepath.Base(f), err, i, len(order))
+		}
+		for _, p := range m.Pictures {
+			if p.Type == flac.PictureTypeFrontCover {
+				name, err := j.keep(p.Data, extFor(p.MIME))
+				if err != nil {
+					return fmt.Errorf("keeping the old cover of %s for an undo: %w", filepath.Base(f), err)
+				}
+				op.Before, op.BeforeMIME = name, p.MIME
+				break
+			}
+		}
+		j.Pictures = append(j.Pictures, op)
+		if err := j.write(); err != nil {
+			return err
+		}
+		if err := writePic(f, data, mime); err != nil {
+			return fmt.Errorf("%s: %w (%d of %d file(s) were written)", filepath.Base(f), err, i, len(order))
+		}
+		last := &j.Pictures[len(j.Pictures)-1]
+		last.Size, last.MTimeNS, _ = stampOf(f)
+		last.Done = true
+		if err := j.write(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func extFor(mime string) string {
+	switch strings.ToLower(mime) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	}
+	return ".bin"
+}
+
 func coverName(mime string) string {
 	if strings.EqualFold(mime, "image/png") {
 		return "cover.png"
 	}
 	return "cover.jpg"
-}
-
-// Undo puts the renames of one Fix back. It is organizer.Undo: every file must
-// still be where the journal put it, with the size and mtime it had, and
-// anything else is left alone and listed.
-//
-// Embedded art is NOT undone. The pre-image of the FLAC is not kept — a 25 MB
-// copy per track to make a cover reversible is not a trade this program makes
-// — so a cover a Fix embedded stays embedded. flac.RemovePictures takes one
-// out again by hand.
-func Undo(ctx context.Context, journalPath string, o Options) (*organizer.UndoReport, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return organizer.Undo(ctx, journalPath, organizer.Options{
-		JournalDir: o.JournalDir,
-		Progress: func(e organizer.Event) {
-			if e.Phase == "undo" {
-				o.progress(JobFix, e.Album, e.Done, e.Total)
-			}
-		},
-	})
 }
 
 // ------------------------------------------------------------ the moves

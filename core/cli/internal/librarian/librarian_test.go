@@ -31,17 +31,18 @@ import (
 
 // --- fixtures ---------------------------------------------------------------
 
-// smallPNG is a picture for a file that already HAS art. It never has to be
-// decoded (Inspect only asks whether a front cover is there), but it is a real
-// PNG anyway, so a test that starts decoding it does not fail for the wrong
-// reason.
-func smallPNG(t *testing.T) []byte {
+// smallPNG is a picture for a file that already HAS art. It is 640 px a side —
+// over DefaultMinArtPx, so a fixture album with it is "has a cover", not "has
+// a small cover" — and one flat colour, so it is a few hundred bytes anyway.
+func smallPNG(t *testing.T) []byte { return pngSquare(t, 640) }
+
+// pngSquare is a flat-colour PNG of the given size: what the low-resolution
+// tests embed, at 300 and 1200.
+func pngSquare(t *testing.T, size int) []byte {
 	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
-			img.Set(x, y, color.RGBA{R: uint8(x * 31), G: uint8(y * 31), B: 0x40, A: 0xFF})
-		}
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	for i := range img.Pix {
+		img.Pix[i] = 0x80
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

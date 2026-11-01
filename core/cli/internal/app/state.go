@@ -57,6 +57,9 @@ const (
 	JobArt
 	JobFix
 	JobUndoFix
+	// JobKeepAlbum is "Keep this one" on a duplicate pair: the other
+	// album's folder goes to the trash.
+	JobKeepAlbum
 )
 
 // String is the label shown in the status line and written into the
@@ -93,6 +96,8 @@ func (k JobKind) String() string {
 		return "library fix"
 	case JobUndoFix:
 		return "undo"
+	case JobKeepAlbum:
+		return "removing a duplicate album"
 	default:
 		return "idle"
 	}
@@ -394,6 +399,15 @@ type State struct {
 	// the last sync, which is what makes Sync the primary button even
 	// when the grid's plan is stale.
 	LibraryChanged bool
+
+	// FixLowRes is the low-resolution row's tick: with it on, the covers
+	// chosen for those albums are part of Fix all. It starts ON, like
+	// the Names row: a larger cover is a repair.
+	FixLowRes bool
+	// DupArmed is the album whose "Keep this one" has been pressed once
+	// and now reads "Delete <other> anyway": keeping it would delete
+	// songs the other album has and it does not. A view field.
+	DupArmed librarian.AlbumKey
 }
 
 // Tab is one of the three screens in the body.
@@ -508,6 +522,12 @@ const (
 	CatDiscs
 	// CatAttention is "Needs attention" — never fixed automatically.
 	CatAttention
+	// CatLowRes is "Low-resolution cover art": a cover under the
+	// report's MinArtPx, replaced only by a larger one.
+	CatLowRes
+	// CatDuplicates is "Duplicate albums" — the same songs in two
+	// folders. Never fixed by Fix all; one is kept by hand.
+	CatDuplicates
 )
 
 // Title and Sub are the two lines of the problem row.
@@ -521,6 +541,10 @@ func (c Category) Title() string {
 		return "Multi-disc albums"
 	case CatAttention:
 		return "Needs attention"
+	case CatLowRes:
+		return "Low-resolution cover art"
+	case CatDuplicates:
+		return "Duplicate albums"
 	default:
 		return "Missing cover art"
 	}
@@ -537,13 +561,22 @@ func (c Category) Sub() string {
 		return "into Disc N folders — off unless you tick it"
 	case CatAttention:
 		return "tags too thin to name a file from"
+	case CatLowRes:
+		return lowResSub(librarian.DefaultMinArtPx)
+	case CatDuplicates:
+		return "the same songs in two folders"
 	default:
 		return "looked up by artist and album"
 	}
 }
 
 // Categories is the list, in order.
-var Categories = []Category{CatArt, CatNames, CatFolders, CatDiscs, CatAttention}
+var Categories = []Category{CatArt, CatLowRes, CatNames, CatFolders, CatDiscs, CatDuplicates, CatAttention}
+
+// lowResSub is the low-resolution row's sub line at the report's own line.
+func lowResSub(px int) string {
+	return fmt.Sprintf("below %d px — a larger cover file in the folder is used first, else iTunes at 1200", px)
+}
 
 // Count is how many things this category holds in r, and 0 for a report
 // that has not been made yet.
@@ -568,6 +601,10 @@ func (c Category) Count(r *librarian.Report) int {
 		return len(DiscMoves(r))
 	case CatAttention:
 		return len(r.NeedsAttention)
+	case CatLowRes:
+		return len(r.LowResArt)
+	case CatDuplicates:
+		return len(r.Duplicates)
 	default:
 		return len(r.MissingArt)
 	}

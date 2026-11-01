@@ -2,11 +2,13 @@
 // one job that fixes them.
 //
 // It is a report, not a wizard (plan §1 decision 12). Inspect walks the source
-// tree ONCE and answers four questions at the same time:
+// tree ONCE and answers six questions at the same time:
 //
 //	which albums have no cover art
+//	which albums have a cover too small to look right (below MinArtPx)
 //	which files are misnamed (right folder, wrong name)
 //	which files are unorganized (wrong folder)
+//	which albums are the same songs in two folders (never fixed by Fix)
 //	which files nobody can name from their tags, and why
 //
 // plus the cost of acting on it: how many tracks the next sync will copy again
@@ -21,10 +23,13 @@
 // # What Undo does and does not put back
 //
 // Undo replays the journal organizer wrote, so every rename and every move
-// goes back. It does NOT remove embedded art: the pre-image of a 25 MB FLAC is
-// not kept, so there is nothing to put back (plan §5, "Art embedding is not
-// undone by the journal"). Removing a cover again is flac.RemovePictures, by
-// hand, and Undo's report says so.
+// goes back. A cover that REPLACED a smaller one goes back too: the old
+// picture is a few hundred kilobytes, not the 25 MB FLAC around it, so Fix
+// keeps it beside its own journal (journal.go) and Undo writes it back. A
+// cover added to an album that had none is NOT removed (plan §5, "Art
+// embedding is not undone by the journal"); flac.RemovePictures does that by
+// hand, and Undo's report says so. An album moved to the trash by
+// RemoveDuplicate comes back out of it.
 //
 // # The order inside Fix
 //
@@ -137,6 +142,29 @@ type Options struct {
 	// it and Fix cannot apply it. Turn it on to inspect a tree with the
 	// split IN the plan, which is what Choices.DiscFolders then ticks.
 	DiscFolders bool
+	// MinArtPx is the shortest side a cover may have before the report
+	// calls it low resolution. Zero means DefaultMinArtPx; a negative
+	// value turns the check off.
+	MinArtPx int
+	// TrashDir overrides where RemoveDuplicate moves an album: by default
+	// <parent of the music folder>/.core-trash/<timestamp>/.
+	TrashDir string
+}
+
+// DefaultMinArtPx is the low-resolution line: 600 px on the shorter side. The
+// iPod itself renders a 120 px sidecar, but the same files are looked at on a
+// computer, and iTunes serves 1200 px for nearly every album — a 300 px cover
+// is a scan somebody would replace if they knew there was a better one.
+const DefaultMinArtPx = 600
+
+func (o Options) minArt() int {
+	switch {
+	case o.MinArtPx < 0:
+		return 0
+	case o.MinArtPx == 0:
+		return DefaultMinArtPx
+	}
+	return o.MinArtPx
 }
 
 func (o Options) emit(e Event) {
@@ -212,6 +240,12 @@ type AlbumRef struct {
 	// own, sorted, then each "Disc N" subfolder's). Fix embeds the accepted
 	// cover in all of them.
 	Files []string `json:"-"`
+	// CoverFile is the cover image in the album folder (cover.jpg,
+	// folder.jpg…), the largest when there are several, and its size; ""
+	// when there is none. It is the first source Candidates offers.
+	CoverFile   string `json:"cover_file,omitempty"`
+	CoverWidth  int    `json:"cover_width,omitempty"`
+	CoverHeight int    `json:"cover_height,omitempty"`
 }
 
 // Report is everything one Inspect found. It is a description, not a plan: the
@@ -223,6 +257,18 @@ type Report struct {
 	MissingArt []AlbumRef `json:"missing_art"`
 	// Misnamed are files in the right folder under the wrong name.
 	Misnamed []organizer.Move `json:"misnamed"`
+	// LowResArt are the albums whose cover IS there and is smaller than
+	// MinArtPx on its shorter side. They go through the missing-art flow
+	// (Candidates, a Decision per album, Fix) with one extra rule: a
+	// candidate is only used when it is larger than what the album has.
+	LowResArt []ArtRef `json:"low_res_art,omitempty"`
+	// MinArtPx is the line LowResArt was measured against (0: the check
+	// was off).
+	MinArtPx int `json:"min_art_px,omitempty"`
+	// Duplicates are pairs of album folders holding the same songs. They
+	// are never fixed by Fix: which copy to keep is a person's call, made
+	// one group at a time (RemoveDuplicate).
+	Duplicates []DuplicateGroup `json:"duplicates,omitempty"`
 	// Unorganized are files that have to change folder (including the
 	// sidecars that follow an album folder), EXCEPT the multi-disc split,
 	// which is DiscSplit's.
@@ -274,18 +320,61 @@ type Report struct {
 // Empty reports whether there is nothing to fix and nothing to look at.
 func (r *Report) Empty() bool {
 	return len(r.MissingArt) == 0 && len(r.Misnamed) == 0 &&
-		len(r.Unorganized) == 0 && len(r.NeedsAttention) == 0
+		len(r.Unorganized) == 0 && len(r.NeedsAttention) == 0 &&
+		len(r.LowResArt) == 0 && len(r.Duplicates) == 0
 }
 
-// Album returns the album with this key.
+// Album returns the album with this key, from either art list.
 func (r *Report) Album(key AlbumKey) (AlbumRef, bool) {
+	if r == nil {
+		return AlbumRef{}, false
+	}
 	for _, a := range r.MissingArt {
 		if a.Key == key {
 			return a, true
 		}
 	}
+	for _, a := range r.LowResArt {
+		if a.Key == key {
+			return a.AlbumRef, true
+		}
+	}
 	return AlbumRef{}, false
 }
+
+// LowRes returns the low-resolution entry for this key, if it is one.
+func (r *Report) LowRes(key AlbumKey) (ArtRef, bool) {
+	if r == nil {
+		return ArtRef{}, false
+	}
+	for _, a := range r.LowResArt {
+		if a.Key == key {
+			return a, true
+		}
+	}
+	return ArtRef{}, false
+}
+
+// ArtRef is one album whose cover is smaller than the report's MinArtPx.
+type ArtRef struct {
+	AlbumRef
+	// Width and Height are the cover's size in pixels, read from the
+	// image header.
+	Width  int `json:"width"`
+	Height int `json:"height"`
+	// Source is the file the cover was measured in: the album's art
+	// source, the same file the syncer renders the iPod's sidecars from.
+	Source string `json:"source"`
+}
+
+// Short is the cover's shorter side, which is what "low resolution" and
+// "larger" are both measured by.
+func (a ArtRef) Short() int { return min(a.Width, a.Height) }
+
+// Size is "300×300".
+func (a ArtRef) Size() string { return dims(a.Width, a.Height) }
+
+func dims(w, h int) string { return fmt.Sprintf("%d×%d", w, h) }
 
 // Inspect reads the tree and returns the report. It writes nothing and makes
 // no network request.
@@ -312,9 +401,13 @@ func Inspect(ctx context.Context, src string, o Options) (*Report, error) {
 	}
 
 	o.progress(JobInspect, "reading the tags", 0, 0)
+	// The scan reads every file's tags once; the duplicate check needs
+	// each track's title, artist and length, so it is handed them as they
+	// go past rather than reading the whole tree a second time.
+	tracks := newTrackMemo(o.meta())
 	plan, err := organizer.Scan(organizer.Options{
 		Root:        root,
-		Meta:        o.Meta,
+		Meta:        tracks.read,
 		JournalDir:  o.JournalDir,
 		DiscFolders: o.DiscFolders,
 		Progress: func(e organizer.Event) {
@@ -340,6 +433,7 @@ func Inspect(ctx context.Context, src string, o Options) (*Report, error) {
 		// With the split off these are the moves the option WOULD make;
 		// with it on they are picked out of the plan below.
 		DiscSplit: plan.DiscSplit,
+		MinArtPx:  o.minArt(),
 	}
 	for i, m := range plan.Moves {
 		switch reason := effectiveReason(plan.Moves, i); {
@@ -381,11 +475,8 @@ func Inspect(ctx context.Context, src string, o Options) (*Report, error) {
 			// with the same reason; saying it twice helps nobody.
 			continue
 		}
-		if m.FrontCover() != nil {
-			continue
-		}
 		artist, album := albumQuery(a.dir, m)
-		rep.MissingArt = append(rep.MissingArt, AlbumRef{
+		ref := AlbumRef{
 			Key:       AlbumKey(rel(root, a.dir)),
 			Dir:       a.dir,
 			Artist:    artist,
@@ -393,12 +484,30 @@ func Inspect(ctx context.Context, src string, o Options) (*Report, error) {
 			FirstFLAC: a.files[0],
 			Tracks:    len(a.files),
 			Files:     a.files,
-		})
+		}
+		ref.CoverFile, ref.CoverWidth, ref.CoverHeight = localCover(a.dir)
+		// The cover the syncer would render the iPod's sidecars from. A
+		// picture that is there but will not decode is no cover at all as
+		// far as the device is concerned, so it is missing, not small.
+		pic := m.FrontCover()
+		if pic == nil {
+			rep.MissingArt = append(rep.MissingArt, ref)
+			continue
+		}
+		w, h, err := artfetch.ImageSize(pic.Data)
+		if err != nil {
+			rep.MissingArt = append(rep.MissingArt, ref)
+			continue
+		}
+		if limit := rep.MinArtPx; limit > 0 && min(w, h) < limit {
+			rep.LowResArt = append(rep.LowResArt, ArtRef{AlbumRef: ref, Width: w, Height: h, Source: a.files[0]})
+		}
 	}
-	o.log(JobInspect, "%d album(s), %d track(s): %d need art, %d misnamed, %d to re-folder, "+
-		"%d in flat multi-disc albums, %d need attention",
-		rep.Albums, rep.Tracks, len(rep.MissingArt), len(rep.Misnamed),
-		len(rep.Unorganized), len(rep.DiscSplit), len(rep.NeedsAttention))
+	rep.Duplicates = findDuplicates(root, albums, tracks)
+	o.log(JobInspect, "%d album(s), %d track(s): %d need art, %d with small art, %d misnamed, %d to re-folder, "+
+		"%d in flat multi-disc albums, %d duplicate album(s), %d need attention",
+		rep.Albums, rep.Tracks, len(rep.MissingArt), len(rep.LowResArt), len(rep.Misnamed),
+		len(rep.Unorganized), len(rep.DiscSplit), len(rep.Duplicates), len(rep.NeedsAttention))
 	return rep, nil
 }
 

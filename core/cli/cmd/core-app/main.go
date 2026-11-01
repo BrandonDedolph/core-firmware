@@ -17,7 +17,7 @@
 //	core-app --source DIR             open it with the music folder preset
 //	core-app --log FILE               append startup diagnostics to FILE
 //	core-app --no-detect              do not poll for the iPod
-//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced|album|preview]
+//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced|album|preview|lowres|duplicates]
 //	              [--size 900x600] [--tab albums|library|details]
 //	              [--theme system|linen|onyx] [--drawer]
 //	              [--dialog write|holding|remove|about|album|preview]
@@ -52,7 +52,8 @@ func main() {
 		screenshot = flag.String("screenshot", "", "Render one frame to this PNG and exit (no window)")
 		stateName  = flag.String("state", "demo",
 			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled, menu, advanced, "+
-				"album (the album sheet, a track playing), preview (the sync preview)")
+				"album (the album sheet, a track playing), preview (the sync preview), "+
+				"lowres (the Fix tab on its small covers), duplicates (the duplicate-album chooser)")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
 		tabName  = flag.String("tab", "", "Which tab --screenshot shows: albums, library, details (default: the state's own)")
 		source   = flag.String("source", "", "Preset the music source folder")
@@ -123,8 +124,10 @@ func main() {
 		cfg, cfgErr = app.LoadConfig(cfgPath)
 	}
 
+	be := app.NewRealBackend(cfg.BackupDir)
+	be.MinArtPx = cfg.MinArtPx
 	o := app.Options{
-		Backend:    app.NewRealBackend(cfg.BackupDir),
+		Backend:    be,
 		Config:     cfg,
 		ConfigPath: cfgPath,
 		Source:     *source,
@@ -161,9 +164,14 @@ func cannedState(name string) (app.State, error) {
 		return app.AdvancedState(), nil
 	case "album", "preview":
 		return app.DemoState(), nil
+	case "lowres":
+		return app.LowResState(), nil
+	case "duplicates":
+		return app.DuplicatesState(), nil
 	default:
 		return app.State{}, fmt.Errorf(
-			"--state %q: expected demo, library, empty, looking, notinstalled, menu, advanced, album or preview", name)
+			"--state %q: expected demo, library, empty, looking, notinstalled, menu, advanced, album, preview, "+
+				"lowres or duplicates", name)
 	}
 }
 

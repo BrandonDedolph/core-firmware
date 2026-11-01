@@ -577,7 +577,7 @@ func (u *UI) startInspect(src string) {
 // (plan §5 decision 2: Inspect never touches the network).
 func (u *UI) startCandidates() {
 	rep := u.st.Report
-	if rep == nil || len(rep.MissingArt) == 0 {
+	if rep == nil || len(rep.MissingArt)+len(rep.LowResArt) == 0 {
 		return
 	}
 	u.start(JobArt, func(ctx context.Context, emit func(Event)) error {
@@ -609,7 +609,7 @@ func (u *UI) startFix() {
 		answer, err := u.ask(ctx, &dialogRequest{
 			title:   "Fix the library?",
 			body:    "in " + src + "\n\n" + summary,
-			prompt:  "Names and folders can be undone until the next sync; a cover written into a file stays.",
+			prompt:  "Names, folders and replaced covers can be undone until the next sync; a cover added to an album that had none stays.",
 			okLabel: "Fix all",
 		})
 		if err != nil {
@@ -656,8 +656,8 @@ func (u *UI) startUndo(journal string) {
 			for _, sk := range rep.Skipped {
 				emit(Event{Kind: EventLog, Text: "left alone: " + sk.Op.To + " — " + sk.Reason})
 			}
-			emit(Event{Kind: EventLog, Text: "embedded covers are not undone; " +
-				"`core art --remove` takes a picture back out"})
+			emit(Event{Kind: EventLog, Text: "a replaced small cover is put back; a cover added to an " +
+				"album that had none is not undone (`core art --remove` takes a picture back out)"})
 		}
 		return err
 	})

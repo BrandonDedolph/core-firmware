@@ -3060,6 +3060,15 @@ static void library_ensure(fat32_t *fs)
      * nowhere else. Cheap: one hash lookup per entry. */
     otg_bind_all();
     g_lib_load_ms = (mmio_read32(USEC_TIMER_ADDR) - t0) / 1000u;
+    /* Into the log, for the host's boot check: what the library came to and
+     * how long it took. Hex like every other core: line (uart has no decimal). */
+    uart_puts("core: library songs ");
+    uart_put_hex32((uint32_t)g_songs_n);
+    uart_puts(" albums ");
+    uart_put_hex32((uint32_t)g_albums_n);
+    uart_puts(" ms ");
+    uart_put_hex32(g_lib_load_ms);
+    uart_putc('\n');
 }
 
 /* Populate g_songview with the songs to show (genre < 0 = all), title-ordered. */
@@ -10521,6 +10530,13 @@ _Noreturn void kernel_main(void) {
     uart_init();
 
     uart_puts("core: kernel alive (iPod 5G/5.5G, PP5022)\n");
+    /* The build, said by the build itself. Every byte the UART sends is also
+     * captured into the event log (evlog_capture), so once this reaches the
+     * disk the log can name which firmware a boot ran — the host otherwise
+     * only knows what it WROTE (COREFLSH.TXT) and infers the rest. A plain
+     * string, deliberately without the CORE-FW-VERSION: prefix: the image
+     * must carry exactly one marker for check_version_marker.sh to find. */
+    uart_puts("core: version " CORE_VERSION " build " CORE_BUILD_ID "\n");
 
     /*
      * Hand the shared list chrome its scrolling-title implementation.

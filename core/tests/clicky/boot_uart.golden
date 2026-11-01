@@ -12,6 +12,9 @@
 #   - PROCESSOR_ID reads 0x55 on silicon and 0x55555555 in clicky (its
 #     4G quirk; see 01-soc-pp5022.md "Dual core"). crt0.S compares only
 #     the low byte, so both are the CPU.
+#   - version prints the git describe tag and build id of whatever was
+#     built, which differ on every commit: <text> matches the rest of the
+#     line (one or more characters).
 #   - cpu freq reads the post-PLL clock. clicky never sets the PLL lock
 #     bit, so the bounded lock poll gives up and the clock stays at the
 #     24 MHz boot crystal there; the device reports 30 MHz.
@@ -29,6 +32,7 @@
 # transcript, and re-apply the <hex32> masks above. Then explain the change
 # in the commit that carries it.
 core: kernel alive (iPod 5G/5.5G, PP5022)
+core: version <text>
 core: uart self-test 1234ABCD
 core: PROCESSOR_ID <hex32>
 core: clock init -> 30 MHz

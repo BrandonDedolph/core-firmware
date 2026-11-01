@@ -66,7 +66,8 @@ HEX32 = re.compile(r"[0-9A-Fa-f]{8}")
 
 
 def load_golden(path):
-    """Golden lines as compiled regexes; `<hex32>` matches eight hex digits."""
+    """Golden lines as compiled regexes; `<hex32>` matches eight hex digits,
+    `<text>` the rest of the line (one or more characters, no newline)."""
     lines = []
     with open(path, encoding="utf-8") as f:
         for raw in f:
@@ -75,8 +76,15 @@ def load_golden(path):
                 continue
             if not line.startswith(PREFIX):
                 sys.exit(f"{path}: golden line does not start with {PREFIX!r}: {line!r}")
-            parts = [re.escape(p) for p in line.split("<hex32>")]
-            lines.append((line, re.compile("^" + HEX32.pattern.join(parts) + "$")))
+            pat = ""
+            for i, chunk in enumerate(re.split(r"(<hex32>|<text>)", line)):
+                if chunk == "<hex32>":
+                    pat += HEX32.pattern
+                elif chunk == "<text>":
+                    pat += ".+"
+                else:
+                    pat += re.escape(chunk)
+            lines.append((line, re.compile("^" + pat + "$")))
     if not lines:
         sys.exit(f"{path}: golden is empty")
     return lines

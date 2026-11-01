@@ -20,6 +20,12 @@
  *     or art longer than the file it was copied out of.
  * Leaks count: libFuzzer's leak check runs, and audio_tags_free() is the
  * documented release, so a stashed picture that escapes it is a finding.
+ *
+ * KNOWN, upstream: dr_flac's little-endian u32 read shifts a byte into the
+ * sign bit of an int (UB for a byte >= 0x80). dr_flac is vendored verbatim,
+ * so it is built with -fno-sanitize=shift-base and nothing else relaxed —
+ * tests/fuzz/meson.build has the details, regress/tag_flac/
+ * xfail-drflac-le32-shift the input.
  */
 
 #include "fuzz.h"

@@ -33,9 +33,10 @@ fuzz_harnesses = {
                         '../../codecs/meta_text.c']},
   'flac_meta': {'src': ['fuzz_flac_meta.c', '../../codecs/flac_meta.c',
                         '../../codecs/meta_text.c']},
-  'tag_flac':  {'src': ['fuzz_tag_flac.c', '../../codecs/dr_flac/flac.c',
-                        '../../codecs/dr_flac/tag_flac.c'],
-                'vendored': true},
+  # dr_flac itself (flac.c is its DR_FLAC_IMPLEMENTATION unit) is built
+  # apart, as `vendored`, so it can carry its own flags — see below.
+  'tag_flac':  {'src': ['fuzz_tag_flac.c', '../../codecs/dr_flac/tag_flac.c'],
+                'vendored': ['../../codecs/dr_flac/flac.c']},
   'mp3_frame': {'src': ['fuzz_mp3_frame.c', '../../codecs/pvmp3/mp3_frame.c']},
   # settings.c for settings_defaults(); eq.c and datetime.c only because
   # settings.c's display helpers reference them, and the coverage
@@ -58,15 +59,29 @@ if fuzz_with_libfuzzer and cc.get_id() != 'clang'
         'or just `make fuzz`')
 endif
 
-# dr_flac is vendored; silence its noise exactly as codecs/meson.build does.
-fuzz_vendored_args = vendored_codec_warning_suppress
+# dr_flac is vendored and kept byte-identical to upstream (vendor.sh
+# re-fetches it), so its findings are reported, not patched. Its noise is
+# silenced exactly as codecs/meson.build does, plus ONE sanitizer check:
+#
+#   shift-base — drflac__le2host_32_ptr_unaligned() builds a little-endian
+#   u32 as `*(p+3) << 24` on a promoted int, which is undefined for a byte
+#   >= 0x80 (it shifts into the sign bit). Every compiler produces the
+#   intended bits, it is reached only through the VORBIS_COMMENT walk that
+#   runs when an onMeta callback is given (tag_flac.c; the device's flac.c
+#   never passes one), and the fix belongs upstream: a (drflac_uint32) cast.
+#   regress/tag_flac/xfail-drflac-le32-shift is the input; delete this flag
+#   once a re-vendored dr_flac.h has the cast, and that input will hold it.
+#
+# Same reasoning, and the same flag, as the pvmp3 precedent in
+# codecs/meson.build. Everything else UBSan checks stays on for dr_flac.
+fuzz_vendored_args = vendored_codec_warning_suppress + ['-fno-sanitize=shift-base']
 
 fuzz_flags = ['-fsanitize=fuzzer,address,undefined',
               '-fno-sanitize-recover=undefined', '-fno-omit-frame-pointer']
 
 fuzz_targets = []
 foreach name, h : fuzz_harnesses
-  extra = h.get('vendored', false) ? fuzz_vendored_args : []
+  vendored = h.get('vendored', [])
   corpus  = meson.current_source_dir() / 'corpus' / name
   regress = meson.current_source_dir() / 'regress' / name
   inputs  = [corpus]
@@ -74,18 +89,33 @@ foreach name, h : fuzz_harnesses
     inputs += [regress]
   endif
 
+  vlib = []
+  if vendored.length() > 0
+    vlib = static_library('fuzz_vendored_replay_' + name, vendored,
+      include_directories: fuzz_inc,
+      c_args: fuzz_vendored_args,
+      override_options: test_opts)
+  endif
   replay = executable('fuzz_replay_' + name,
     sources: h['src'] + ['fuzz_replay.c'],
     include_directories: fuzz_inc,
-    c_args: extra,
+    link_with: vlib,
     override_options: test_opts)
   test('fuzz-replay-' + name, replay, args: inputs, suite: 'unit')
 
   if fuzz_with_libfuzzer
+    vlib = []
+    if vendored.length() > 0
+      vlib = static_library('fuzz_vendored_' + name, vendored,
+        include_directories: fuzz_inc,
+        c_args: fuzz_flags + ['-g'] + fuzz_vendored_args,
+        override_options: test_opts)
+    endif
     fuzz_targets += executable('fuzz_' + name,
       sources: h['src'],
       include_directories: fuzz_inc,
-      c_args: extra + fuzz_flags + ['-g'],
+      link_with: vlib,
+      c_args: fuzz_flags + ['-g'],
       link_args: fuzz_flags,
       override_options: test_opts)
   endif

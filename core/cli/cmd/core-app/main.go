@@ -49,6 +49,7 @@ func main() {
 		stateName  = flag.String("state", "demo",
 			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
+		tabName  = flag.String("tab", "", "Which tab --screenshot shows: albums, library, details (default: the state's own)")
 		source   = flag.String("source", "", "Preset the music source folder")
 		logFile  = flag.String("log", "", "Append startup diagnostics to this file")
 		noDetect = flag.Bool("no-detect", false,
@@ -70,6 +71,17 @@ func main() {
 		st, err := cannedState(*stateName)
 		if err != nil {
 			fail(*logFile, err)
+		}
+		switch *tabName {
+		case "":
+		case "albums":
+			st.Tab = app.TabAlbums
+		case "library":
+			st.Tab = app.TabLibrary
+		case "details":
+			st.Tab = app.TabDetails
+		default:
+			fail(*logFile, fmt.Errorf("--tab %q: want albums, library or details", *tabName))
 		}
 		if err := app.Snapshot(st, w, h, *screenshot); err != nil {
 			fail(*logFile, err)

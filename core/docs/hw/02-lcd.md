@@ -520,9 +520,9 @@ B = (74*(Y - 16) + 128*(Cb - 128))                  >> 9
 The backlight is **not** a PWM peripheral and is **not** on the BCM. On
 the iPod Video 5G/5.5G (and Nano 1G — Rockbox drives both from the same
 `backlight-nano_video.c`) it is an external multi-level LED-driver IC
-bit-banged over three PortalPlayer GPIO lines. Facts below are extracted
-cleanroom from Rockbox `backlight-nano_video.c` + `firmware/export/pp5020.h`
-(read 2026-07-21); no code was copied.
+bit-banged over three PortalPlayer GPIO lines. Facts below come from Rockbox's
+`backlight-nano_video.c` and `firmware/export/pp5020.h` (read 2026-07-21),
+used as the register reference.
 
 ### GPIO lines
 

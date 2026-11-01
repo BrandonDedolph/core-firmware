@@ -2,8 +2,7 @@
 
 A from-scratch firmware for the iPod 5.5G. It is written in C and ARM assembly, boots as the
 device's own OSOS image, reads FLAC off the iPod's disk and plays it through a designed
-interface: Nunito type, seven palettes, album art, a status strip, a Hold banner. Apache-2.0,
-no Rockbox code.
+interface: Nunito type, seven palettes, album art, a status strip, a Hold banner. Apache-2.0.
 
 <p align="center">
   <img src="docs/screens/hero.gif" alt="cold boot, browse, play" width="420">
@@ -270,3 +269,8 @@ MIT-0; the MP3 decoder is PacketVideo's `pvmp3` from AOSP, Apache-2.0, vendored 
 with its NOTICE and its patent disclaimer
 ([`core/codecs/pvmp3/`](core/codecs/pvmp3/README.md)). Nunito is under the SIL Open Font
 License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)).
+
+The hardware reference in [`core/docs/hw/`](core/docs/hw/README.md) cites where each fact came
+from: the PortalPlayer and Wolfson datasheets, the FAT32 specification, the iPodLinux wiki, and
+the Rockbox project's documentation and source, read for register addresses, bit fields and
+bring-up sequences. This firmware would not exist without the work those communities did first.

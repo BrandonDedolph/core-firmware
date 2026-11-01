@@ -26,7 +26,7 @@ decoder under an Apache-compatible licence that exists. Everything else is
 either floating point (dr_mp3, minimp3, PDMP3), copyleft (libmad GPL-2.0,
 mpg123 and ffmpeg's `mpegaudiodec_fixed` LGPL, Symphonia MPL-2.0), under the
 RPSL/RCSL (Helix), or a prebuilt binary with no source (Espressif's
-`esp_audio_codec`). This tree is Apache-2.0 and cleanroom, so the licence
+`esp_audio_codec`). This tree is Apache-2.0, so the licence
 filter came first and left exactly one candidate.
 
 That mattered because float was the problem. On the FPU-less ARM7TDMI every

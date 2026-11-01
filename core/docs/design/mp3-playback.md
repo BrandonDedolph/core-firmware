@@ -15,7 +15,7 @@ call. That is the "no floating point in core code" rule in PLAN.md arriving as
 a concrete bill.
 
 So the requirement was a **fixed-point** Layer III decoder, and since this tree
-is Apache-2.0 and cleanroom, one under a compatible licence. That filter is
+is Apache-2.0, one under a compatible licence. That filter is
 brutal:
 
 | candidate | licence | fixed point? | verdict |
@@ -24,7 +24,7 @@ brutal:
 | libmad | GPL-2.0 | yes | no |
 | mpg123 | LGPL-2.1 | yes | a static freestanding link cannot satisfy the relinking clause |
 | ffmpeg `mpegaudiodec_fixed` | LGPL | yes | same |
-| Rockbox's libmad tree | GPL | yes | no, and cleanroom-forbidden here regardless |
+| Rockbox's libmad tree | GPL | yes | no — GPL, which this Apache-2.0 tree cannot carry |
 | Symphonia | MPL-2.0 | no (float), Rust | no |
 | dr_mp3, minimp3, PDMP3 | CC0 / Unlicense / PD | **no** | the 219 M instr/s problem |
 | Espressif `esp_audio_codec` | binary `.a` | yes | no source |

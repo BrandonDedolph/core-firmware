@@ -15,9 +15,8 @@
  * (through 0x5F<->0x00), finger-lift reseeding (no spurious jump delta),
  * and the hold-switch edge / gating.
  *
- * Cleanroom note: every status word here is hand-built from the field
- * layout in core/docs/hw/03-clickwheel.md (via pp5022.h), not lifted from
- * any reference source.
+ * Every status word here is hand-built from the field layout in
+ * core/docs/hw/03-clickwheel.md (via pp5022.h).
  *
  * main() returns nonzero if any case fails; prints PASS/FAIL per case.
  */

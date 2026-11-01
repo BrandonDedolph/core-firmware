@@ -174,20 +174,3 @@
       of your accepting any such warranty or support.
 
    END OF TERMS AND CONDITIONS
-
-================================================================================
-
-The first-party code in this directory (everything except vendored
-third-party libraries under codecs/<name>/) is licensed under the
-Apache License, Version 2.0, as set out above.
-
-Vendored third-party libraries retain their own licenses — see the
-LICENSE file inside each codecs/<name>/ subdirectory. The codec
-stack mixes BSD-2-Clause (Tremor, libopus), Apache-2.0 (ALAC), public
-domain (dr_flac, hand-written WAV), and RPSL (Helix MP3/AAC). All are
-distributable alongside Apache-2.0-licensed first-party code.
-
-This project uses the Rockbox source tree as a hardware reference
-(reading registers, init sequences, magic constants), not as a linked
-dependency. Rockbox's own GPL-2.0 license does not apply to code we
-write from documentation derived from it.

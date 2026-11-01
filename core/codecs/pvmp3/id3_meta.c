@@ -2,7 +2,7 @@
 /*
  * core/codecs/pvmp3/id3_meta.c — ID3v2 tag + duration reader (see id3_meta.h).
  *
- * Cleanroom implementation from the published ID3v2.2/2.3/2.4 informal
+ * Implemented from the published ID3v2.2/2.3/2.4 informal
  * standards. Layout:
  *
  *   header, 10 bytes: "ID3", major, revision, flags, size (4 sync-safe bytes,

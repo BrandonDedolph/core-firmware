@@ -158,7 +158,7 @@ int hal_rtc_set(uint32_t epoch);
 map (the 50605 is the same family; every register `docs/hw/06-power.md` lists — `OOCC1 0x08`,
 `DCDC1 0x1B`, `IOREGC 0x23`, `MBCS1 0x2C`, `ADCC1 0x2F`, `ADCS1/2 0x30/0x31` — sits at the
 datasheet's PCF50606 address, which is the cross-check that the RTC block is at the same place).
-Cleanroom: derived from the datasheet and the doc, not from any GPL source; the doc must be
+Derived from the datasheet and the doc; the doc must be
 extended (Docs section) before the header can cite it.
 
 | Addr | Name | Meaning | Encoding | Confidence |

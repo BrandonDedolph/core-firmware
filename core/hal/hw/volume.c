@@ -26,10 +26,10 @@
  * — it would scale the line-out with it. It is used for exactly one thing
  * here: the pre-cut that buys an EQ boost its headroom (hal_eq_set).
  *
- * CLEANROOM NOTE: register numbers, bit positions and the 0x39=0 dB
+ * SOURCING: register numbers, bit positions and the 0x39=0 dB
  * headphone-gain fact are transcribed from core/docs/hw/05-audio.md
  * (which resolves the Wolfson/Rockbox mnemonics to concrete numbers).
- * No Rockbox code body is copied — the percent curve, the EQ write order
+ * The percent curve, the EQ write order
  * and the pre-cut policy below are this project's own.
  */
 

@@ -4,7 +4,7 @@
  * with the debounce that makes it safe to pause on, and the compiled-out probe
  * that identifies the pin on the device.
  *
- * Cleanroom from core/docs/hw/10-headphone-jack.md. Freestanding: <stdint.h>,
+ * From core/docs/hw/10-headphone-jack.md. Freestanding: <stdint.h>,
  * the mmio.h seam and (probe only) the SER0 UART driver, so this compiles
  * unchanged against the recording mock bus for the host trace test.
  *

@@ -5,10 +5,10 @@ written for someone who needs to drive every register and replicate
 every sequence from scratch. Compiled from public hardware
 documentation — the PortalPlayer PP502x datasheets, the Wolfson WM8758
 datasheet, the FAT32 spec, and the iPodLinux wiki — and cross-referenced
-against community projects for **hardware facts only** (register
-addresses, bit fields, init sequences), never their source code. This
-keeps the reference and the firmware built on it cleanroom and
-Apache-2.0.
+against community projects — chiefly Rockbox and iPodLinux — for
+hardware facts (register addresses, bit fields, init sequences). Each
+page says where a fact came from. The firmware in `core/` is written
+from these notes and licensed Apache-2.0.
 
 > **Status:** originally a Phase 0 deliverable; now a live reference that
 > the firmware in `core/` has been built and booted against on real

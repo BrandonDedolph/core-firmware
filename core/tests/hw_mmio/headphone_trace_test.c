@@ -30,8 +30,8 @@
  *     sample interval, and goes silent after its event budget — i.e. it
  *     cannot flood the only debug channel the device has.
  *
- * Values are hand-derived from core/docs/hw/10-headphone-jack.md, never from
- * Rockbox source — the cleanroom boundary applies to test vectors too.
+ * Values are hand-derived from core/docs/hw/10-headphone-jack.md: test
+ * vectors come from the docs, never from the driver under test.
  *
  * MUTATION CHECK (2026-09-10): each of these breaks the suite —
  *   - dropping the "back at the believed level cancels the candidate" reset

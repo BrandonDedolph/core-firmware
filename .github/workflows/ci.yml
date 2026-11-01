@@ -253,7 +253,7 @@ jobs:
   #
   # clicky (github.com/daniel5151/clicky) is a third-party PortalPlayer
   # emulator in Rust. It is NOT vendored and nothing links against it: it
-  # carries no licence file, this tree is Apache-2.0 and cleanroom, so it is
+  # carries no licence file and this tree is Apache-2.0, so it is
   # cloned at a pinned commit, built, and run as a tool, the way a compiler
   # is. Its HLE loader puts our image in SDRAM at the native 0x10000000 with
   # the remap undone and PC at _start — the boot-ROM handoff crt0.S is

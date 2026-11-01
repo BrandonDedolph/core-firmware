@@ -2,7 +2,7 @@
 /*
  * core/hal/hw/power.c — PCF50605 deep-sleep standby.
  *
- * Cleanroom from core/docs/hw/06-power.md ("Standby / sleep"): standby is a
+ * From core/docs/hw/06-power.md ("Standby / sleep"): standby is a
  * single write to the PMU's OOCC1 register over the shared I2C control bus
  * (same 7-bit device 0x08 the battery gauge reads). GOSTDBY latches the
  * transition; a wake source bit (EXTONWAK / CHGWAK) MUST accompany it or the

@@ -5,7 +5,7 @@ the Phase-0 hardware reference (docs/hw/) plus header-internal address
 invariants.
 
 Two independently-maintained sources describe the same silicon: the
-prose/tables in docs/hw/ (the cleanroom artifact) and the C constants in
+prose/tables in docs/hw/ (the reference) and the C constants in
 pp5022.h. This asserts they agree, and that the header's own address
 arithmetic (register strides, port spacing) is internally sound. It is
 the check that catches the exact bug class this project has hit twice —

@@ -6,7 +6,7 @@ This package is a design reference — the canonical layouts, tokens, and behavi
 
 > **This JSX prototype predates the project's pivot, and its name is a
 > fossil.** It began as a Rockbox *theme*; `core/` is now **from-scratch
-> firmware that replaces Rockbox entirely** — no Rockbox code, no `.wps`, no
+> firmware that replaces Rockbox entirely** — no `.wps`, no
 > theme engine. What survives is the design: the palette, chrome, screen
 > layouts, and interaction model that `core/kernel/main.c` and `core/ui/`
 > implement directly in C.

@@ -6,7 +6,7 @@
  * from the PCF50605 PMU's internal 10-bit ADC, read over the same on-SoC
  * I2C control bus the WM8758 codec uses (7-bit device address 0x08). See
  * battery.c and core/docs/hw/06-power.md for the mechanism and the
- * cleanroom facts it was built from.
+ * facts it was built from.
  *
  * Charge/power-state (external supply present, actively charging) is
  * NOT on the PMU/I2C path — it is three plain GPIO input bits, so the

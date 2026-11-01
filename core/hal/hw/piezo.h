@@ -9,7 +9,7 @@
  * main loop (piezo_service), so a click never blocks decode.
  *
  * Register facts (addresses/bit values, PP5020/5022 — extracted as hardware
- * facts, reimplemented cleanroom): DEV_INIT1 @0x70000010 (clear 0xc to route
+ * facts, reimplemented here): DEV_INIT1 @0x70000010 (clear 0xc to route
  * PWM to the piezo), DEV_EN @0x6000600C bit 0x00020000 (PWM clock), PWM0_CTRL
  * @0x7000A000 (0x80000000 | form<<16 | inv_freq; inv_freq = 91225/hz; 0 = off).
  */

@@ -26,7 +26,7 @@
 #include "trace_expect.h"
 
 /* Backlight GPIO bits (mirror of backlight.c's private #defines; the
- * cleanroom test vectors are derived from the docs, not the driver). */
+ * test vectors are derived from the docs, not the driver). */
 #define BL_B  0x08u     /* GPIOB bit 3: circuit power */
 #define BL_D  0x80u     /* GPIOD bit 7: step/clock     */
 #define BL_L  0x80u     /* GPIOL bit 7: LED enable     */

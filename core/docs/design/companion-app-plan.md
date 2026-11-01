@@ -170,7 +170,7 @@ against the source, the bring-up folder, the two ipodpatcher partition dumps and
    and binds records to folders by hash — an index that names a folder not yet copied
    just orphans the record, but an index written before a failed copy is worse to
    explain, so it goes last.
-5. **Flash = pure Go clean-room from `08-boot-dock.md` + the measured entry.** Whole
+5. **Flash = pure Go from `08-boot-dock.md` + the measured entry.** Whole
    partition backup to `<UserConfigDir>/core/backups/fwpart-<size>-<RFC3339>.bin` before
    any write, body write zero-padded to 0x800, entry `len`/`chksum` updated and all
    other fields preserved, directory sector rewritten, read-back compare of body AND

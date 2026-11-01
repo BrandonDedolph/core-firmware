@@ -15,7 +15,7 @@
  * observing the change.
  *
  * PP5022 vs PP5020: the 11-step list in an earlier doc revision was the
- * PP5020 sequence. On PP5022 (confirmed by the cleanroom dig) there is
+ * PP5020 sequence. On PP5022 (confirmed when the doc was re-derived) there is
  * NO pre-stage PLL_CONTROL write — the target value is programmed in a
  * single write — and DEV_TIMING1 is target-specific and set to its
  * operating value BEFORE routing CLOCK_SOURCE to the PLL.

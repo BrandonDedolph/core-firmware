@@ -6,7 +6,7 @@
  * bit-banged over three GPIO lines (NOT a hardware PWM peripheral, and
  * NOT on the BCM video coprocessor). See backlight.c and
  * core/docs/hw/02-lcd.md ("Backlight") for the mechanism and the
- * cleanroom facts it was built from.
+ * facts it was built from.
  *
  * Level convention (matches the UI's dim/fade + inactivity-off needs):
  *   backlight_set(0)             -> backlight OFF (LED disabled)

@@ -25,8 +25,8 @@
  *      success.
  *
  * Values are hand-derived from docs/hw/06-power.md and 09-i2c.md (via
- * pp5022.h), never extracted from Rockbox source — the cleanroom boundary
- * applies to test vectors too.
+ * pp5022.h): test vectors come from the docs, never from the driver under
+ * test.
  *
  * MUTATION CHECK (performed while writing): dropping the third one-byte read
  * makes torn_read fail; accepting year 00 makes unset_year fail; writing the

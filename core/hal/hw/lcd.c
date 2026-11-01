@@ -620,7 +620,7 @@ void lcd_fill(uint16_t rgb565)
  * the panel instead of the whole ~150 KB frame — the win for our
  * row-based UI, which usually redraws one horizontal band.
  *
- * Mechanism (cleanroom from 02-lcd.md, "LCD update protocol" — the
+ * Mechanism (from 02-lcd.md, "LCD update protocol" — the
  * documented Rockbox lcd_update_rect, NOT the ipodloader2
  * BCMCMD_LCD_UPDATERECT / BCM_CMD(5) header path): the BCM keeps a
  * persistent 320x240 framebuffer in its own SDRAM at BCMA_CMDPARAM. We

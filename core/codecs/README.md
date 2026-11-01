@@ -97,7 +97,7 @@ answers it on its own:
 | Symphonia | MPL-2.0, Rust, and float |
 | dr_mp3, minimp3, PDMP3 | permissive, but float synthesis and IMDCT: the 219 M instr/s above |
 | Espressif `esp_audio_codec` | prebuilt `.a`, no source |
-| Rockbox's libmad tree | GPL, and cleanroom-forbidden here regardless |
+| Rockbox's libmad tree | GPL, which this Apache-2.0 tree cannot carry |
 
 **pvmp3** (PacketVideo, in AOSP's `frameworks/av`, Apache-2.0) is the only one
 left, and it is a good one: 15.7 M ARMv4T instructions per second of audio at

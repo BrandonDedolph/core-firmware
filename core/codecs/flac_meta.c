@@ -2,7 +2,7 @@
 /*
  * core/codecs/flac_meta.c — FLAC metadata-block parser (see flac_meta.h).
  *
- * Cleanroom implementation from the public FLAC format spec. We do NOT lean
+ * Implemented from the public FLAC format spec. We do NOT lean
  * on dr_flac here: parsing the handful of metadata blocks ourselves is both
  * cheaper (no decoder state, no allocation) and cleaner. The format:
  *

@@ -19,9 +19,8 @@
  *      register at the RIGHT width and decode the RIGHT bit + polarity
  *      (main charger active-low, USB active-high, charging active-low).
  *
- * Values are hand-derived from core/docs/hw/06-power.md (via pp5022.h),
- * never extracted from Rockbox source — the cleanroom boundary applies to
- * test vectors too.
+ * Values are hand-derived from core/docs/hw/06-power.md (via pp5022.h):
+ * test vectors come from the docs, never from the driver under test.
  *
  * MUTATION CHECK (performed manually during bring-up, 2026-07-21): flipping
  * the expected mV assertion below from 3996 to 3997 makes the test FAIL,

@@ -13,9 +13,8 @@
  *      proves the driver actually spins on THRE, not just that it
  *      eventually wrote THR.
  *
- * Values are hand-derived from core/docs/hw/ (via pp5022.h), never
- * extracted from Rockbox source — the cleanroom boundary applies to
- * test vectors too.
+ * Values are hand-derived from core/docs/hw/ (via pp5022.h): test vectors
+ * come from the docs, never from the drivers under test.
  */
 
 #ifndef CORE_TESTS_HW_MMIO_MOCK_H

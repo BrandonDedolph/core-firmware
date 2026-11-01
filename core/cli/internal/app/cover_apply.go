@@ -102,6 +102,7 @@ func (u *UI) coverApplied(r *coverResult) {
 	u.st.Report = withoutAlbum(u.st.Report, r.key)
 	delete(u.st.ArtCands, r.key)
 	delete(u.st.ArtChoices, r.key)
+	u.keepSelectionVisible()
 }
 
 // withoutAlbum is the report with one album's cover question answered: a
@@ -216,4 +217,73 @@ func (u *UI) coverRowEmpty(c Category) string {
 		return "Every cover is at least this size."
 	}
 	return "Every album has a cover."
+}
+
+// --- only what has something to fix --------------------------------------------
+
+// costNothing is the cost line when nothing changes what the sync copies.
+const costNothing = "Nothing here changes what the next sync copies."
+
+// visibleCategories are the rows the Fix tab draws: the ones with something
+// in them, in their usual order. With no report yet (not scanned, or the
+// scan still reading) every row is drawn, as it always was.
+func visibleCategories(rep *librarian.Report) []Category {
+	if rep == nil {
+		return Categories
+	}
+	var out []Category
+	for _, c := range Categories {
+		if c.Count(rep) > 0 {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// tidy is a scanned library with nothing to fix.
+func (u *UI) tidy() bool {
+	return u.st.Report != nil && len(visibleCategories(u.st.Report)) == 0
+}
+
+// keepSelectionVisible moves the selection to the first row that is drawn
+// when the selected one has emptied (a last cover applied, a Fix all, a
+// rescan). A tidy library keeps whatever it had; nothing is drawn.
+func (u *UI) keepSelectionVisible() {
+	rep := u.st.Report
+	if rep == nil || u.st.Category.Count(rep) > 0 {
+		return
+	}
+	if cats := visibleCategories(rep); len(cats) > 0 {
+		u.st.Category = cats[0]
+	}
+}
+
+// tidySentence says what a clean library is, from the checks that ran.
+func tidySentence(rep *librarian.Report) string {
+	cover := "every album has a cover"
+	if rep != nil && rep.MinArtPx > 0 {
+		cover = fmt.Sprintf("every album has a cover at least %d px across", rep.MinArtPx)
+	}
+	// "Album - Artist" is the folder convention, so it must not break at
+	// its hyphen: no-break spaces around it and a word joiner after it.
+	clauses := []string{cover, "every file is named from its tags", "every folder is Album\u00a0-\u2060\u00a0Artist"}
+	if rep != nil && rep.DuplicatesChecked {
+		clauses = append(clauses, "nothing is duplicated")
+	}
+	last := len(clauses) - 1
+	s := strings.Join(clauses[:last], ", ") + ", and " + clauses[last] + "."
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// TidyState is a library with nothing to fix: no rows, the sentence, and
+// Rescan.
+func TidyState() State {
+	st := LibraryState()
+	st.Report = &librarian.Report{Root: st.Report.Root, Albums: 101, Tracks: 907,
+		MinArtPx: librarian.DefaultMinArtPx, DuplicatesChecked: true}
+	st.ArtCands, st.ArtChoices = nil, nil
+	st.Category = CatArt
+	st.Journal = ""
+	st.LibraryChanged = false
+	return st
 }

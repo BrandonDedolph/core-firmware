@@ -269,6 +269,9 @@ type Report struct {
 	// are never fixed by Fix: which copy to keep is a person's call, made
 	// one group at a time (RemoveDuplicate).
 	Duplicates []DuplicateGroup `json:"duplicates,omitempty"`
+	// DuplicatesChecked says the duplicate check ran, so an empty
+	// Duplicates means "none" rather than "not looked for".
+	DuplicatesChecked bool `json:"duplicates_checked,omitempty"`
 	// Unorganized are files that have to change folder (including the
 	// sidecars that follow an album folder), EXCEPT the multi-disc split,
 	// which is DiscSplit's.
@@ -504,6 +507,7 @@ func Inspect(ctx context.Context, src string, o Options) (*Report, error) {
 		}
 	}
 	rep.Duplicates = findDuplicates(root, albums, tracks)
+	rep.DuplicatesChecked = true
 	o.log(JobInspect, "%d album(s), %d track(s): %d need art, %d with small art, %d misnamed, %d to re-folder, "+
 		"%d in flat multi-disc albums, %d duplicate album(s), %d need attention",
 		rep.Albums, rep.Tracks, len(rep.MissingArt), len(rep.LowResArt), len(rep.Misnamed),

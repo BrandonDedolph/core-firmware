@@ -313,6 +313,7 @@ func addLowResAndDuplicates(st *State) {
 	root := rep.Root
 	st.FixLowRes = true
 	rep.MinArtPx = librarian.DefaultMinArtPx
+	rep.DuplicatesChecked = true
 	for _, a := range []struct {
 		folder, artist, album string
 		px, tracks            int

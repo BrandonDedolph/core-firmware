@@ -80,8 +80,13 @@ func (u *UI) fixList(gtx C) D {
 					layout.Rigid(func(gtx C) D { return u.sourceRow(gtx, busy) }),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 					layout.Rigid(func(gtx C) D {
-						rows := make([]layout.FlexChild, 0, len(Categories)*2)
-						for i, c := range Categories {
+						cats := visibleCategories(rep)
+						u.drawnRows = len(cats)
+						if len(cats) == 0 {
+							return u.wrapN(12, u.pal.Muted, tidySentence(rep), 4)(gtx)
+						}
+						rows := make([]layout.FlexChild, 0, len(cats)*2)
+						for i, c := range cats {
 							cat := c
 							if i > 0 {
 								rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
@@ -99,13 +104,30 @@ func (u *UI) fixList(gtx C) D {
 		// The cost goes directly above the button that spends it. A rename
 		// IS a re-copy — the filename is the device's locator — and on a
 		// real library that is gigabytes over USB that nobody asked for.
-		layout.Rigid(u.wrap(13, u.pal.Ink, u.costLine())),
+		layout.Rigid(func(gtx C) D {
+			// A tidy library has no cost to state unless covers written
+			// by a click are still to be copied.
+			line := u.costLine()
+			if u.tidy() && line == costNothing {
+				return D{}
+			}
+			return u.wrap(13, u.pal.Ink, line)(gtx)
+		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx C) D {
+			rescan := btn{&u.rescanBtn, "Rescan", false, !busy && strings.TrimSpace(u.st.Source) != ""}
+			if u.tidy() {
+				// Nothing to fix: no Fix all, and Undo only when there is
+				// something to take back.
+				if u.st.Journal != "" {
+					return u.buttonRow(gtx, btn{&u.undoBtn, "Undo", false, !busy}, rescan)
+				}
+				return u.buttonRow(gtx, rescan)
+			}
 			return u.buttonRow(gtx,
 				btn{&u.fixAllBtn, "Fix all", true, !busy && u.canFix()},
 				btn{&u.undoBtn, "Undo", false, !busy && u.st.Journal != ""},
-				btn{&u.rescanBtn, "Rescan", false, !busy && strings.TrimSpace(u.st.Source) != ""},
+				rescan,
 			)
 		}),
 	)
@@ -181,7 +203,7 @@ func (u *UI) costLine() string {
 		}
 	}
 	if rep.RecopyTracks == 0 && rep.NewTracks == 0 && covers == 0 {
-		return "Nothing here changes what the next sync copies."
+		return costNothing
 	}
 	if rep.RecopyTracks == 0 && rep.NewTracks == 0 {
 		return fmt.Sprintf("%s track%s will be copied again on the next sync, for the new covers.",
@@ -340,15 +362,24 @@ func (u *UI) previewContent() []layout.Widget {
 		return out
 	}
 
+	if u.tidy() {
+		add(u.line(13, u.pal.Muted, "Nothing to fix in "+u.st.Source))
+		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx) })
+		u.addCoverNote(add)
+		return out
+	}
+
 	cat := u.st.Category
 	add(u.line(14, u.pal.Ink, fmt.Sprintf("%s · %d", cat.Title(), cat.Count(rep))))
 	add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx) })
+	// What the last Use this cover did, whichever row the pane is on: the
+	// row it was clicked in may have emptied and gone.
+	u.addCoverNote(add)
 
 	switch cat {
 	case CatArt:
 		add(u.wrap(11, u.pal.Muted, artIntro))
 		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
-		u.addCoverNote(add)
 		if len(rep.MissingArt) == 0 {
 			add(u.line(12, u.pal.Muted2, u.coverRowEmpty(CatArt)))
 			break
@@ -371,7 +402,6 @@ func (u *UI) previewContent() []layout.Widget {
 	case CatLowRes:
 		add(u.wrap(11, u.pal.Muted, lowResIntro))
 		add(func(gtx C) D { return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx) })
-		u.addCoverNote(add)
 		if len(rep.LowResArt) == 0 {
 			add(u.line(12, u.pal.Muted2, u.coverRowEmpty(CatLowRes)))
 			break

@@ -324,6 +324,8 @@ type UI struct {
 	// lowCovers is each low-resolution album's current cover, read from
 	// its art source (not the sidecar, which is the iPod's 120 px copy).
 	lowCovers *thumbCache
+	// drawnRows is how many problem rows the Fix tab drew last frame.
+	drawnRows int
 	// topH is the top bar's height in the last frame: where the menu
 	// hangs from.
 	topH int
@@ -596,9 +598,7 @@ func (u *UI) drain() {
 		// moved) is dropped with its decision.
 		u.st.ArtCands, u.st.ArtChoices = keepArt(report, u.st.ArtCands, u.st.ArtChoices)
 		u.takeLocalCovers(report)
-		if u.st.Category.Count(report) == 0 {
-			u.st.Category = firstCategory(report)
-		}
+		u.keepSelectionVisible()
 	}
 	if cands != nil {
 		u.st.ArtCands = cands
@@ -715,17 +715,6 @@ func (u *UI) runPending() {
 	f := u.pending[0]
 	u.pending = u.pending[1:]
 	f()
-}
-
-// firstCategory is the row the Library tab opens on: the first one with
-// anything in it, so a report lands on something to look at.
-func firstCategory(r *librarian.Report) Category {
-	for _, c := range Categories {
-		if c.Count(r) > 0 {
-			return c
-		}
-	}
-	return CatArt
 }
 
 // markSynced turns a plan that has just run into the grid it leaves

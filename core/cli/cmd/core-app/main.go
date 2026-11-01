@@ -17,7 +17,7 @@
 //	core-app --source DIR             open it with the music folder preset
 //	core-app --log FILE               append startup diagnostics to FILE
 //	core-app --no-detect              do not poll for the iPod
-//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced|album|playing|preview|lowres|lowres-after|duplicates]
+//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced|album|playing|preview|lowres|lowres-after|duplicates|tidy]
 //	              [--size 900x600] [--tab music|fix|summary]
 //	              [--theme system|linen|onyx] [--drawer]
 //	              [--dialog write|holding|remove|about|album|preview]
@@ -54,7 +54,7 @@ func main() {
 			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled, menu, advanced, "+
 				"album (the album sheet, a track playing), playing (the same, sheet closed: the footer's bar), "+
 				"preview (the sync preview), lowres (the Fix tab on its small covers), lowres-after (the same after Use this cover), "+
-				"duplicates (the duplicate-album chooser)")
+				"duplicates (the duplicate-album chooser), tidy (the Fix tab with nothing to fix)")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
 		tabName  = flag.String("tab", "", "Which tab --screenshot shows: music, fix, summary (also albums, library, details; default: the state's own)")
 		source   = flag.String("source", "", "Preset the music source folder")
@@ -171,12 +171,14 @@ func cannedState(name string) (app.State, error) {
 		return app.LowResState(), nil
 	case "lowres-after":
 		return app.LowResAppliedState(), nil
+	case "tidy":
+		return app.TidyState(), nil
 	case "duplicates":
 		return app.DuplicatesState(), nil
 	default:
 		return app.State{}, fmt.Errorf(
 			"--state %q: expected demo, library, empty, looking, notinstalled, menu, advanced, album, playing, preview, "+
-				"lowres, lowres-after or duplicates", name)
+				"lowres, lowres-after, duplicates or tidy", name)
 	}
 }
 

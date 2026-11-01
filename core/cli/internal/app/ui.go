@@ -15,6 +15,7 @@ import (
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
@@ -109,8 +110,19 @@ type dialogRequest struct {
 	okLabel string
 	// info marks a dialog that only says something (About): the body is
 	// set in the text face rather than the plan's monospace, and there
-	// is one button.
-	info bool
+	// is one button. prose is the text face with Cancel kept.
+	info, prose bool
+	// card is the write dialog's identity card; items and total are the
+	// removal list; note is the Muted sentence under them; plan is the
+	// flasher's plan behind "Show the plan"; warn is the warning line.
+	card, items []cardRow
+	total       string
+	note, plan  string
+	warn        string
+	// hold makes the confirming button a press-and-hold (HoldDuration)
+	// that answers holdAnswer when it completes.
+	hold       bool
+	holdAnswer string
 	// reply carries the typed answer, or "" for a cancel. Buffered, so
 	// a job that has already given up cannot wedge the UI goroutine.
 	reply chan string
@@ -223,6 +235,17 @@ type UI struct {
 	// Clickable drawn twice in a frame is a button that only works in
 	// one of the two places), the "···" button and its menu.
 	headCancelBtn widget.Clickable
+	// The write dialog's hold button, its clock, and the plan toggle.
+	// now is time.Now except in a test.
+	dlgHold, planToggle widget.Clickable
+	holdStart           time.Time
+	holdFrac            float32
+	planOpen            bool
+	measureOps          op.Ops
+	// holdFrozen pins the hold fill for a canned screenshot, which has
+	// no pointer to hold it with. Zero everywhere else.
+	holdFrozen float32
+	now        func() time.Time
 	// The iPod tab's own: Show folder, and the Advanced disclosure.
 	backupDirBtn widget.Clickable
 	advancedBtn  widget.Clickable
@@ -265,6 +288,7 @@ func NewUI(o Options) *UI {
 		cfgPath:    o.ConfigPath,
 		invalidate: o.Invalidate,
 		pickerOK:   PickerAvailable(),
+		now:        time.Now,
 	}
 	if u.invalidate == nil {
 		u.invalidate = func() {}
@@ -843,6 +867,33 @@ func (u *UI) dialogEvents(gtx C) {
 		u.answer("")
 		return
 	}
+	if u.planToggle.Clicked(gtx) {
+		u.planOpen = !u.planOpen
+	}
+	if u.dlg.hold {
+		// Drain the button's clicks: a click (or Enter on a focused
+		// button) is not a hold and must not confirm anything.
+		for {
+			if _, ok := u.dlgHold.Update(gtx); !ok {
+				break
+			}
+		}
+		if u.holdFrozen > 0 {
+			u.holdFrac = u.holdFrozen
+			return
+		}
+		pressed := u.dlgHold.Pressed()
+		f, done := u.holdTick(pressed, u.now())
+		u.holdFrac = f
+		if done {
+			u.answer(u.dlg.holdAnswer)
+			return
+		}
+		if pressed {
+			gtx.Execute(op.InvalidateCmd{})
+		}
+		return
+	}
 	if u.dlgOK.Clicked(gtx) {
 		u.answer(strings.TrimSpace(u.confirmEd.Text()))
 	}
@@ -864,6 +915,7 @@ func (u *UI) answer(text string) {
 	}
 	u.dlg = nil
 	u.confirmEd.SetText("")
+	u.holdStart, u.holdFrac, u.planOpen = time.Time{}, 0, false
 }
 
 // ask puts a modal question on screen and blocks the calling (job)
@@ -1625,92 +1677,6 @@ func (u *UI) flashNote() string {
 }
 
 // --- the modal ----------------------------------------------------------
-
-func (u *UI) dialog(gtx C) D {
-	// The scrim. It is drawn over the whole window, dims what is behind
-	// it, and is the visual half of the input block set up in Layout.
-	paint.FillShape(gtx.Ops, u.pal.Scrim, clip.Rect{Max: gtx.Constraints.Min}.Op())
-
-	return layout.Center.Layout(gtx, func(gtx C) D {
-		if w := gtx.Constraints.Max.X - gtx.Dp(64); w < gtx.Constraints.Max.X {
-			gtx.Constraints.Max.X = w
-		}
-		gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		if h := gtx.Constraints.Max.Y - gtx.Dp(48); h > 0 {
-			gtx.Constraints.Max.Y = h
-		}
-		gtx.Constraints.Min.Y = 0
-		return u.plate(gtx, func(gtx C) D {
-			return layout.UniformInset(unit.Dp(14)).Layout(gtx, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(u.text(16, u.pal.Ink, u.dlg.title)),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						lines := strings.Split(u.dlg.body, "\n")
-						// A Gio list fills its main axis, so a short
-						// plan in a tall window would leave the two
-						// buttons stranded at the bottom of an empty
-						// box. Cap the height at what the text actually
-						// needs and the dialog shrinks to its content;
-						// a long plan still scrolls.
-						lh := unit.Sp(16)
-						if u.dlg.info {
-							lh = unit.Sp(19)
-						}
-						if want := len(lines) * gtx.Sp(lh); want < gtx.Constraints.Max.Y {
-							gtx.Constraints.Max.Y = want
-						}
-						gtx.Constraints.Min.Y = 0
-						list := material.List(u.th, &u.dlgBody)
-						list.Indicator.Color = u.pal.SelSub
-						return list.Layout(gtx, len(lines), func(gtx C, i int) D {
-							l := material.Label(u.th, unit.Sp(11), lines[i])
-							l.Font = Mono
-							if u.dlg.info {
-								l = material.Label(u.th, unit.Sp(12), lines[i])
-							}
-							l.Color = u.pal.MutedD
-							l.MaxLines = 1
-							l.Truncator = " "
-							return l.Layout(gtx)
-						})
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						if u.dlg.prompt == "" {
-							return D{}
-						}
-						return u.text(13, u.pal.Ink, u.dlg.prompt)(gtx)
-					}),
-					layout.Rigid(func(gtx C) D {
-						if u.dlg.want == "" {
-							return D{}
-						}
-						return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx C) D {
-							return u.field(gtx, &u.confirmEd, u.dlg.want)
-						})
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						ok := u.dlg.want == "" || strings.TrimSpace(u.confirmEd.Text()) == u.dlg.want
-						return layout.Flex{}.Layout(gtx,
-							layout.Rigid(func(gtx C) D {
-								if u.dlg.info {
-									return D{}
-								}
-								return u.button(gtx, btn{&u.dlgCancel, "Cancel", false, true})
-							}),
-							layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
-							layout.Rigid(func(gtx C) D {
-								return u.button(gtx, btn{&u.dlgOK, u.dlg.okLabel, true, ok})
-							}),
-						)
-					}),
-				)
-			})
-		})
-	})
-}
 
 // --- small drawing helpers ---------------------------------------------
 

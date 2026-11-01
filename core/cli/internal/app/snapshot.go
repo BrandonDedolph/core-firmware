@@ -46,6 +46,16 @@ func SnapshotTheme(st State, t Theme, w, h int, out string) error {
 // snapshotWith is Snapshot with a hook that runs after the State is set
 // and before the frame is laid out, for the test that needs a modal on
 // screen.
+// SnapshotDialog is SnapshotTheme with one of DialogKinds open.
+func SnapshotDialog(st State, t Theme, kind string, w, h int, out string) error {
+	var derr error
+	err := snapshotThemed(st, t, w, h, out, func(u *UI) { derr = cannedDialog(u, kind) })
+	if derr != nil {
+		return derr
+	}
+	return err
+}
+
 func snapshotWith(st State, w, h int, out string, tweak func(*UI)) error {
 	return snapshotThemed(st, ThemeLinen, w, h, out, tweak)
 }

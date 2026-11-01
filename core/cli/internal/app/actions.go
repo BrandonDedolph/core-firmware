@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
@@ -99,9 +98,11 @@ func (u *UI) startSync(kind JobKind) {
 
 		// JobSyncPrune.
 		answer, err := u.ask(ctx, &dialogRequest{
-			title:   "Sync and remove deletes music",
-			body:    "Sync and remove deletes everything under Music/ on the iPod that this music folder\ndoes not produce — tracks, albums and their art sidecars.\n\nsource  " + src + "\niPod    " + dst + "\n\nA preview comes next and will list exactly what would go.",
-			prompt:  "Continue to the list?",
+			title: "Sync and remove deletes music",
+			body: "Sync and remove deletes every album on the iPod that your music folder " +
+				"(" + sourceName(src) + ") does not have, with its covers. A preview comes next " +
+				"and lists exactly what would go.",
+			prose:   true,
 			okLabel: "Show me the list",
 		})
 		if err != nil {
@@ -122,19 +123,15 @@ func (u *UI) startSync(kind JobKind) {
 			_, err := u.be.Sync(ctx, o, emit)
 			return err
 		}
-		answer, err = u.ask(ctx, &dialogRequest{
-			title: fmt.Sprintf("Delete %d item(s) from the iPod?", len(plan.Prune)),
-			body: fmt.Sprintf("%s would be deleted from %s:\n\n%s",
-				disk.HumanSize(plan.PruneBytes), dst, strings.Join(plan.Prune, "\n")),
-			prompt:  "Type  remove  to confirm:",
-			want:    "remove",
-			okLabel: "Delete and sync",
-		})
+		for _, p := range plan.Prune {
+			emit(Event{Kind: EventLog, Text: "would remove " + p})
+		}
+		answer, err = u.ask(ctx, removalDialog(plan, statSize))
 		if err != nil {
 			return err
 		}
-		if answer != "remove" {
-			return fmt.Errorf("aborted: the confirmation did not match")
+		if answer == "" {
+			return fmt.Errorf("cancelled: nothing was deleted")
 		}
 		o.Prune, o.Yes = true, true
 		plan, err = u.be.Sync(ctx, o, emit)
@@ -174,7 +171,7 @@ func (u *UI) startCheck() {
 func (u *UI) startUpdate() {
 	rel := u.st.Release
 	installed := installedTag(u.st.Device.Firmware)
-	cli := u.st.CLIPath
+	g := u.gate("Update this iPod to Core " + rel.Tag + "?")
 	u.start(JobUpdate, func(ctx context.Context, emit func(Event)) error {
 		if !rel.Checked || rel.Tag == "" {
 			return fmt.Errorf("no release known yet: use ··· → Check for updates first")
@@ -189,7 +186,8 @@ func (u *UI) startUpdate() {
 		if err != nil {
 			return err
 		}
-		if err := u.flashFile(ctx, file, cli, emit); err != nil {
+		g.image = file
+		if err := u.flashFile(ctx, file, g, emit); err != nil {
 			return err
 		}
 		return u.readBack(ctx, emit)
@@ -207,12 +205,13 @@ func installedTag(firmware string) string {
 }
 
 func (u *UI) startFlash(file string) {
-	cli := u.st.CLIPath
+	g := u.gate("Write " + fileBase(file) + " to this iPod?")
+	g.image = file
 	u.start(JobFlash, func(ctx context.Context, emit func(Event)) error {
 		if file == "" {
 			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or use ··· → Flash an image file…")
 		}
-		if err := u.flashFile(ctx, file, cli, emit); err != nil {
+		if err := u.flashFile(ctx, file, g, emit); err != nil {
 			return err
 		}
 		return u.readBack(ctx, emit)
@@ -248,22 +247,12 @@ func (u *UI) readBack(ctx context.Context, emit func(Event)) error {
 	return nil
 }
 
-// flashFile is the shared tail of Flash and Update.
-//
-// The confirmation dialog shows the flasher's OWN plan text — captured
-// from Deps.Out as it is printed, which is everything written before
-// Confirm is called — and requires the device path typed exactly, the
-// same gate the CLI has. A GUI "Are you sure? [Yes]" over a raw disk
-// write would be a downgrade from the terminal.
-//
-// cliPath is read from the model on the UI goroutine by the caller and
-// passed in: this function runs on the job goroutine, where u.st is
-// off limits.
-func (u *UI) flashFile(ctx context.Context, file, cliPath string, emit func(Event)) error {
+// flashFile is the shared tail of Flash and Update: the write, behind the
+// gate (confirmWrite), with the flasher's own plan going to the log and to
+// the dialog's "Show the plan".
+func (u *UI) flashFile(ctx context.Context, file string, g writeGate, emit func(Event)) error {
 	plan, tee := teePlan(emit)
-	confirm := u.confirmWrite(ctx, plan, cliPath,
-		"Write this image to the iPod?", "Write it")
-	return u.be.Flash(ctx, file, confirm, tee)
+	return u.be.Flash(ctx, file, u.confirmWrite(ctx, plan, g), tee)
 }
 
 // teePlan splits a job's log events two ways: on to the window, and
@@ -280,38 +269,6 @@ func teePlan(emit func(Event)) (*strings.Builder, func(Event)) {
 	}
 }
 
-// confirmWrite is the modal that guards every raw write this app makes:
-// the flasher's own plan, and the device path typed exactly. Flash,
-// Update and Install share it, because a second dialog with a slightly
-// different gate is a second gate to get wrong.
-//
-// cliPath is read from the model on the UI goroutine by the caller and
-// passed in: this runs on the job goroutine, where u.st is off limits.
-func (u *UI) confirmWrite(ctx context.Context, plan *strings.Builder,
-	cliPath, title, okLabel string) func(prompt string) (string, error) {
-	return func(prompt string) (string, error) {
-		note := ""
-		if runtime.GOOS == "windows" && cliPath != "" {
-			note = "\n\nWindows will show a UAC prompt for:\n  " + cliPath
-		}
-		want, ok := devicePathFromPrompt(prompt)
-		if !ok {
-			// The flasher's wording changed under us. Refusing here is
-			// the only honest move: a dialog that cannot say what to
-			// type would either wave the write through or fail it
-			// with a message about a path nobody was shown.
-			return "", fmt.Errorf("the flasher's confirmation prompt is not in the form core-app knows: %q", prompt)
-		}
-		return u.ask(ctx, &dialogRequest{
-			title:   title,
-			body:    tail(plan.String(), 40) + note,
-			prompt:  strings.TrimSpace(prompt),
-			want:    want,
-			okLabel: okLabel,
-		})
-	}
-}
-
 // startInstall is the Install screen's one button: put Core on an iPod
 // that is still running Apple's firmware.
 //
@@ -325,8 +282,8 @@ func (u *UI) confirmWrite(ctx context.Context, plan *strings.Builder,
 // that verified but somehow left something else installed cannot show
 // the main screen.
 func (u *UI) startInstall(file string) {
-	cli := u.st.CLIPath
 	rel := u.st.Release
+	g := u.gate("")
 	u.start(JobInstall, func(ctx context.Context, emit func(Event)) error {
 		image := file
 		if image == "" {
@@ -346,9 +303,14 @@ func (u *UI) startInstall(file string) {
 			}
 		}
 
+		g.image = image
+		if file != "" {
+			g.title = "Install Core from " + fileBase(file) + " on this iPod?"
+		} else {
+			g.title = "Install Core " + rel.Tag + " on this iPod?"
+		}
 		plan, tee := teePlan(emit)
-		confirm := u.confirmWrite(ctx, plan, cli,
-			"Install Core on this iPod?", "Install it")
+		confirm := u.confirmWrite(ctx, plan, g)
 		res, err := u.be.Install(ctx, installer.Options{Image: image}, tee, confirm)
 		if err != nil {
 			return err

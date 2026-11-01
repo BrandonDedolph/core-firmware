@@ -41,6 +41,7 @@ func DemoState() State {
 			SectorSize: 2048,
 			Tested:     true,
 			Volume:     `D:\`,
+			DiskCount:  3,
 			// The bench volume: 74.5 GB as Explorer counts it, 51.2 free.
 			Free:     54_975_581_388,
 			Capacity: 79_993_765_888,

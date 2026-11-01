@@ -77,8 +77,8 @@ func TestInstallButtonWritesAndReachesReady(t *testing.T) {
 	if req.want != testPath {
 		t.Errorf("the dialog wants %q typed, want the device path", req.want)
 	}
-	if !strings.Contains(req.body, "installed: Apple firmware") {
-		t.Errorf("the dialog does not show what is being replaced:\n%s", req.body)
+	if !strings.Contains(req.plan, "installed: Apple firmware") {
+		t.Errorf("the dialog does not carry what is being replaced:\n%s", req.plan)
 	}
 	if !strings.Contains(req.title, "Install") {
 		t.Errorf("the dialog is titled %q", req.title)

@@ -211,19 +211,19 @@ func TestSyncPruneIsTwoDialogsAndADryRunFirst(t *testing.T) {
 	}
 }
 
-// The word has to be right. Anything else aborts before the second
-// Sync call, which is the one that deletes.
-func TestSyncPruneAbortsOnAWrongConfirmation(t *testing.T) {
+// Cancel on the list aborts before the second Sync call, which is the one
+// that deletes.
+func TestSyncPruneCancelledAtTheList(t *testing.T) {
 	f := &fakeBackend{plans: []*syncer.Plan{
 		{Albums: 3, Prune: []string{"Music/Old - Band/01. a.flac"}},
 	}}
 	u := newTestUI(f)
-	answerDialogs(u, "yes", "yes")
+	answerDialogs(u, "yes", "")
 	u.startSync(JobSyncPrune)
 	settle(u)
 
 	if len(f.syncCalls) != 1 {
-		t.Fatalf("got %d Sync calls, want 1 — nothing may be deleted after a wrong word", len(f.syncCalls))
+		t.Fatalf("got %d Sync calls, want 1 — nothing may be deleted after a Cancel", len(f.syncCalls))
 	}
 	if u.st.Job == nil || !u.st.Job.Failed {
 		t.Fatalf("the job did not fail: %+v", u.st.Job)
@@ -304,11 +304,11 @@ func TestUpdateDownloadsThenFlashes(t *testing.T) {
 	}
 }
 
-// The confirmation dialog must carry the flasher's own plan text and
-// require the device path typed exactly — the same gate the CLI has.
-func TestFlashDialogShowsThePlanAndDemandsTheDevicePath(t *testing.T) {
+// The confirmation dialog must carry the flasher's own plan text, and on
+// tested hardware its gate is the hold, answered with the device path.
+func TestFlashDialogCarriesThePlanAndHoldsOnTestedHardware(t *testing.T) {
 	f := &fakeBackend{
-		dev:         Device{Found: true, Path: `\\.\PhysicalDrive2`, Volume: `D:\`},
+		dev:         Device{Found: true, Path: `\\.\PhysicalDrive2`, Volume: `D:\`, Tested: true},
 		flashPrompt: flasher.ConfirmPrompt(`\\.\PhysicalDrive2`),
 	}
 	u := newTestUI(f)
@@ -344,11 +344,13 @@ func TestFlashDialogShowsThePlanAndDemandsTheDevicePath(t *testing.T) {
 	if seen == nil {
 		t.Fatal("no confirmation dialog was raised")
 	}
-	if !strings.Contains(seen.body, "image   /img/core.ipod") {
-		t.Errorf("the dialog does not show the flasher's plan:\n%s", seen.body)
+	if !strings.Contains(seen.plan, "image   /img/core.ipod") {
+		t.Errorf("the dialog does not carry the flasher's plan:\n%s", seen.plan)
 	}
-	if seen.want != `\\.\PhysicalDrive2` {
-		t.Errorf("the dialog wants %q typed, want the device path", seen.want)
+	// Tested hardware: the gate is the hold, which answers with the path
+	// the window identified; nothing is typed.
+	if !seen.hold || seen.holdAnswer != `\\.\PhysicalDrive2` || seen.want != "" {
+		t.Errorf("tested hardware: hold=%v answer=%q want=%q", seen.hold, seen.holdAnswer, seen.want)
 	}
 	if f.flashAnswer != `\\.\PhysicalDrive2` {
 		t.Errorf("the flasher got %q as the confirmation", f.flashAnswer)

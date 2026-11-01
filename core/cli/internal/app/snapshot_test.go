@@ -150,6 +150,30 @@ func TestSnapshotOnyx(t *testing.T) {
 	}
 }
 
+// TestSnapshotGates renders the write dialog (tested, both themes; mid-hold;
+// untested) and the removal list.
+func TestSnapshotGates(t *testing.T) {
+	dir := snapshotDir(t)
+	cases := []struct {
+		kind string
+		th   Theme
+	}{
+		{"write", ThemeLinen}, {"write", ThemeOnyx}, {"holding", ThemeLinen},
+		{"untested", ThemeLinen}, {"remove", ThemeLinen}, {"remove", ThemeOnyx}, {"about", ThemeLinen},
+	}
+	for _, c := range cases {
+		out := filepath.Join(dir, fmt.Sprintf("dialog-%s-%s-900x600.png", c.kind, c.th))
+		err := SnapshotDialog(DemoState(), c.th, c.kind, 900, 600, out)
+		if errors.Is(err, ErrNoHeadless) || errors.Is(err, ErrNoGPU) {
+			t.Skipf("no headless GPU surface on this machine: %v", err)
+		}
+		if err != nil {
+			t.Fatalf("SnapshotDialog(%s): %v", c.kind, err)
+		}
+		checkPNG(t, out, 900, 600)
+	}
+}
+
 // TestSnapshotEmptyState renders the first-run screen: no device, no
 // source, every button that needs one disabled. It is the state a user
 // sees first and the one easiest to leave untested.

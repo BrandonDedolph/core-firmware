@@ -20,6 +20,7 @@
 //	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced]
 //	              [--size 900x600] [--tab albums|library|details]
 //	              [--theme system|linen|onyx] [--drawer]
+//	              [--dialog write|holding|untested|remove|about]
 //	                                  render one frame headless and exit
 //
 // --screenshot is the review channel: a `-H windowsgui` process cannot
@@ -58,6 +59,7 @@ func main() {
 		noDetect = flag.Bool("no-detect", false,
 			"Do not poll for the iPod every 2 seconds; the window stays on whatever it last read")
 		drawer    = flag.Bool("drawer", false, "--screenshot with the log drawer open")
+		dialog    = flag.String("dialog", "", "--screenshot with a dialog open: write, holding, untested, remove, about")
 		themeName = flag.String("theme", "",
 			"Palette for this run: system (Onyx when Windows is set to dark apps), linen or onyx; default: the saved choice")
 		showVersion = flag.Bool("version", false, "Print the version and exit")
@@ -95,7 +97,12 @@ func main() {
 		default:
 			fail(*logFile, fmt.Errorf("--tab %q: want albums, library or details", *tabName))
 		}
-		if err := app.SnapshotTheme(st, theme, w, h, *screenshot); err != nil {
+		if *dialog != "" {
+			err = app.SnapshotDialog(st, theme, *dialog, w, h, *screenshot)
+		} else {
+			err = app.SnapshotTheme(st, theme, w, h, *screenshot)
+		}
+		if err != nil {
 			fail(*logFile, err)
 		}
 		fmt.Printf("wrote %s (%dx%d, state %s)\n", *screenshot, w, h, *stateName)

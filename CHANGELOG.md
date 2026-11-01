@@ -3,7 +3,7 @@
 Each release lists what changed on the device since the previous one. Versions are git tags;
 the boot screen and Settings → About show the one the device runs.
 
-## Unreleased
+## v0.2.1 — 2026-10-31
 
 - **Smoother list rows.** The selection bar's corners are anti-aliased instead
   of stepped, and so is every other rounded shape in the UI. The small

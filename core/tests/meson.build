@@ -1581,4 +1581,90 @@ if target == 'sim'
                 'pack_ipod.py', '--selftest'],
          suite: 'unit')
   endif
+  # ---- the headless firmware ---------------------------------------------
+  #
+  # firmware-walk: the REAL kernel/main.c — boot, library, browse, play,
+  # pause (the v0.2.2 frozen bars), Settings, idle-sleep, suspend, wake and the
+  # 30-minute PMU escalation, then a second power-on of the disk the first
+  # session wrote (settings/evlog/resume persisted; the resume-stall shape) —
+  # on the host, booted from a FAT32 disk image the repo's own tools build,
+  # driven by a scripted click wheel in deterministic fake time and asserted
+  # on the framebuffer, the UART transcript and the hardware timeline. The
+  # backend is hal/headless/ (fakes of the hw driver APIs main.c calls, at the
+  # hw/mmio.h seam); everything else is the firmware's own source, compiled
+  # with the same -DMMIO_MOCK the hw_mmio trace tests use. Every write is
+  # fenced to the pre-allocated files' extents. docs/testing-headless.md.
+  py_hl = find_program('python3', required: false)
+  thread_dep = dependency('threads')
+  if py_hl.found()
+    headless_disk = custom_target('headless-disk',
+      output: ['headless_disk.img', 'headless_disk.img.ranges'],
+      command: [py_hl, files('scripts' / 'make_headless_disk.py'),
+                '--vectors', vectors_dir, '--out', '@OUTPUT0@'],
+      depend_files: files('../../tools/build_index.py',
+                          '../../tools/make_config.py',
+                          '../../tools/make_log.py',
+                          '../../tools/make_otg.py'))
+
+    headless_fw_src = files(
+      '../kernel/main.c', '../kernel/console.c', '../kernel/pcm_ring.c',
+      '../kernel/config.c', '../kernel/cfg_commit.c', '../kernel/evlog.c',
+      '../kernel/otg_store.c', '../kernel/datetime.c', '../kernel/timesync.c',
+      '../kernel/wallclock.c', '../kernel/chargestat.c', '../kernel/idlesleep.c',
+      '../fs/fat32.c', '../fs/m3u.c',
+      '../player/player.c',
+      '../codecs/arena.c', '../codecs/readahead.c', '../codecs/diskbuf.c',
+      '../codecs/flac_meta.c',
+      '../ui/text.c', '../ui/thumb.c', '../ui/chrome.c', '../ui/wheel.c',
+      '../ui/letterindex.c', '../ui/search.c', '../ui/keyhold.c',
+      '../ui/gesture.c', '../ui/sleeptimer.c', '../ui/jackwatch.c',
+      '../ui/screen_charging.c', '../ui/screen_battery.c', '../ui/artcache.c',
+      '../ui/settings.c', '../ui/screen_settings.c', '../ui/palette.c',
+      '../ui/eq.c', '../ui/settime.c',
+      '../library/names.c', '../library/idx.c', '../library/sort.c',
+      '../library/playlist.c', '../library/fold.c', '../library/otg.c',
+      '../library/otg_slot.c',
+      '../hal/hw/battery.c', '../hal/hw/rtc.c',
+      '../hal/headless/headless_hw.c',
+    )
+    headless_inc = include_directories(
+      '..', '../hal', '../hal/hw', '../hal/headless', '../kernel',
+      '../codecs', '../codecs/dr_flac', '../codecs/pvmp3', '.')
+
+    # The firmware + backend once, for the test and the hand driver.
+    headless_fw_lib = static_library(
+      'core_headless_fw',
+      sources: headless_fw_src + files('headless/hl_screen.c')
+               + [core_version_h, core_version_tag_h],
+      include_directories: headless_inc,
+      c_args: ['-DMMIO_MOCK', '-DCORE_FREESTANDING'],
+      dependencies: [flac_dep, mp3_dep, meta_text_dep, thread_dep],
+      override_options: test_opts,
+    )
+    headless_fw_dep = declare_dependency(
+      link_with: headless_fw_lib,
+      include_directories: headless_inc,
+      dependencies: [flac_dep, mp3_dep, meta_text_dep, m_dep, thread_dep],
+    )
+    firmware_walk_test = executable(
+      'firmware_walk_test',
+      sources: ['headless/walk_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    # Not a test: `headless_explore DISK cmd...` drives the same firmware by
+    # hand and writes screenshots (tests/headless/explore.c).
+    executable(
+      'headless_explore',
+      sources: ['headless/explore.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('firmware-walk', firmware_walk_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
+                meson.current_build_dir()],
+         depends: [headless_disk],
+         timeout: 300,
+         suite: 'unit')
+  endif
 endif

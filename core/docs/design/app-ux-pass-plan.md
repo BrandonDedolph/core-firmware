@@ -192,7 +192,7 @@ own output to plain words, anything on the firmware side.
   always under `(ulimit -v 6000000; timeout 240 …)` — an earlier layout bug
   allocated 40 GB per frame and took the machine down.
 - Windows build: CI's `-ldflags` stamp (release.yml / scripts/build-all.sh)
-  plus `-H windowsgui`; staged copies live in `C:\Users\brandon-home\ipod-bringup\`.
+  plus `-H windowsgui`; staged copies live in `C:\Users\you\ipod-bringup\`.
 - `config.json` is `%AppData%\core\config.json` (`internal/app/config.go`);
   today it holds `source`, `backup_dir`, `names`.
 - Gio has no menu widget and no OS-theme signal; both are ours to build.

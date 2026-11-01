@@ -1,6 +1,6 @@
 # Review: feat/clock (plan 14-clock) — round 2
 
-Worktree `/home/brando/Projects/ipod_theme/.claude/worktrees/clock`, HEAD `a476374`, ten commits on
+Worktree `<repo>/.claude/worktrees/clock`, HEAD `a476374`, ten commits on
 top of `main 8d64349` (the alphabet/search merge landed underneath). The round-1 fixes are one commit,
 `a476374 ui, kernel, docs: round-1 review — the lines that were not true`.
 

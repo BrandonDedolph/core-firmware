@@ -1,6 +1,6 @@
 # Review: feat/on-the-go (r2)
 
-Worktree `/home/brando/Projects/ipod_theme/.claude/worktrees/on-the-go`, HEAD **e93e39c** on main b8f627c
+Worktree `<repo>/.claude/worktrees/on-the-go`, HEAD **e93e39c** on main b8f627c
 (clock merged). Four commits: 8ad6d7e, ebc955b, ccc0af9 (the r1 three, re-based) + e93e39c (the r1 fixes).
 `git range-diff` against r1's a26e9ef series: commits 1–3 differ only in rebase resolutions (the
 `kernel_sources` list gaining the clock's three files beside `otg_store.c`, and the README/guide/cli-README

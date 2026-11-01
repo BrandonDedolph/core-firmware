@@ -1,6 +1,6 @@
 # Plan 01 — three iPod input gestures: PLAY on a list title, hold RIGHT/LEFT to seek, hold MENU to root
 
-Repo `/home/brando/Projects/ipod_theme`, branch `main` at `dbce3b8`. All paths below are under `core/`
+Repo `<repo>`, branch `main` at `dbce3b8`. All paths below are under `core/`
 unless they start with `docs/` or `STATUS.md`. Line numbers are as of `dbce3b8`.
 
 ## Summary

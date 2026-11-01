@@ -1,6 +1,6 @@
 # Review r2 — feat/volume-eq (07-18 Volume Limit + EQ presets)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/volume-eq`, HEAD `d8e1399`, rebased onto
+Worktree: `<repo>/.claude/worktrees/volume-eq`, HEAD `d8e1399`, rebased onto
 main `9c39b54` (sleep timer + headphone merges), four commits. Reviewed 2026-09-16 against r1
 (`07-18-volume-eq-r1.md`) and the plan.
 

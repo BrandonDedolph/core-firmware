@@ -1,6 +1,6 @@
 # Review: feat/gestures (round 1)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/gestures`, branch `feat/gestures`,
+Worktree: `<repo>/.claude/worktrees/gestures`, branch `feat/gestures`,
 4 commits on top of `main`@dbce3b8 (f8246d8, 4c2d373, 3d4b052, da62be5). Plan: `plans/01-gestures.md`.
 
 ## What I ran (from the worktree's `core/`)

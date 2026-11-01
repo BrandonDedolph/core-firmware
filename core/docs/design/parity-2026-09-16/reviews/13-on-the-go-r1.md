@@ -1,6 +1,6 @@
 # Review: feat/on-the-go (r1)
 
-Worktree `/home/brando/Projects/ipod_theme/.claude/worktrees/on-the-go`. Reviewed first at
+Worktree `<repo>/.claude/worktrees/on-the-go`. Reviewed first at
 5bf94f9 (onto main 8d64349), then re-run at the rebased HEAD **a26e9ef** (onto main 4c4ce50, MP3
 merged): commits 2dea32a (storage + tools), 199cd6b (Go host half), a26e9ef (UI). `git range-diff`
 shows commits 1–2 byte-identical to their pre-rebase versions and commit 3 differing only in the

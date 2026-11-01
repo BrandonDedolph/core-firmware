@@ -1,6 +1,6 @@
 # Review: feat/gestures (round 2)
 
-Worktree `/home/brando/Projects/ipod_theme/.claude/worktrees/gestures`, rebased onto `main`@9c39b54
+Worktree `<repo>/.claude/worktrees/gestures`, rebased onto `main`@9c39b54
 (sleep timer + headphone merged), HEAD 8fa6ea7, 8 commits (round-1's four rewritten as
 50ff6f1/0c7343f/74c7ead/cf8ec00, then c13a2ea, d609b4f, 7440ac9, 8fa6ea7). Round-1 review:
 `reviews/01-gestures-r1.md`.

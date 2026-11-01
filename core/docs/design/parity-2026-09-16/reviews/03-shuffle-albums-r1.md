@@ -1,6 +1,6 @@
 # Review: feat/shuffle-albums (r1)
 
-Worktree: /home/brando/Projects/ipod_theme/.claude/worktrees/shuffle-albums, four commits on top of main 6d6504a
+Worktree: <repo>/.claude/worktrees/shuffle-albums, four commits on top of main 6d6504a
 (132e4ca ui/config, aeeadaa player, 56b476f kernel wiring, 0102d61 docs). Plan: plans/03-shuffle-albums.md.
 
 ## What I ran (independently, from the worktree's core/)

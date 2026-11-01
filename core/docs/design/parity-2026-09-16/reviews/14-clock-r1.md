@@ -1,6 +1,6 @@
 # Review: feat/clock (plan 14-clock) — round 1
 
-Worktree `/home/brando/Projects/ipod_theme/.claude/worktrees/clock`, HEAD `ce6ffa6`, nine commits on
+Worktree `<repo>/.claude/worktrees/clock`, HEAD `ce6ffa6`, nine commits on
 top of `main 5fac8e4`, 65 files. Reviewed against `scratchpad/plans/14-clock.md`.
 
 ## What I ran (fresh build dirs, not the implementer's output)

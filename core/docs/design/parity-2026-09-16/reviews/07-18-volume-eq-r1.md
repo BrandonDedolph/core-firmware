@@ -1,6 +1,6 @@
 # Review r1 — feat/volume-eq (07-18 Volume Limit + EQ presets)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/volume-eq`, HEAD `2b920c3`, 7 commits
+Worktree: `<repo>/.claude/worktrees/volume-eq`, HEAD `2b920c3`, 7 commits
 over main. Plan: `plans/07-18-volume-limit-eq.md`. Reviewed 2026-09-16.
 
 ## What I ran (independently, from the worktree)

@@ -1,6 +1,6 @@
 # Shared brief for every agent on this job
 
-Repo: /home/brando/Projects/ipod_theme (git, branch main at dbce3b8). Firmware lives in core/.
+Repo: <repo> (git, branch main at dbce3b8). Firmware lives in core/.
 Project: "core", a from-scratch Apache-2.0 firmware for the iPod 5.5G (PP5022, two ARM7TDMI, no FPU,
 WM8758B codec, 320x240 BCM framebuffer, ATA PIO, FAT32). Cleanroom: NO Rockbox code, no GPL code,
 no RPSL/RCSL (Helix) code. Anything pulled in must be Apache-2.0 compatible (Apache/MIT/BSD/CC0/Unlicense/public domain).

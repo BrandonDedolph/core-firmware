@@ -19,7 +19,7 @@ against the source, the bring-up folder, the two ipodpatcher partition dumps and
 ## 0. Facts the implementer must not re-derive
 
 **Firmware partition (measured on the 5.5G 80 GB, dumps in
-`/mnt/c/Users/brandon-home/ipod-bringup/`: `bootpartition-backup.bin` = Apple OSOS,
+`/mnt/c/Users/you/ipod-bringup/`: `bootpartition-backup.bin` = Apple OSOS,
 `after_bootpart.bin` = ours, both 131,475,456 B):**
 
 - MBR partition 0: type 0x00, start sector 63, end 64259; partition 1: type 0x0B FAT32,
@@ -53,7 +53,7 @@ against the source, the bring-up folder, the two ipodpatcher partition dumps and
 
 **Library (from `tools/build_index.py`, `core/kernel/main.c`, the oracle):**
 
-- Source tree: `C:\Users\brandon-home\Music\MC` (`/mnt/c/Users/brandon-home/Music/MC`),
+- Source tree: `C:\Users\you\Music\MC` (`/mnt/c/Users/you/Music/MC`),
   102 folders, 928 FLACs, folders named **`Album - Artist`** (split on the LAST " - ";
   the artist is the part after it). Device layout: `Music/<Artist - Album>/NN. Title.flac`
   (FAT-safe: `[\/:*?"<>|]` → `_`, then rstrip `" ."`), multi-disc source `Disc N/`
@@ -69,7 +69,7 @@ against the source, the bring-up folder, the two ipodpatcher partition dumps and
   containing `[`, `]`, `*` or `?` vanishes from the Python index; Go uses `ReadDir` and
   indexes it (deliberate superset, MC has no such folder). The dedup `while` loop in
   the script is unreachable and would not terminate; Go bounds it.
-- Oracle: `/mnt/c/Users/brandon-home/ipod-bringup/CORELIB.IDX` — header
+- Oracle: `/mnt/c/Users/you/ipod-bringup/CORELIB.IDX` — header
   `CIDX`, v2, rec 256, count 928, CRC 3248459348, 237,584 B, built from MC on
   2026-09-10 with `ffprobe`. ffprobe/ffmpeg are on this host (`/usr/sbin`).
 - Record (256 B, LE): `u32 duration_s, u16 track, u16 disc, folder[64], file[64],
@@ -523,8 +523,8 @@ file re-copies; `--prune` removes an orphan album only with `--yes`; playlist ma
 index equals `cidx.Encode(RecordsFromScan)`; the plan for the MC tree against an
 empty dst reports 102 albums / 928 tracks when `CORE_PARITY_SRC` is set.
 **Device check (needs the iPod in disk mode, run from Windows):** build
-`GOOS=windows GOARCH=amd64 go build -o /mnt/c/Users/brandon-home/ipod-bringup/core.exe
-./cmd/core`, run `core.exe sync --src C:\Users\brandon-home\Music\MC --dst D:\ --dry-run`
+`GOOS=windows GOARCH=amd64 go build -o /mnt/c/Users/you/ipod-bringup/core.exe
+./cmd/core`, run `core.exe sync --src C:\Users\you\Music\MC --dst D:\ --dry-run`
 (expect ~0 copies: the device already has the tree; the report must list any real
 diffs), then a real `sync`, then `Write-VolumeCache D` is no longer needed but harmless;
 boot: About shows 928 songs / 102 albums, no orphans, art chips present. This retires
@@ -586,7 +586,7 @@ OSOS body (must `cmp` ipodpatcher `-rfb`).
 against a fake `List` + fake handles; aligned-I/O bounce buffer round-trips at odd
 offsets; elevation decision table.
 **Device check (read-only, Windows, disk mode):** stage `core.exe`, run elevated via
-`powershell.exe -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c','C:\Users\brandon-home\ipod-bringup\core.exe info > C:\Users\brandon-home\ipod-bringup\core_info.txt 2>&1' -Verb RunAs -Wait"`
+`powershell.exe -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c','C:\Users\you\ipod-bringup\core.exe info > C:\Users\you\ipod-bringup\core_info.txt 2>&1' -Verb RunAs -Wait"`
 (the RunAs child has its own console, so redirect inside `cmd /c`); then `backup --out
 …\core_backup.bin` and `cmp` against a fresh ipodpatcher `-r` dump (or the existing
 `after_bootpart.bin` only if the partition has not changed — it has; take a fresh
@@ -802,8 +802,8 @@ Windows binary is cross-built on Linux with `CGO_ENABLED=0`. `build-all.sh` grow
 `macos-latest` job for them).
 
 **Local run (device not required):** `cd core/cli && GOOS=windows GOARCH=amd64
-CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o /mnt/c/Users/brandon-home/ipod-bringup/core-app.exe ./cmd/core-app`,
-then `/mnt/c/Windows/System32/cmd.exe /c start "" C:\Users\brandon-home\ipod-bringup\core-app.exe`
+CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o /mnt/c/Users/you/ipod-bringup/core-app.exe ./cmd/core-app`,
+then `/mnt/c/Windows/System32/cmd.exe /c start "" C:\Users\you\ipod-bringup\core-app.exe`
 opens the window on the user's desktop (the orchestrator cannot see it; it can only check
 the process started and that `core-app.exe --screenshot C:\…\app.png --state demo` wrote
 a PNG, which it then reads from `/mnt/c`). The Linux build (`go build -tags novulkan

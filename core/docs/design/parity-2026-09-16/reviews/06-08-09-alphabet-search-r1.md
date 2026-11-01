@@ -1,6 +1,6 @@
 # Review r1 — feat/alphabet-search (plan 06/08/09: A-Z indicator, steering, Search)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/alphabet-search`, rebased onto main
+Worktree: `<repo>/.claude/worktrees/alphabet-search`, rebased onto main
 5fac8e4. Commits d4b3bcc (Stage A), 3f39638 (Stage B), 2cb2ed1 (Stage C). All `core/` paths below
 are relative to the worktree's `core/`; line numbers are the branch's.
 

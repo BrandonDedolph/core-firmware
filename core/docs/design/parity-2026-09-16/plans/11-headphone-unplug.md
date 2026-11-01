@@ -1,6 +1,6 @@
 # 11 — Pause on headphone unplug
 
-Repo: `/home/brando/Projects/ipod_theme` (main @ dbce3b8). All paths below are under `core/` unless
+Repo: `<repo>` (main @ dbce3b8). All paths below are under `core/` unless
 they start with `docs/`, `STATUS.md`, `README.md`.
 
 ## Summary

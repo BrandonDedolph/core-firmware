@@ -1,7 +1,7 @@
 # Plan 06/08/09 — alphabet indicator, alphabet steering, Search
 
 One plan, three stages that build on each other. All paths below are under
-`/home/brando/Projects/ipod_theme/core/` unless they start with `docs/`,
+`<repo>/core/` unless they start with `docs/`,
 `README.md`, `STATUS.md`, `PLAN.md` or `design_reference/` (repo root).
 Nothing here can be verified on the device in this job; every stage's
 acceptance is host suites + `make hw && make verify-hw`, and every

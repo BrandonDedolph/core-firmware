@@ -1,6 +1,6 @@
 # 03 — Shuffle Albums
 
-Repo: /home/brando/Projects/ipod_theme (main @ dbce3b8). Firmware in `core/`. All paths below are
+Repo: <repo> (main @ dbce3b8). Firmware in `core/`. All paths below are
 relative to `core/` unless they start with `docs/`, `tools/` or `STATUS.md`. Line numbers are as of
 dbce3b8. Nothing in this plan can be verified on the device in this job; every user-visible change
 ships **UNFLASHED** and is listed for the bench at the end.

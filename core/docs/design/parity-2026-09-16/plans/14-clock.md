@@ -1,6 +1,6 @@
 # 14 — Clock, and Settings › Date & Time
 
-Plan only. Repo `/home/brando/Projects/ipod_theme`, `main` at `dbce3b8`. Paths are under `core/`
+Plan only. Repo `<repo>`, `main` at `dbce3b8`. Paths are under `core/`
 unless they start with `docs/`, `tools/`, `design_reference/`, `README.md`, `STATUS.md` or
 `CHANGELOG.md`. Line numbers are as of `dbce3b8`. Nothing here can be verified on the device in
 this job; every device-only item is marked **DEVICE**.

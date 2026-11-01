@@ -1,6 +1,6 @@
 # Review: feat/headphone (plan 11 — pause on headphone unplug), round 1
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/headphone`
+Worktree: `<repo>/.claude/worktrees/headphone`
 Branch: `main..HEAD` = 49040f9, bfe979b, d79692d (three commits, 18 files, +1031/−88).
 
 ## What I ran (independently, from `<worktree>/core`)

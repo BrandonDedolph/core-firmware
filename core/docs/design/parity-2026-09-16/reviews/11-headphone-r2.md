@@ -1,6 +1,6 @@
 # Review: feat/headphone (plan 11 — pause on headphone unplug), round 2
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/headphone`
+Worktree: `<repo>/.claude/worktrees/headphone`
 HEAD 0043b94 (rebased; three commits: 49040f9, bfe979b, 0043b94). Reviewed as the tree diff
 `d79692d..0043b94` (r1 HEAD to r2 HEAD, 11 files, +175/−132) on top of the round-1 reading.
 

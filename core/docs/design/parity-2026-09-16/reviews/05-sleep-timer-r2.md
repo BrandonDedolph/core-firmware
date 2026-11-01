@@ -1,6 +1,6 @@
 # Review: feat/sleep-timer (r2)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/sleep-timer`, HEAD 44cd189, history rewritten into
+Worktree: `<repo>/.claude/worktrees/sleep-timer`, HEAD 44cd189, history rewritten into
 four commits on main dbce3b8: 7e4ad27 (ui model + module + tests), f56b22f (shared suspend block, pure refactor),
 45076a2 (wiring + chrome), 44cd189 (docs/gallery/STATUS). Round 1 is `05-sleep-timer-r1.md`; the old HEAD 2089bcd
 is still in the object store, so every round-2 change was reviewed as `git diff 2089bcd HEAD` (63 lines in main.c,

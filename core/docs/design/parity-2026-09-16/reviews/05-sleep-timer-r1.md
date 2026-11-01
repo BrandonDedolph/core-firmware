@@ -1,6 +1,6 @@
 # Review: feat/sleep-timer (r1)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/sleep-timer`, five commits on top of main dbce3b8
+Worktree: `<repo>/.claude/worktrees/sleep-timer`, five commits on top of main dbce3b8
 (8ecd92b, 2c6fe9b, 4baa62b, 8b43341, 2089bcd). Reviewed against `plans/05-sleep-timer.md`.
 
 ## Independently verified

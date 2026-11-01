@@ -1,6 +1,6 @@
 # Review: feat/clock (plan 14-clock) — round 3
 
-Worktree `/home/brando/Projects/ipod_theme/.claude/worktrees/clock`, HEAD `4893749`, eleven commits on
+Worktree `<repo>/.claude/worktrees/clock`, HEAD `4893749`, eleven commits on
 top of `main 4c4ce50` (MP3 merge underneath; branch delta vs main is unchanged in shape — 67 files, the
 `menu_render_list` delta is still exactly the `right` parameter). The round-2 fixes are one commit,
 `4893749 kernel, ui: round-2 review — two sentences the code still did not make true`, touching

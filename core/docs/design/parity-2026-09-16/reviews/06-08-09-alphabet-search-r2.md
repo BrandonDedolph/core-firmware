@@ -1,6 +1,6 @@
 # Review r2 — feat/alphabet-search (round 2: commit C amended to 515282d)
 
-Worktree: `/home/brando/Projects/ipod_theme/.claude/worktrees/alphabet-search`, still rebased onto
+Worktree: `<repo>/.claude/worktrees/alphabet-search`, still rebased onto
 main 5fac8e4. d4b3bcc (A) and 3f39638 (B) are byte-identical to r1 (same SHAs); only C changed
 (2cb2ed1 → 515282d). Delta: `core/kernel/main.c` (+59/−24 lines), `core/tests/ui/gesture_test.c`
 (+52), `STATUS.md`, `docs/USER_GUIDE.md`. Worktree clean.

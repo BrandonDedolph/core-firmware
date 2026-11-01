@@ -3,6 +3,26 @@
 The README is the canonical public story; this doc is the running list of
 what works, what doesn't, and what to pick up next.
 
+## 2026-11-01 — the desktop app has its own repository
+
+The repository splits in two. This one is renamed `ipod-core` → **`core-firmware`**
+(history, stars and the `v…` releases kept; GitHub redirects the old URLs) and keeps
+the firmware only. The desktop app and the `core` CLI — `core/cli/**`,
+`tools/app_icon.py`, `docs/screens/core_app*.png`, the user guide's app section, the
+three app plans in `core/docs/design/` (left here frozen, with a note) and the
+app half of `tools/release.py` — move to **`core-desktop-app`**
+(https://github.com/BrandonDedolph/core-desktop-app), a fresh history with plain
+`v…` tags starting at v0.3.0 (formerly app-v0.3.0 here). The app's releases, guide
+and CHANGELOG are there; this repo's releases carry `core.ipod` only. CI here lost
+the Go `cli` job; `release.yml` is now a tag-time guard (the tagged commit builds
+and its `CORE-FW-VERSION` marker reads the tag) and uploads nothing. `make ipod` no
+longer runs the Go CLI: `tools/pack_ipod.py` packs `core.ipod`, checked
+byte-identical to `core firmware pack` on the same `core.bin` before the Go copy
+left, and its `--selftest` is a new meson suite (`pack-ipod`). The app's parity
+tests find this checkout through the **`CORE_REPO`** environment variable (or by
+walking up for `tools/build_index.py`) and skip when it is absent — the Python
+tools here stay its oracles.
+
 ## 2026-11-01 — the now-playing bars stop when paused — UNFLASHED
 
 `nowplaying_bars()` was fed the raw USEC_TIMER wherever it was drawn, and its
@@ -1905,7 +1925,7 @@ Found while writing this doc. Worth fixing when you next touch these files
 
 ## Repository
 
-GitHub: https://github.com/BrandonDedolph/ipod-core.
+GitHub: https://github.com/BrandonDedolph/core-firmware.
 
 **`main` is NOT necessarily current.** This line used to claim it was; work
 lands on local branches first and several commits have sat unpushed at a time,

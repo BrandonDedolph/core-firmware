@@ -16,7 +16,7 @@ the data sectors of a file that ALREADY EXISTS. It cannot create, grow,
 shrink, move or delete anything — doing so would mean allocating clusters and
 rewriting directory entries, which is precisely where filesystem corruption
 lives. So both files have to exist before the device ever sees them, and that
-is this tool's whole job. `core sync` (core/cli) does the same thing from Go
+is this tool's whole job. `core sync` (core-desktop-app) does the same thing from Go
 and is tested byte-for-byte against this script; this is the reference.
 
 WORKFLOW

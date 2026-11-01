@@ -30,7 +30,7 @@ from what a real partition carries:
     it at devOffset + 0x800. The emulator's HLE loader uses the older
     +0x200 convention, and this file only ever feeds the emulator, so it
     follows the emulator. Do not reuse this script to build something for
-    ipodpatcher — that is `core firmware pack` (core/cli), a different
+    ipodpatcher — that is tools/pack_ipod.py (`make ipod`), a different
     format (.ipod: checksum + model name + raw image).
 
 Usage: make_clicky_fw.py <core.bin> <out.fw>

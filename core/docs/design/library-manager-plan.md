@@ -1,5 +1,7 @@
 # Plan — phase 2 of `core-app`: install, auto-detect, and the library manager
 
+> **Moved.** This document moved to core-desktop-app/docs/design/ when the app got its own repository (2026-11-01); this copy is frozen.
+
 > **History.** The window this plan describes was redesigned on 2026-10-31; the current design is [`app-ux-pass-plan.md`](app-ux-pass-plan.md). The words and buttons below (Details tab, Dry run, Sync + prune, Flash file…, Take, typed confirmations) are the old ones.
 
 Addendum to `companion-app-plan.md` (S0–S10 shipped as v0.1.3, 2026-09-15). The user's

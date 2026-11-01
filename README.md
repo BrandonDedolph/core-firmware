@@ -185,7 +185,7 @@ and newlib for the device.
 cd core
 make hw                        # build-hw/core.elf, core.bin
 make ipod                      # build-hw/core.ipod
-make sim && meson test -C build-sim   # host tests, 82 suites
+make sim && meson test -C build-sim   # host tests, 83 suites
 make verify-hw                 # layout, header/doc and size checks on the ARM image
 ```
 
@@ -194,55 +194,23 @@ Detail, sanitizer builds and the host tools: [`core/README.md`](core/README.md),
 
 ## The `core` app
 
-One binary on your computer does the host side: it puts the music on the iPod in the layout the
-firmware reads, bakes the art sidecars, writes the index, flashes firmware and fetches updates.
-Download the one for your machine from the newest `app-v…` release on the
-[releases page](https://github.com/BrandonDedolph/ipod-core/releases), or build it from
-[`core/cli/`](core/cli/README.md).
-
-| File | For |
-|---|---|
-| `core-windows-amd64.exe` | Windows |
-| `core-darwin-arm64` | macOS, Apple silicon |
-| `core-darwin-amd64` | macOS, Intel |
-| `core-linux-amd64` | Linux, x86-64 |
-| `core-linux-arm64` | Linux, ARM |
-
-The same five come as `core-app-*`: a desktop window over the same code, for people who would
-rather press Sync than type it — in the iPod's own Linen or Onyx, following the system's dark mode.
-It finds the iPod by itself, offers the update when there is one, and confirms a firmware write
-with the iPod's identity and a two-second hold. On Windows it asks for Administrator when it opens,
-then reads and flashes the iPod itself.
-
-<p align="center">
-  <img src="docs/screens/core_app.png" alt="the core desktop app, Linen" width="420">
-  <img src="docs/screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="420">
-</p>
-<p align="center">
-  <img src="docs/screens/core_app_album.png" alt="an album open: its tracklist, with the player below" width="420">
-  <img src="docs/screens/core_app_fix.png" alt="the Fix tab" width="420">
-</p>
-
-```bash
-core info                                   # identify the iPod, in disk mode
-core sync --src ~/Music --dst /media/IPOD   # files, art, playlists, index
-core eject /media/IPOD
-core update                                 # newest firmware release, verified and flashed
-```
-
-The walkthrough is in the [user guide](docs/USER_GUIDE.md#the-core-app). The 5.5G 80 GB is the only
-model the firmware has booted on and the only one the app knows; `core flash` refuses other hardware
-without `--untested-hardware`. Its flash path has written to that device and been read back by
-both `core` and `ipodpatcher`.
+One program on your computer does the host side: it puts the music on the iPod in the layout the
+firmware reads, bakes the art sidecars, writes the index, flashes firmware and fetches updates —
+as a command line (`core`) and as a desktop window (`core-app`) over the same code. It has its own
+repository, [core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app): the downloads
+are on its releases page, and its guide and source are there too.
 
 ## Flash
 
 The image replaces Apple's firmware, so you need an iPod 5.5G and a backup of its firmware
-partition. `core flash` takes that backup itself, writes only the OSOS image and its directory row,
-and compares the read-back. Paths are relative to `core/`, as in Build.
+partition. `make ipod` wraps `core.bin` in the `.ipod` transport format with
+[`tools/pack_ipod.py`](tools/pack_ipod.py) (checksum, model name, image — no Go, no app needed).
+The desktop app's `core flash` takes the backup itself, writes only the OSOS image and its
+directory row, and compares the read-back. Paths are relative to `core/`, as in Build.
 
 ```bash
-core flash build-hw/core.ipod                    # iPod in disk mode
+make ipod                                        # build-hw/core.ipod
+core flash build-hw/core.ipod                    # iPod in disk mode (the app's CLI)
 ```
 
 ipodpatcher is the documented fallback:
@@ -273,11 +241,10 @@ The firmware and the desktop app are versioned and released apart. Firmware vers
 tags `v0.1.0` and up; the boot screen's bottom-right stamp and Settings → About show the one the
 device runs, and an untagged build shows the nearest tag, the commit distance and the hash, for
 example `v0.1.0-3-g7617196`. A firmware release carries the flashable `core.ipod`, and what
-changed is in [`CHANGELOG.md`](CHANGELOG.md). The desktop app and the `core` CLI are tagged
-`app-v0.3.0` and up; an app release carries their ten binaries, the window's About shows the
-version, and what changed is in [`core/cli/CHANGELOG.md`](core/cli/CHANGELOG.md). The app says in
-About which firmware it writes for (Core v0.2.0 or newer) and offers the firmware update first
-when the iPod's is older.
+changed is in [`CHANGELOG.md`](CHANGELOG.md). The desktop app and the `core` CLI are released
+from [their own repository](https://github.com/BrandonDedolph/core-desktop-app) (its tags here
+ended at `app-v0.3.0`); the app says in About which firmware it writes for and offers the firmware
+update first when the iPod's is older.
 
 ## Design
 
@@ -289,8 +256,7 @@ where the two differ the reference notes say so. [`design_reference/`](design_re
 
 ```
 core/         firmware: boot/, kernel/, hal/, fs/, codecs/, ui/, library/, player/, tests/, docs/
-core/cli/     the core app: info, sync, index, art, backup, flash (Go)
-tools/        host tooling: atlases, and the Python oracles the core app is checked against
+tools/        host tooling: atlases, the .ipod packer, and the Python oracles the core app is checked against
 docs/screens/ the screenshots and GIFs in this README, and the renderer that draws them
 docs/         the user guide
 design_reference/  the UI design source
@@ -303,6 +269,4 @@ Apache-2.0 ([`core/LICENSE`](core/LICENSE)). The vendored FLAC decoder `dr_flac`
 MIT-0; the MP3 decoder is PacketVideo's `pvmp3` from AOSP, Apache-2.0, vendored at a pinned commit
 with its NOTICE and its patent disclaimer
 ([`core/codecs/pvmp3/`](core/codecs/pvmp3/README.md)). Nunito is under the SIL Open Font
-License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)); `core-app` embeds three of its
-weights, with the licence beside them in
-[`core/cli/internal/app/fonts/OFL.txt`](core/cli/internal/app/fonts/OFL.txt).
+License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)).

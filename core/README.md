@@ -30,7 +30,6 @@ core/
 ├── ui/          gamma-correct AA text renderer + Nunito atlases, the
 │                runtime palette (seven themes), art thumbnail cache,
 │                settings model, and per-screen renderers
-├── cli/         Go host CLI (`core` — .ipod firmware pack/unpack, sim)
 ├── docs/hw/     hardware reference the drivers were written against
 ├── docs/design/ design notes (settings persistence, …)
 ├── cross/       Meson cross file (arm-none-eabi)
@@ -53,10 +52,12 @@ app layer.
   reference build (Arm GNU Toolchain 14.2.rel1) both compile under `-Werror`.
   The pin and the reasoning live in `.tool-versions` and
   `.github/workflows/ci.yml`, not in a comment that can go stale.
-- `go` — for the host CLI (`.ipod` packaging)
+- `python3` — for `make ipod` (`../tools/pack_ipod.py`) and the `verify-hw`
+  checks. No Go: the desktop app and its `core` CLI live in
+  [core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app).
 
 On Arch: `pacman -S arm-none-eabi-gcc arm-none-eabi-binutils
-arm-none-eabi-newlib meson ninja pkgconf sdl2 go`.
+arm-none-eabi-newlib meson ninja pkgconf sdl2 python`.
 
 ## Quick start
 
@@ -67,7 +68,7 @@ make sim        # configures + builds the HOST TEST SUITE (see note below)
 make verify-hw  # static checks against a fresh `make hw` (see below)
 make help       # all targets
 
-meson test -C build-sim     # 82 host unit + MMIO golden-trace suites
+meson test -C build-sim     # 83 host unit + MMIO golden-trace suites
 ```
 
 `make verify-hw` is the static half of the safety net — the checks that
@@ -113,6 +114,16 @@ make ipod                       # → build-hw/core.ipod
 ipodpatcher <n> -wf build-hw/core.ipod    # write it as the firmware image
 ipodpatcher <n> -rfb read-back.bin        # read back and compare — always
 ```
+
+`make ipod` wraps `build-hw/core.bin` in the `.ipod` transport format with
+[`../tools/pack_ipod.py`](../tools/pack_ipod.py): a big-endian additive
+checksum (seeded with 5 for `ipvd` — unlike the partition directory's, which
+is unseeded), the model name `ipvd`, then the image; see
+[`docs/hw/08-boot-dock.md`](docs/hw/08-boot-dock.md). It refuses an
+empty, truncated or blank `core.bin`, and writes through a read-back-verified
+temp file. (It replaced the desktop app's Go packer, byte-identical, when the
+app moved to its own repository.) The app's `core flash` is the other way to
+write the image; ipodpatcher is the one documented here.
 
 **Recovery is the boot ROM's disk mode: hold Select + Play at power-on.**
 It lives in ROM and runs *before* any firmware image is loaded, so it works

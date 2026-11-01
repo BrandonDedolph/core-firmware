@@ -1570,5 +1570,15 @@ if target == 'sim'
          args: [meson.current_source_dir() / '..' / '..' / 'tools' /
                 'make_otg.py', '--selftest'],
          suite: 'unit')
+
+    # pack-ipod: the .ipod packer `make ipod` runs (tools/pack_ipod.py) —
+    # header layout and the "ipvd" seed-5 checksum against a golden vector,
+    # the 32-bit wrap, every read-side and plausibility refusal, and the
+    # atomic write's overwrite guard. Ported from the desktop app's Go
+    # packer and checked byte-identical to it before the app left the repo.
+    test('pack-ipod', py,
+         args: [meson.current_source_dir() / '..' / '..' / 'tools' /
+                'pack_ipod.py', '--selftest'],
+         suite: 'unit')
   endif
 endif

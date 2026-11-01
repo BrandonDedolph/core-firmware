@@ -6,9 +6,14 @@ index that get built into or copied alongside the firmware.
 
 Five of them — `build_index.py`, `coreart.py`, `make_config.py`, `make_log.py`,
 `make_otg.py` —
-are no longer the everyday path: the `core` app (`core/cli`) does that work in
-Go. They stay as the **reference implementations and parity oracles** the Go
-code is tested against, and their rows below say what "agrees" means for each.
+are no longer the everyday path: the `core` desktop app and CLI do that work in
+Go, from their own repository,
+[core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app). They stay
+here as the **reference implementations and parity oracles** the Go code is
+tested against — the app's parity tests find this checkout through the
+`CORE_REPO` environment variable (or by walking up for `tools/build_index.py`)
+and skip when it is absent — and their rows below say what "agrees" means for
+each.
 
 | Tool | What it does |
 |---|---|
@@ -23,7 +28,8 @@ code is tested against, and their rows below say what "agrees" means for each.
 | `build_index.py` | Read a source music tree with `ffprobe` and emit `CORELIB.IDX` — the single-read library index the firmware loads at boot (duration, track/disc, UTF-8 title/artist/album/genre, and a normalized-name hash locator per track). Paths are `--src` / `--out`; ffprobe failures are counted and listed at the end (a non-zero exit), and the record count is checked against the firmware's `LIB_MAX_SONGS`. **Reference implementation / parity oracle** for `core index` / `core sync`, which is the everyday path: the Go index is **byte-identical** to this script's on the same tree, asserted on the real library. |
 | `artist_genres.json` | The artist → primary genre map `build_index.py` applies when a file's own genre tag is empty or a comma-list. Data, not code — add artists here, not in the script. |
 | `coreart.py` | Extract a FLAC's embedded cover into the CoreArt RGB565 sidecars the firmware blits directly — `folder.art` (120×120, now-playing hero) and `folder.thm` (28×28, list chip). No JPEG decoding on the device. **Reference implementation / parity oracle** for `core art` / `core sync`. Not byte-identical, and cannot be: ffmpeg dithers its RGB565 output with a fixed ordered pattern that `-sws_dither none` does not reach. The Go renderer is held to a **tolerance against ffmpeg's rgb24 at the target size** over the whole corpus (mean |Δ| ≤ 2.0, p99 ≤ 12 per channel). |
-| `install_deps.sh` | One-shot install of the build prerequisites (toolchain + SDL2 + Go). |
+| `pack_ipod.py` | Wrap the flat `core.bin` in the `.ipod` transport format ipodpatcher and the desktop app flash: a big-endian additive checksum seeded with 5 for `ipvd`, the 4-byte model name `ipvd`, then the image (`core/docs/hw/08-boot-dock.md`). It is what `make ipod` runs. It refuses an empty, truncated (< 4 KiB), oversized (> 32 MiB) or single-byte-blank image so a failed objcopy cannot become a "valid" core.ipod, and writes through a temp file that is read back and re-verified before the rename. A port of the Go packer that `make ipod` used to `go run` from the app; checked **byte-identical** to it on the same `core.bin` before the app moved out. `--selftest` runs under `meson test`. |
+| `install_deps.sh` | One-shot install of the build prerequisites (toolchain + SDL2; no Go — that is the app repo's). |
 | `fonts-src/` | Nunito TTF sources (SIL Open Font License 1.1) the atlas generator reads. |
 | `fonts-out/` | **Dead.** 30 `.fnt` bitmap fonts from the abandoned Rockbox-theme era. Nothing in `core/` or the build references them, and the device does not read `.fnt` at all — it links the generated C headers in `core/ui/atlas/`. Kept only because nobody has deleted it; it is a candidate for removal, not a build input. |
 
@@ -31,10 +37,14 @@ code is tested against, and their rows below say what "agrees" means for each.
 
 The everyday path for the four oracle tools is the `core` app, not the scripts:
 `core index`, `core art`, and `core sync` (which does both, plus the copy, the
-playlists and the two pre-allocated files) — see [`core/cli/README.md`](../core/cli/README.md).
+playlists and the two pre-allocated files) — see
+[core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app).
 What follows is the by-hand route and the way the oracles are run.
 
 ```bash
+# The flashable image (what `make ipod` runs)
+python3 tools/pack_ipod.py core/build-hw/core.bin --out core/build-hw/core.ipod --force
+
 # Font atlases + glyphmap (after changing fonts or glyph coverage)
 bash tools/atlas_gen.sh          # → core/ui/atlas/*.h
 

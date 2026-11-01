@@ -137,7 +137,16 @@ int tag_flac_read(const void *bytes, size_t len, audio_tags_t *out) {
     memset(out, 0, sizeof(*out));
 
     drflac *f = drflac_open_memory_with_metadata(bytes, len, on_meta, out, NULL);
-    if (!f) return -1;
+    if (!f) {
+        /* dr_flac fires on_meta block by block and can refuse the file
+         * AFTER a PICTURE was stashed — so a -1 used to hand back a heap
+         * copy of the art (and the tags) that no caller frees, because -1
+         * reads as "nothing here". Release it and leave *out as it was
+         * zeroed above. */
+        audio_tags_free(out);
+        memset(out, 0, sizeof(*out));
+        return -1;
+    }
     drflac_close(f);
     return 0;
 }

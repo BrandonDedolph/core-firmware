@@ -312,6 +312,45 @@ int main(int argc, char **argv)
         static const uint8_t tiny[2] = { 'f', 'L' };
         src_init(&ms, &src, tiny, sizeof tiny);
         check("truncated-magic", flac_meta_read(&src, &m) == -1);
+
+        /* No STREAMINFO: a SEEKTABLE whose length runs off the end, then
+         * nothing. -1, and nothing left behind — the seek-point count used
+         * to survive into the "zeroed" result (found by fuzz_flac_meta;
+         * regress/flac_meta/no-streaminfo-seektable). */
+        static const uint8_t nosi[8] = { 'f', 'L', 'a', 'C', 0x03, 0x02, 0, 0 };
+        static const flac_meta_t zero;
+        src_init(&ms, &src, nosi, sizeof nosi);
+        check("no-streaminfo-is-zeroed",
+              flac_meta_read(&src, &m) == -1 && memcmp(&m, &zero, sizeof m) == 0);
+    }
+
+    /* --- Test 3b: two STREAMINFO blocks, the second with rate 0. The last
+     * one wins, and it has to win BOTH fields: duration 0 with rate 0, not
+     * the first block's 10 s next to a rate of 0 (found by fuzz_flac_meta;
+     * regress/flac_meta/second-streaminfo-rate-0). --- */
+    {
+        static uint8_t buf[4 + 2 * 38];
+        uint8_t *p = buf;
+        memcpy(p, "fLaC", 4); p += 4;
+        for (int b = 0; b < 2; b++) {
+            *p++ = (uint8_t)(b ? 0x80 : 0x00); put_be24(p, 34); p += 3;
+            memset(p, 0, 34);
+            if (b == 0) {                    /* 44100 Hz, 441000 samples */
+                p[10] = (uint8_t)(44100 >> 12);
+                p[11] = (uint8_t)(44100 >> 4);
+                p[12] = (uint8_t)(((44100 & 0xF) << 4) | (1 << 1));
+                p[13] = (uint8_t)(0x0F << 4);
+                p[15] = (uint8_t)(441000 >> 16);
+                p[16] = (uint8_t)(441000 >> 8);
+                p[17] = (uint8_t)441000;
+            }
+            p += 34;
+        }
+        src_init(&ms, &src, buf, sizeof buf);
+        int rc = flac_meta_read(&src, &m);
+        check("second-streaminfo-parses", rc == 0 && m.have == 1);
+        check("second-streaminfo-rate-0-no-duration",
+              m.sample_rate == 0 && m.duration_s == 0);
     }
 
     /* --- Test 4: a VORBIS_COMMENT lying about its size can't run away --- */

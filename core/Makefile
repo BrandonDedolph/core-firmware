@@ -4,20 +4,26 @@
 
 BUILD_HW  := build-hw
 BUILD_SIM := build-sim
+BUILD_FUZZ := build-fuzz
+FUZZ_SECS ?= 60
+FUZZ_CC   ?= clang
 
-.PHONY: help hw ipod sim clean realclean reconfigure-hw reconfigure-sim verify-hw
+.PHONY: help hw ipod sim fuzz fuzz-run clean realclean reconfigure-hw reconfigure-sim verify-hw
 
 help:
 	@echo "Targets:"
 	@echo "  make hw           Build the firmware ELF + flat binary (ARM, iPod 5G/5.5G)"
 	@echo "  make ipod         Build hw, then wrap as .ipod transport image"
 	@echo "  make sim          Build the host simulator (SDL2)"
+	@echo "  make fuzz         Build the libFuzzer harnesses (clang) into $(BUILD_FUZZ)/"
+	@echo "  make fuzz-run     Run every harness for FUZZ_SECS (default 60) seconds"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make realclean    Remove build directories entirely"
 	@echo
 	@echo "Build directories:"
 	@echo "  $(BUILD_HW)/      ARM cross-build (core.elf, core.bin, core.ipod)"
 	@echo "  $(BUILD_SIM)/     host build"
+	@echo "  $(BUILD_FUZZ)/    host build with clang + -Dfuzz=true (fuzz_<name>)"
 
 hw: $(BUILD_HW)/build.ninja
 	ninja -C $(BUILD_HW)
@@ -50,6 +56,19 @@ verify-hw: hw
 	python3 tests/scripts/check_index_loader.py
 	python3 tests/scripts/check_build_index.py
 
+# The fuzz harnesses (tests/fuzz, docs/testing-fuzz.md). A build directory of
+# its own because it is a different COMPILER: libFuzzer is clang's, while the
+# sim build is whatever cc is. Only the `fuzz` alias is built — the rest of
+# the sim tree is configured here but never compiled with these flags.
+fuzz: $(BUILD_FUZZ)/build.ninja
+	ninja -C $(BUILD_FUZZ) -j4 fuzz
+
+fuzz-run: fuzz
+	sh tests/fuzz/run_fuzz.sh $(BUILD_FUZZ) $(FUZZ_SECS)
+
+$(BUILD_FUZZ)/build.ninja:
+	CC=$(FUZZ_CC) meson setup $(BUILD_FUZZ) -Dtarget=sim -Dfuzz=true -Db_lto=false
+
 $(BUILD_HW)/build.ninja:
 	meson setup $(BUILD_HW) --cross-file cross/arm-none-eabi.txt -Dtarget=hw
 
@@ -67,4 +86,4 @@ clean:
 	@if [ -d $(BUILD_SIM) ]; then ninja -C $(BUILD_SIM) -t clean; fi
 
 realclean:
-	rm -rf $(BUILD_HW) $(BUILD_SIM)
+	rm -rf $(BUILD_HW) $(BUILD_SIM) $(BUILD_FUZZ)

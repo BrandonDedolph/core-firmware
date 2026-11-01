@@ -334,7 +334,13 @@ static void parse_streaminfo(flac_meta_t *out, const uint8_t *b)
                      ((uint64_t)b[16] << 8)  |
                      (uint64_t)b[17];
 
+    /* Both fields from THIS block, always. A file may carry a second
+     * STREAMINFO (the spec allows one; files in the wild do not care), and
+     * the last one wins — but it used to win only the rate: one with rate 0
+     * left the previous block's duration standing next to sample_rate 0, a
+     * length nothing could have computed. */
     out->sample_rate = sr;
+    out->duration_s  = 0;
     if (sr != 0 && total != 0) {
         /* Round to nearest whole second for display. */
         out->duration_s = (uint32_t)((total + (sr / 2)) / sr);
@@ -403,5 +409,16 @@ int flac_meta_read(decoder_source_t *src, flac_meta_t *out)
         }
     }
 
-    return out->have ? 0 : -1;
+    if (!out->have) {
+        /* No STREAMINFO, so not a FLAC we can play — but the blocks before
+         * the walk gave up may already have written a seek-point count or a
+         * whole Vorbis comment. The header promises a zeroed *out on -1 (the
+         * "fall back to the filename" state), so make it true rather than
+         * hand back tags from a file we just called unreadable. */
+        for (uint32_t i = 0; i < sizeof *out; i++) {
+            z[i] = 0;
+        }
+        return -1;
+    }
+    return 0;
 }

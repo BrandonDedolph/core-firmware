@@ -24,6 +24,8 @@
 #   boot-smoke        the linked ARM image booted in the clicky emulator,
 #                     its UART transcript held to a golden — the only job
 #                     that executes crt0.S / switch.S / the IRQ entry
+#   fuzz              libFuzzer harnesses for every disk parser, replayed
+#                     over their committed inputs, then fuzzed 60 s each
 #
 # The desktop app and its `core` CLI (Go) have their own repository and CI,
 # github.com/BrandonDedolph/core-desktop-app. Nothing here builds Go; the
@@ -238,6 +240,75 @@ jobs:
         with:
           name: meson-logs-asan
           path: core/build-asan/meson-logs/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------
+  # Fuzz the disk parsers (core/tests/fuzz, core/docs/testing-fuzz.md).
+  #
+  # The sanitizer job runs each parser over the inputs someone thought to
+  # write. This one lets libFuzzer write them: FAT32, the M3U reader, ID3,
+  # FLAC metadata, the MPEG framing layer, and the four files the firmware
+  # both reads and rewrites (settings, event log, On-The-Go, library index).
+  #
+  # Two steps, deliberately separate. The REPLAY runs every committed seed
+  # and every past crash once (-runs=0): a regression fails there in seconds
+  # and names the input. Then each harness FUZZES for a bounded 60 s — long
+  # enough to catch a shallow new bug in a change, short enough to run on
+  # every push; the deep runs are a developer's (`make fuzz-run`). A crash,
+  # a hang (-timeout=10 per input) or an OOM fails the job, and the input is
+  # uploaded so it can be reproduced locally with the command in the doc.
+  #
+  # Pinned to 24.04 because the libFuzzer runtime is a versioned package
+  # there (libclang-rt-18-dev); `ubuntu-latest` moving would break the
+  # install line, not the code.
+  # ---------------------------------------------------------------------
+  fuzz:
+    name: fuzz (libFuzzer, bounded)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host build tools and clang's libFuzzer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build python3 libsdl2-dev clang-18 libclang-rt-18-dev
+
+      - name: Record the toolchain actually in use
+        run: |
+          clang-18 --version | head -1
+          meson --version
+
+      - name: Build the harnesses from scratch
+        working-directory: core
+        run: make fuzz FUZZ_CC=clang-18
+
+      - name: Replay the committed corpus and regression inputs (-runs=0)
+        working-directory: core
+        env:
+          FUZZ_OUT: fuzz-out
+          FUZZ_REPLAY_ONLY: "1"
+        run: sh tests/fuzz/run_fuzz.sh build-fuzz 0
+
+      - name: Fuzz every harness for 60 s
+        working-directory: core
+        env:
+          FUZZ_OUT: fuzz-out
+          FUZZ_PARALLEL: "1"
+        run: sh tests/fuzz/run_fuzz.sh build-fuzz 60
+
+      - name: Upload the crashing inputs and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: |
+            core/fuzz-out/*/crash-*
+            core/fuzz-out/*/timeout-*
+            core/fuzz-out/*/oom-*
+            core/fuzz-out/*/leak-*
+            core/fuzz-out/*/*.log
+            core/build-fuzz/meson-logs/
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------

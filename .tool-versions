@@ -1,5 +1,3 @@
-golang 1.22.10
-
 # --- ARM cross-toolchain (not asdf-managed) --------------------------------
 #
 # The firmware is built with arm-none-eabi-gcc, which asdf has no plugin for,

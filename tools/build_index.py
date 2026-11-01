@@ -291,7 +291,7 @@ def probe(path):
     # TRUNCATED, not rounded, and taken from ffprobe's format.duration — which
     # for an MP3 is the Xing/Info frame count times the samples per frame, less
     # the LAME encoder delay and end padding. `core sync` computes exactly that
-    # rule itself (core/cli/internal/id3), because the two tools must stamp
+    # rule itself (core-desktop-app's internal/id3), because the two tools must stamp
     # byte-identical indexes for the same tree and a one-second disagreement
     # would break that.
     try:

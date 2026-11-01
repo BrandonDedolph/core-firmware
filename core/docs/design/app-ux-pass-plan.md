@@ -1,5 +1,7 @@
 # The app pass — plan
 
+> **Moved.** This document moved to core-desktop-app/docs/design/ when the app got its own repository (2026-11-01); this copy is frozen.
+
 *2026-10-31. Decided with the owner on the design page
 (https://claude.ai/artifact/4rq6e21KH7EkT5FPFigD9X): D1 Linen + Onyx following
 the system, D2 identity card + hold-to-write, D3 Albums · Library · iPod with

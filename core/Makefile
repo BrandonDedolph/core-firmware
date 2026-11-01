@@ -1,8 +1,6 @@
 # Convenience wrapper around Meson + Ninja.
 #
 # This is the human entry point. Real build logic lives in meson.build.
-# The Go CLI (`core build hw` / `core build sim`) is a thin wrapper around
-# these same targets — they should stay equivalent.
 
 BUILD_HW  := build-hw
 BUILD_SIM := build-sim
@@ -24,14 +22,15 @@ help:
 hw: $(BUILD_HW)/build.ninja
 	ninja -C $(BUILD_HW)
 
-# `make ipod` produces $(BUILD_HW)/core.ipod by running the host Go CLI
-# against the flat binary that `make hw` already emits. `go run` here
-# avoids requiring a pre-built `core` binary; once the CLI ships in CI
-# we'll switch this to the released binary. --force because remaking
-# over a previous run's core.ipod is the normal case here, not an
-# accident the CLI's overwrite guard should block.
+# `make ipod` produces $(BUILD_HW)/core.ipod from the flat binary that
+# `make hw` already emits, with tools/pack_ipod.py (checksum + "ipvd" +
+# image; it refuses an empty/truncated/blank core.bin). This used to be the
+# desktop app's Go CLI (`go run ./cmd/core firmware pack`); the app has its
+# own repository now (core-desktop-app) and the Python port is byte-identical.
+# --force because remaking over a previous run's core.ipod is the normal case
+# here, not an accident the packer's overwrite guard should block.
 ipod: hw
-	cd cli && go run ./cmd/core firmware pack ../$(BUILD_HW)/core.bin --out ../$(BUILD_HW)/core.ipod --force
+	python3 ../tools/pack_ipod.py $(BUILD_HW)/core.bin --out $(BUILD_HW)/core.ipod --force
 
 sim: $(BUILD_SIM)/build.ninja
 	ninja -C $(BUILD_SIM)

@@ -12,8 +12,8 @@
 # So the non-negotiable property here is: EVERY JOB BUILDS FROM NOTHING. No
 # cached build directories, no ccache, no `--no-rebuild`, no incremental
 # reuse. The Meson/Ninja artefacts are the thing most likely to lie, so they
-# are the thing we refuse to persist. (Package and Go-module caches are fine —
-# they are inputs, not outputs.)
+# are the thing we refuse to persist. (Package caches are fine — they are
+# inputs, not outputs.)
 #
 # Jobs:
 #   firmware-pinned   exact, reproducible ARM toolchain — the reference build
@@ -24,9 +24,10 @@
 #   boot-smoke        the linked ARM image booted in the clicky emulator,
 #                     its UART transcript held to a golden — the only job
 #                     that executes crt0.S / switch.S / the IRQ entry
-#   cli               the Go host CLI and core-app, the Gio desktop app:
-#                     build, vet, test, gofmt, the snapshot render, and
-#                     the cross-compiled release binaries as artifacts
+#
+# The desktop app and its `core` CLI (Go) have their own repository and CI,
+# github.com/BrandonDedolph/core-desktop-app. Nothing here builds Go; the
+# .ipod transport image is packed by tools/pack_ipod.py (`make ipod`).
 
 name: CI
 
@@ -115,6 +116,12 @@ jobs:
       - name: Verify the linked image
         working-directory: core
         run: make verify-hw
+
+      # The flashable transport image, from the binary just built — the
+      # packer refuses an empty, truncated or blank core.bin.
+      - name: Pack core.ipod
+        working-directory: core
+        run: make ipod
 
       - name: Upload build logs on failure
         if: failure()
@@ -349,165 +356,3 @@ jobs:
             core/build-hw/core.clicky.fw
             core/sysdump.log
           if-no-files-found: ignore
-
-  # ---------------------------------------------------------------------
-  # The Go host CLI (core/cli): `core firmware pack` builds the .ipod
-  # transport image, so a break here means no way to get a build onto the
-  # device. gofmt is checked because a formatting drift in a repo with no CI
-  # is invisible until it collides with someone else's edit.
-  # ---------------------------------------------------------------------
-  cli:
-    name: Go CLI
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: core/cli
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Full history and tags: scripts/build-all.sh stamps the binary from
-          # `git describe --tags --match 'app-v[0-9]*'`, and checkout's default
-          # depth-1 clone has no tags at all, so the stamp would silently
-          # degrade to a bare SHA even once an app tag exists.
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          # Kept in step with .tool-versions and core/cli/go.mod.
-          go-version: "1.22.10"
-          cache-dependency-path: core/cli/go.sum
-
-      # Enforced. The gofmt-dirty files this step used to tolerate were in
-      # internal/tagcache, internal/artistart and the command stubs that went
-      # with them; those are deleted, `gofmt -l .` over the module is empty
-      # under the Go pinned above, so drift fails the job again.
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "these files are not gofmt-clean:" >&2
-            echo "$unformatted" >&2
-            gofmt -d .
-            exit 1
-          fi
-
-      # core-app is a Gio window, and Gio's Linux backend is cgo against
-      # the X11/Wayland/EGL/GLES headers. These are the -dev packages it
-      # needs; the runtime .so files are already on the image. Without
-      # them the app package still COMPILES (see the build tags in
-      # internal/app/gpu.go — the two GPU files drop out of a Linux
-      # build that has no Vulkan headers), so this step is what makes
-      # the difference between CI checking the model and CI checking the
-      # window. libasound2-dev is internal/player's: oto's Linux backend
-      # is cgo against ALSA, so every build of the module needs it.
-      - name: Install the Gio GUI build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
-            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev libasound2-dev pkg-config
-
-      - name: Build
-        run: go build ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        # -tags noaudio: the album sheet's player is a stub in the tests,
-        # so no test ever opens an audio device (core/cli/README.md).
-        run: go test -tags noaudio ./...
-
-      # The same three again WITH the GUI files in. -tags novulkan is
-      # the flag the whole arrangement turns on: it drops Gio's Vulkan
-      # path, which needs vulkan/vulkan.h and buys nothing here, and it
-      # is what a developer on a machine without those headers passes
-      # too. Passing it in CI as well means the tagged build is not a
-      # configuration only one laptop ever compiles.
-      #
-      # This run is also the one that executes TestSnapshot: it renders
-      # the window headless through Mesa's software EGL and writes the
-      # PNGs, so a layout change that overlaps or clips something fails
-      # here rather than on the user's desktop.
-      - name: Build, vet and test with the GUI in (-tags novulkan)
-        env:
-          CORE_SNAPSHOT_DIR: ${{ runner.temp }}/app-snapshots
-        run: |
-          go build -tags novulkan ./...
-          go vet -tags novulkan ./...
-          go test -tags "novulkan noaudio" ./...
-
-      - name: Upload the rendered window snapshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-app-snapshots
-          path: ${{ runner.temp }}/app-snapshots
-          if-no-files-found: ignore
-
-      # The binaries a user actually downloads. Building them on every
-      # push is how we find out that, say, a new dependency pulled in cgo or
-      # a syscall that does not exist on darwin BEFORE a tag is cut and the
-      # release workflow is the first thing to try it. Same script, same
-      # -ldflags, as .github/workflows/release.yml — see the header of
-      # core/cli/scripts/build-all.sh for why that is one file and not two.
-      #
-      # On this runner that is the five `core` binaries, core-app for
-      # Windows (pure Go, cross-built) and core-app-linux-amd64 (cgo,
-      # native). The script prints the darwin and linux/arm64 GUI builds
-      # it skipped; release.yml has jobs on their own runners for those.
-      - name: Cross-compile every shipped target
-        run: bash scripts/build-all.sh dist
-
-      - name: Show the version stamp the binaries carry
-        run: ./dist/core-linux-amd64 --version
-
-      - name: Upload core-linux-amd64
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-linux-amd64
-          path: core/cli/dist/core-linux-amd64
-          if-no-files-found: error
-
-      - name: Upload core-linux-arm64
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-linux-arm64
-          path: core/cli/dist/core-linux-arm64
-          if-no-files-found: error
-
-      - name: Upload core-darwin-amd64
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-darwin-amd64
-          path: core/cli/dist/core-darwin-amd64
-          if-no-files-found: error
-
-      - name: Upload core-darwin-arm64
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-darwin-arm64
-          path: core/cli/dist/core-darwin-arm64
-          if-no-files-found: error
-
-      - name: Upload core-windows-amd64.exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-windows-amd64.exe
-          path: core/cli/dist/core-windows-amd64.exe
-          if-no-files-found: error
-
-      - name: Upload core-app-windows-amd64.exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-app-windows-amd64.exe
-          path: core/cli/dist/core-app-windows-amd64.exe
-          if-no-files-found: error
-
-      - name: Upload core-app-linux-amd64
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-app-linux-amd64
-          path: core/cli/dist/core-app-linux-amd64
-          if-no-files-found: error

@@ -2,8 +2,14 @@
 
 Each release lists what changed on the device since the previous one. Versions are git tags;
 the boot screen and Settings → About show the one the device runs.
-The desktop app and the `core` CLI have their own changelog at
-[core/cli/CHANGELOG.md](core/cli/CHANGELOG.md) and their own `app-v…` tags.
+The desktop app and the `core` CLI have their own repository, releases and changelog:
+[core-desktop-app/CHANGELOG.md](https://github.com/BrandonDedolph/core-desktop-app/blob/main/CHANGELOG.md).
+
+## Unreleased
+
+- The desktop app and the `core` CLI moved to their own repository,
+  [core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app); their last release
+  from this one was app-v0.3.0.
 
 ## v0.2.2 — 2026-11-01
 

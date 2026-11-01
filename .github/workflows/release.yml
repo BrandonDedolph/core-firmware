@@ -1,260 +1,82 @@
-# Attach the desktop app's and the CLI's binaries to an app release.
+# Release-time guard for a firmware tag. It uploads nothing.
 #
-# THE SPLIT THIS FILE EXISTS TO HONOUR. The firmware and the desktop app are
-# versioned apart, and so are their releases:
+# A firmware release (`v…`) has ONE asset, core.ipod, and the human uploads it:
+# tools/release.py vX.Y.Z stamps the docs, then `make ipod` and
+# `gh release create vX.Y.Z core/build-hw/core.ipod` run locally. The image on
+# a release has to be the exact one that was flashed and verified on real
+# hardware, and CI's pinned gcc 14 and the local gcc 16 do not produce the same
+# binary, so CI never builds the asset.
 #
-#   v…         a FIRMWARE release. One asset, core.ipod, built and flashed
-#              LOCALLY by the human running tools/release.py vX.Y.Z. CI's
-#              pinned gcc 14 and the local gcc 16 do not produce the same
-#              firmware binary, and the image on a release has to be the
-#              exact one that was verified on real hardware. A `v…` tag runs
-#              no job here at all.
+# What this job does instead: build the tagged commit from scratch with the
+# same pinned ARM toolchain as ci.yml's firmware-pinned job and fail loudly
+# unless the image's version marker (`CORE-FW-VERSION:<tag>|<build id>`, see
+# core/tests/scripts/check_version_marker.sh) reads the tag being pushed, for
+# both halves — so a tag on a commit that does not build, or one whose
+# describe would stamp some other version, shows up red before anyone flashes
+# or downloads it.
 #
-#   app-v…     an APP release: ten binaries, built HERE from the tag, and no
-#              core.ipod. Five `core` CLI binaries (pure Go, one Linux
-#              runner makes all five, with the same script CI runs on every
-#              push — core/cli/scripts/build-all.sh) and five `core-app` GUI
-#              binaries. core-app is a Gio window: its WINDOWS backend is
-#              pure Go and cross-builds on the same Linux runner (with
-#              -H windowsgui, so no console flashes on launch); its X11 and
-#              Cocoa backends are cgo and can only be built on their own
-#              platform. Hence three jobs, each gated on the tag's prefix:
-#              ubuntu-latest (CLI + core-app-windows + the linux/amd64 GUI),
-#              ubuntu-24.04-arm (the linux/arm64 GUI) and macos-latest (both
-#              darwin GUIs, cross-compiled between arm64 and amd64 with the
-#              SDK Xcode already has). The binaries are stamped with
-#              `git describe --match 'app-v[0-9]*'`, so a firmware tag on
-#              the same commit never becomes the app's version.
-#
-# This workflow never creates the real release if it can help it: it waits
-# up to ten minutes for the human's `gh release create app-v…` (from
-# tools/release.py app-vX.Y.Z) to land — tag push and release creation are
-# separate steps, and the push usually goes first — then uploads onto it with
-# --clobber. Only if the release never appears does it make a DRAFT, visible
-# to nobody, whose notes say the real notes are still missing.
+# The desktop app and its `core` CLI are released from their own repository,
+# github.com/BrandonDedolph/core-desktop-app (formerly `app-v…` tags here).
 name: Release
 
 on:
   push:
     tags:
-      # Both prefixes trigger the workflow; only app-v… runs a job (see the
-      # `if:` on each). A firmware tag is listed so a run shows up for it and
-      # says, by skipping, that there is nothing for CI to build.
       - "v[0-9]*"
-      - "app-v[0-9]*"
 
-# gh release upload/create writes to the repo's releases.
 permissions:
-  contents: write
+  contents: read
+
+env:
+  # Keep in step with ci.yml (and .tool-versions' note).
+  ARM_TOOLCHAIN_VERSION: "14.2.rel1"
+  ARM_TOOLCHAIN_URL: "https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi.tar.xz"
 
 jobs:
-  cli-binaries:
-    name: core CLI + Windows/Linux GUI
-    if: startsWith(github.ref_name, 'app-v')
+  tag-builds:
+    name: the tag builds and says its own version
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: core/cli
     steps:
       - uses: actions/checkout@v4
         with:
-          # Tags, so build-all.sh's `git describe --match 'app-v[0-9]*'`
-          # stamps the binaries with the app tag being released rather
-          # than a bare SHA.
+          # Tags and history, so meson's `git describe` sees the tag.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
-        with:
-          # Kept in step with .tool-versions and core/cli/go.mod.
-          go-version: "1.22.10"
-          cache-dependency-path: core/cli/go.sum
-
-      # Gio's Linux backend is cgo against these headers. The runtime
-      # .so files are on the image already; only the -dev packages are
-      # missing. Without them build-all.sh would skip the linux GUI
-      # build and the release would be one asset short with nothing but
-      # a line of output to say so.
-      - name: Install the Gio GUI build dependencies
+      - name: Install host build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
-            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev libasound2-dev pkg-config
+            meson ninja-build python3 binutils
 
-      - name: Build the CLI binaries, the Windows GUI and the linux/amd64 GUI
-        run: bash scripts/build-all.sh dist
+      - name: Install pinned ARM toolchain
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/arm-toolchain"
+          curl -fsSL "$ARM_TOOLCHAIN_URL" -o /tmp/arm-toolchain.tar.xz
+          tar -xf /tmp/arm-toolchain.tar.xz -C "$HOME/arm-toolchain" \
+              --strip-components=1
+          echo "$HOME/arm-toolchain/bin" >> "$GITHUB_PATH"
 
-      - name: Show the version stamp the binaries carry
-        run: ./dist/core-linux-amd64 --version
+      - name: Build, verify and pack the firmware from scratch
+        working-directory: core
+        run: |
+          arm-none-eabi-gcc --version | head -1
+          make hw
+          make verify-hw
+          make ipod
 
-      # Keep the workflow's own artifacts too: if the upload below fails for a
-      # permissions reason, the binaries are still downloadable from the run
-      # instead of needing a re-tag.
-      - name: Upload the binaries as run artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-binaries-${{ github.ref_name }}
-          path: core/cli/dist/core-*
-          if-no-files-found: error
-
-      - name: Wait for the human-created release, then attach the binaries
-        working-directory: .
+      - name: The version marker reads the tag
+        working-directory: core
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          set -euo pipefail
-          files="core/cli/dist/core-linux-amd64 \
-                 core/cli/dist/core-linux-arm64 \
-                 core/cli/dist/core-darwin-amd64 \
-                 core/cli/dist/core-darwin-arm64 \
-                 core/cli/dist/core-windows-amd64.exe \
-                 core/cli/dist/core-app-windows-amd64.exe \
-                 core/cli/dist/core-app-linux-amd64"
-
-          # 10 minutes: 40 polls, 15s apart. The human flow is
-          # `git push origin main $TAG` and then `gh release create $TAG
-          # --title ... --notes-file ...` (tools/release.py prints it) —
-          # minutes, not seconds.
-          found=""
-          for i in $(seq 1 40); do
-            if gh release view "$TAG" >/dev/null 2>&1; then
-              echo "release $TAG exists (poll $i)"
-              found=1
-              break
-            fi
-            echo "no release $TAG yet (poll $i/40); sleeping 15s"
-            sleep 15
-          done
-
-          if [ -z "$found" ]; then
-            echo "release $TAG never appeared; creating a draft with the binaries only"
-            gh release create "$TAG" --draft \
-              --title "Core app ${TAG#app-}" \
-              --notes "binaries pending notes"
+          set -eu
+          marker="$(strings build-hw/core.elf | grep '^CORE-FW-VERSION:' || true)"
+          want="CORE-FW-VERSION:${TAG}|${TAG}"
+          echo "marker: ${marker:-<none>}"
+          echo "want:   ${want}"
+          if [ "$marker" != "$want" ]; then
+            echo "::error::core.elf's version marker is '${marker:-<none>}', not '${want}'." \
+                 "Do not upload a core.ipod for ${TAG} until this is fixed." >&2
+            exit 1
           fi
-
-          gh release upload "$TAG" $files --clobber
-          echo
-          echo "assets now on $TAG:"
-          gh release view "$TAG" --json assets -q '.assets[].name'
-
-  # -------------------------------------------------------------------
-  # core-app for linux/arm64. cgo, so it needs an arm64 Linux machine —
-  # a cross toolchain would still have no arm64 X11/EGL headers.
-  #
-  # continue-on-error because the arm64 runner label is not available on
-  # every plan. A release that is missing one GUI binary and says so
-  # (tools/release.py app-vX.Y.Z --check lists the ten slots and names
-  # the empty ones) is better than a tag push that fails outright and
-  # leaves the other nine unattached.
-  # -------------------------------------------------------------------
-  linux-arm-gui:
-    name: core-app (linux/arm64)
-    if: startsWith(github.ref_name, 'app-v')
-    runs-on: ubuntu-24.04-arm
-    continue-on-error: true
-    needs: cli-binaries
-    defaults:
-      run:
-        working-directory: core/cli
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22.10"
-          cache-dependency-path: core/cli/go.sum
-
-      - name: Install the Gio GUI build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
-            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev libasound2-dev pkg-config
-
-      # build-all.sh builds what the host can: on this runner that is
-      # the five CLI binaries again (harmless, and it keeps the -ldflags
-      # stamp identical) plus core-app-linux-arm64.
-      - name: Build
-        run: bash scripts/build-all.sh dist
-
-      - name: Attach core-app-linux-arm64
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" core/cli/dist/core-app-linux-arm64 --clobber
-
-  # -------------------------------------------------------------------
-  # core-app for macOS. Cocoa is cgo; Xcode's SDK carries both slices,
-  # so one runner builds arm64 and amd64 with CGO_ENABLED=1 and the
-  # matching GOARCH.
-  #
-  # This job runs after cli-binaries so the release (or its draft)
-  # already exists by the time it uploads.
-  # -------------------------------------------------------------------
-  macos-gui:
-    name: core-app (darwin/amd64, darwin/arm64)
-    if: startsWith(github.ref_name, 'app-v')
-    runs-on: macos-latest
-    needs: cli-binaries
-    defaults:
-      run:
-        working-directory: core/cli
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22.10"
-          cache-dependency-path: core/cli/go.sum
-
-      # Not build-all.sh here: that script only builds the GUI for the
-      # host's own GOARCH, and on macOS both slices are buildable from
-      # one runner. Same -ldflags stamp, taken from the same place.
-      - name: Build both darwin GUI binaries
-        run: |
-          set -euo pipefail
-          MODULE="$(go list -m)"
-          VERSION="$(git describe --tags --always --dirty --match 'app-v[0-9]*')"
-          COMMIT="$(git rev-parse HEAD)"
-          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-s -w"
-          LDFLAGS="$LDFLAGS -X ${MODULE}/internal/version.Version=${VERSION}"
-          LDFLAGS="$LDFLAGS -X ${MODULE}/internal/version.Commit=${COMMIT}"
-          LDFLAGS="$LDFLAGS -X ${MODULE}/internal/version.Date=${DATE}"
-          mkdir -p dist
-          for arch in amd64 arm64; do
-            echo "-> core-app-darwin-$arch"
-            CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" \
-              go build -trimpath -ldflags "$LDFLAGS" \
-                -o "dist/core-app-darwin-$arch" ./cmd/core-app
-          done
-          ls -l dist
-
-      - name: Upload the binaries as run artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-app-darwin-${{ github.ref_name }}
-          path: core/cli/dist/core-app-darwin-*
-          if-no-files-found: error
-
-      - name: Attach the darwin GUI binaries
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          gh release upload "$TAG" \
-            core/cli/dist/core-app-darwin-amd64 \
-            core/cli/dist/core-app-darwin-arm64 --clobber
-          echo
-          echo "assets now on $TAG:"
-          gh release view "$TAG" --json assets -q '.assets[].name'

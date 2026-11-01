@@ -59,6 +59,19 @@ extern uint32_t stub_last_init_rate;
  * reaches the "the DAC can't clock this file" refusal after the fact. */
 void stub_set_rate(uint32_t hz);
 
+/*
+ * Per-FILE rates, for a queue that mixes them: the decoder reports `hz` for
+ * the file at `clus` (instead of the stub_set_rate() rate), up to 8 files;
+ * stub_reset clears them. hal_audio_init accepts 44100, the stub_set_rate()
+ * rate, and the rest of the WM8758B's real table (48000, 32000, 24000,
+ * 22050), and refuses anything else — so a 96 kHz file in a 44.1 kHz album is
+ * unclockable at the very open that reports it, unpaused or at a hand-over,
+ * which stub_set_rate() alone cannot reach. stub_audio_init_refusals counts
+ * the bring-ups the HAL refused.
+ */
+void stub_set_cluster_rate(uint32_t clus, uint32_t hz);
+extern int stub_audio_init_refusals;
+
 /* Cluster of the file most recently opened — i.e. which queue entry the player
  * actually chose, independent of what its index says. */
 uint32_t stub_last_open_clus(void);

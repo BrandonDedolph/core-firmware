@@ -104,7 +104,39 @@ static uint32_t g_dac_played;      /* the count the HAL reports        */
 static uint32_t g_played_origin;   /* what init restarts it at         */
 static uint32_t g_stub_rate = 44100u;  /* stub_set_rate(): the decoder's, and accepted by init */
 int  stub_audio_inits;
+int  stub_audio_init_refusals;
 uint32_t stub_last_init_rate;
+
+/* stub_set_cluster_rate(): per-file overrides of g_stub_rate. */
+#define MAX_RATE_OVERRIDES 8
+static uint32_t g_rate_clus[MAX_RATE_OVERRIDES];
+static uint32_t g_rate_hz[MAX_RATE_OVERRIDES];
+static int      g_rate_n;
+
+void stub_set_cluster_rate(uint32_t clus, uint32_t hz)
+{
+    if (g_rate_n < MAX_RATE_OVERRIDES) {
+        g_rate_clus[g_rate_n] = clus;
+        g_rate_hz[g_rate_n]   = hz;
+        g_rate_n++;
+    }
+}
+
+static uint32_t rate_for_cluster(uint32_t clus)
+{
+    for (int i = 0; i < g_rate_n; i++) {
+        if (g_rate_clus[i] == clus) {
+            return g_rate_hz[i];
+        }
+    }
+    return g_stub_rate;
+}
+
+/* The WM8758B's PLL table (hal/hw/wm8758.c), less 44100 which is always in. */
+static int rate_in_codec_table(uint32_t hz)
+{
+    return hz == 48000u || hz == 32000u || hz == 24000u || hz == 22050u;
+}
 
 void stub_set_seek_ok(int ok)          { g_seek_ok = ok ? 1 : 0; }
 void stub_set_seek_max(uint64_t m)     { g_seek_max = m; }
@@ -157,7 +189,9 @@ void stub_reset(void)
     g_dac_played  = 0;
     g_played_origin = 0;
     g_stub_rate   = 44100u;
+    g_rate_n      = 0;
     stub_audio_inits = 0;
+    stub_audio_init_refusals = 0;
     stub_last_init_rate = 0;
 }
 
@@ -371,7 +405,7 @@ static int fake_open(decoder_t *d)
     }
     memset(d, 0, sizeof *d);
     d->ops             = &g_fake_ops;
-    d->sample_rate     = g_stub_rate;
+    d->sample_rate     = rate_for_cluster(g_last_open_clus);
     d->channels        = 2;
     d->bits_per_sample = 16;
     d->total_frames    = g_total_unknown ? 0u : g_track_frames;
@@ -437,8 +471,12 @@ decoder_alloc_t decoder_arena_allocator(decoder_arena_t *a)
 int hal_audio_init(uint32_t rate, uint16_t channels)
 {
     /* 44.1 kHz always; whatever rate the fake decoder has been told to report
-     * as well, so a format change between tracks is reachable. */
-    if ((rate != 44100u && rate != g_stub_rate) || channels != 2u) {
+     * as well, so a format change between tracks is reachable; and the rest
+     * of the codec's real table, so per-file rates (stub_set_cluster_rate)
+     * are clockable exactly when the device's would be. */
+    if ((rate != 44100u && rate != g_stub_rate && !rate_in_codec_table(rate)) ||
+        channels != 2u) {
+        stub_audio_init_refusals++;
         return -1;
     }
     /* A re-init under a running DAC is a caller bug: the real one stops the

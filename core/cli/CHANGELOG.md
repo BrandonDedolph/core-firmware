@@ -40,6 +40,12 @@ The first release of the app under its own version. The firmware is unchanged.
 - **Now Playing.** The music outlives the album: closing it leaves it on. The bottom left of the
   window is the one player — the album's cover, the track, the time over a thin progress line,
   pause, next and ✕ — and a click on the cover or the title opens the album at that track.
+- **The iPod's loudness.** A FLAC's ReplayGain (track gain, else album gain, held below
+  clipping by its peak) is applied exactly as the firmware applies it, so a loud master no longer
+  plays louder than a quiet one; *Use ReplayGain* in the ··· menu turns it off. The volume slider
+  follows a loudness curve (50 % is about −12 dB), and nothing between the file and the speakers
+  adds level — measured: a −20 dBFS tone leaves the player at −20.00 dBFS at 44.1 and 48 kHz,
+  16 and 24 bits, mono and stereo.
 - **Volume.** The player has its own volume: a speaker that mutes and a slider, the mouse wheel
   over the player, Ctrl+↑ / Ctrl+↓. It is the app's level, not the system's, and it is remembered.
 - **The iPod's bouncing bars** mark what is playing — in the album's tracklist, on its tile in the

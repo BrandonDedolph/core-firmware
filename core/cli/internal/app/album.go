@@ -46,6 +46,8 @@ type audio interface {
 	OnError(func(error))
 	SetVolume(v float64)
 	Volume() float64
+	SetReplayGain(on bool)
+	TrackGain() player.Gain
 }
 
 // albumSheet is the open sheet. UI goroutine only.
@@ -298,7 +300,14 @@ func (u *UI) sheetHead(gtx C) D {
 				})
 			}
 			gap(8)
-			add(u.text(11.5, u.pal.Muted2, albumFacts(a, s.tracks)))
+			facts := albumFacts(a, s.tracks)
+			if u.sheetPlaying() >= 0 && u.replayGainOn() {
+				// While it plays: what ReplayGain is doing to the track.
+				if g := u.audio.TrackGain(); g.Have {
+					facts += " · " + gainWords(g, false)
+				}
+			}
+			add(u.text(11.5, u.pal.Muted2, facts))
 			gap(10)
 			add(u.wrapN(12.5, u.pal.Ink, albumStatus(a), 2))
 			gap(6)

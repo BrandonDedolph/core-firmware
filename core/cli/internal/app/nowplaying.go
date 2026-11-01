@@ -2,10 +2,12 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gioui.org/font"
@@ -55,6 +57,15 @@ func (u *UI) playFrom(a Album, tracks []Track, i int, auto bool) {
 			}
 			u.npLive, u.npWarn = true, ""
 			u.st.Logf("playing %s", filepath.Base(t.Path))
+			// The firmware's audio line says the gain per track; so does
+			// this, whether or not it is switched on.
+			if g := u.audio.TrackGain(); g.Have {
+				state := ""
+				if !u.replayGainOn() {
+					state = ", off"
+				}
+				u.st.Logf("replaygain %s%s", gainWords(g, true), state)
+			}
 			return
 		}
 		if auto && errors.Is(err, os.ErrNotExist) {
@@ -517,3 +528,33 @@ func (u *UI) playingBadge(gtx C, a Album, sz image.Point) {
 
 // StopAudio stops the player, for the window closing.
 func (u *UI) StopAudio() { u.audio.Stop() }
+
+// replayGainOn is the ··· menu's "Use ReplayGain": config.json's
+// "replaygain", absent meaning on.
+func (u *UI) replayGainOn() bool { return u.cfg.ReplayGain == nil || *u.cfg.ReplayGain }
+
+// setReplayGain switches it, on the player at once and in config.json.
+func (u *UI) setReplayGain(on bool) {
+	u.cfg.ReplayGain = &on
+	u.audio.SetReplayGain(on)
+	u.saveConfig()
+	if on {
+		u.st.Logf("replaygain on: tracks play at the loudness their tags ask for, as on the iPod")
+	} else {
+		u.st.Logf("replaygain off: tracks play as they are encoded")
+	}
+}
+
+// gainWords is a track's ReplayGain as the log and the album's facts say
+// it: "−8.3 dB", with " (capped)" when the peak held a boost down.
+func gainWords(g player.Gain, capped bool) string {
+	db := g.DB()
+	s := strings.Replace(fmt.Sprintf("%+.1f dB", db), "-", "−", 1)
+	if db == 0 {
+		s = "0.0 dB"
+	}
+	if capped && g.Capped {
+		s += " (capped)"
+	}
+	return s
+}

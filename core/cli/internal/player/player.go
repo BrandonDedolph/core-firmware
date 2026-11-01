@@ -90,7 +90,10 @@ type Player struct {
 	state  State
 	// volume is this app's level, 0..1: a scale on its own output, not
 	// the system's volume. Every new stream starts at it.
-	volume  float64
+	volume float64
+	// noRG turns ReplayGain off (it is on unless SetReplayGain(false)).
+	// Read by the decoder per chunk, so a toggle is heard at once.
+	noRG    atomic.Bool
 	onEnd   func()
 	onError func(error)
 }
@@ -141,6 +144,7 @@ func (p *Player) start(path string, at time.Duration, st State) error {
 	p.stopLocked()
 	s := newSession(p, path, at)
 	p.cur, p.state = s, st
+	s.gain = trackGain(path)
 	s.voice = p.dev.newVoice(s)
 	// A track change — or a seek, which is a fresh stream — keeps the level.
 	s.voice.SetVolume(p.volume)
@@ -165,6 +169,25 @@ func (p *Player) SetVolume(v float64) {
 	if p.cur != nil {
 		p.cur.voice.SetVolume(v)
 	}
+}
+
+// SetReplayGain turns ReplayGain on (the default) or off, on the playing
+// track at once and on every track after it.
+func (p *Player) SetReplayGain(on bool) { p.noRG.Store(!on) }
+
+// ReplayGain reports whether it is on.
+func (p *Player) ReplayGain() bool { return !p.noRG.Load() }
+
+// TrackGain is the ReplayGain of the loaded track — what its tags ask for
+// and what the peak cap lets through — whether or not it is switched on.
+// The zero Gain when nothing is loaded or the track has no tag.
+func (p *Player) TrackGain() Gain {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cur == nil {
+		return Gain{}
+	}
+	return p.cur.gain
 }
 
 // Volume is the level SetVolume last set (1 until then).
@@ -300,6 +323,8 @@ type session struct {
 	path  string
 	base  time.Duration
 	voice voice
+	// gain is the track's ReplayGain (unity when it has none).
+	gain Gain
 
 	chunks chan []byte
 	quit   chan struct{}
@@ -403,7 +428,14 @@ func (s *session) decode() {
 	for {
 		in, err := src.next()
 		if len(in) > 0 {
-			pending = append(pending, le16(rs.process(conv.stereo16(in)))...)
+			st := conv.stereo16(in)
+			// ReplayGain on the 16-bit samples before anything else, as the
+			// firmware's apply_gain_s16 does; the user's volume is oto's,
+			// applied after.
+			if s.gain.Have && !s.p.noRG.Load() {
+				applyGain(st, s.gain.q12)
+			}
+			pending = append(pending, le16(rs.process(st))...)
 		}
 		for len(pending) >= chunkFrames*bytesPerFrame || (err != nil && len(pending) > 0) {
 			n := chunkFrames * bytesPerFrame

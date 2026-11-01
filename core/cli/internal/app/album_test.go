@@ -29,6 +29,8 @@ type fakeAudio struct {
 	errFor  map[string]error
 	pos     time.Duration
 	vols    []float64
+	rg      []bool
+	gain    player.Gain
 	onEnd   func()
 	onError func(error)
 }
@@ -63,7 +65,13 @@ func (f *fakeAudio) Position() (time.Duration, time.Duration) {
 	}
 	return f.pos, time.Minute
 }
-func (f *fakeAudio) State() player.State { f.mu.Lock(); defer f.mu.Unlock(); return f.state }
+func (f *fakeAudio) State() player.State   { f.mu.Lock(); defer f.mu.Unlock(); return f.state }
+func (f *fakeAudio) SetReplayGain(on bool) { f.mu.Lock(); f.rg = append(f.rg, on); f.mu.Unlock() }
+func (f *fakeAudio) TrackGain() player.Gain {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gain
+}
 func (f *fakeAudio) SetVolume(v float64) { f.mu.Lock(); f.vols = append(f.vols, v); f.mu.Unlock() }
 func (f *fakeAudio) Volume() float64 {
 	f.mu.Lock()
@@ -665,4 +673,10 @@ func TestTheStubPlayerSaysItCannotPlay(t *testing.T) {
 	if u.Layout(newTestContext(900, 600)).Size.X != 900 {
 		t.Error("the window did not lay out")
 	}
+}
+
+// playerGain is a player.Gain for the fake (its multiplier is the
+// player's business).
+func playerGain(asked, got int, capped bool) player.Gain {
+	return player.Gain{Have: true, AskedQ8: asked, GotQ8: got, Capped: capped}
 }

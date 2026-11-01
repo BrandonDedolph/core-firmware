@@ -38,6 +38,8 @@ type Config struct {
 	// Volume is the app's playback level, 0–100; absent is 100. It is the
 	// app's own output, not the system's volume, and a mute is not saved.
 	Volume *int `json:"volume,omitempty"`
+	// ReplayGain is the ··· menu's "Use ReplayGain"; absent is on.
+	ReplayGain *bool `json:"replaygain,omitempty"`
 }
 
 // NameFor is the friendly name remembered for one iPod, or "".

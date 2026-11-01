@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/io/clipboard"
 	"gioui.org/io/key"
@@ -36,6 +37,7 @@ const (
 	menuShowLog
 	menuCopyLog
 	menuOpenMusic
+	menuReplayGain
 	menuGetApp
 	menuAbout
 	menuCount
@@ -43,15 +45,16 @@ const (
 
 // menuLabels are the words, verb first.
 var menuLabels = [menuCount]string{
-	menuBackup:    "Back up the firmware",
-	menuFlashFile: "Flash an image file…",
-	menuReread:    "Read the iPod again",
-	menuCheck:     "Check for updates",
-	menuShowLog:   "Show the log",
-	menuCopyLog:   "Copy the log",
-	menuOpenMusic: "Open the music folder",
-	menuGetApp:    "Get the newer app…",
-	menuAbout:     "About",
+	menuBackup:     "Back up the firmware",
+	menuFlashFile:  "Flash an image file…",
+	menuReread:     "Read the iPod again",
+	menuCheck:      "Check for updates",
+	menuShowLog:    "Show the log",
+	menuCopyLog:    "Copy the log",
+	menuOpenMusic:  "Open the music folder",
+	menuReplayGain: "Use ReplayGain",
+	menuGetApp:     "Get the newer app…",
+	menuAbout:      "About",
 }
 
 // menuGroups puts a hairline between the firmware writes, the reads, the
@@ -60,6 +63,7 @@ var menuGroups = [][]int{
 	{menuBackup, menuFlashFile},
 	{menuReread, menuCheck},
 	{menuShowLog, menuCopyLog, menuOpenMusic},
+	{menuReplayGain},
 	nil, // the theme
 	{menuGetApp, menuAbout},
 }
@@ -133,6 +137,8 @@ func (u *UI) menuEvents(gtx C) {
 // menuDo runs one item.
 func (u *UI) menuDo(gtx C, i int) {
 	switch i {
+	case menuReplayGain:
+		u.setReplayGain(!u.replayGainOn())
 	case menuBackup:
 		u.startBackup()
 	case menuFlashFile:
@@ -274,7 +280,12 @@ func (u *UI) menuLayer(gtx C) D {
 						if i == menuShowLog && u.st.LogOpen {
 							label = "Hide the log"
 						}
-						return u.menuRow(gtx, &u.menuClicks[i], label, u.menuEnabled(i), false, false)
+						if i == menuReplayGain {
+							on := u.replayGainOn()
+							return u.menuRow(gtx, &u.menuClicks[i], label, true,
+								func(gtx C) D { return u.tickBox(gtx, on) }, on)
+						}
+						return u.menuRow(gtx, &u.menuClicks[i], label, u.menuEnabled(i), nil, false)
 					}))
 				}
 			}
@@ -299,15 +310,18 @@ func (u *UI) themeRows(gtx C) D {
 			label = "System — " + u.systemNow.String() + " now"
 		}
 		rows = append(rows, layout.Rigid(func(gtx C) D {
-			return u.menuRow(gtx, &u.themeClicks[i], label, true, true, u.theme == t)
+			on := u.theme == t
+			return u.menuRow(gtx, &u.themeClicks[i], label, true,
+				func(gtx C) D { return u.radioDot(gtx, on) }, on)
 		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 }
 
-// menuRow is one clickable line. radio rows carry a dot, filled for the
-// choice in force.
-func (u *UI) menuRow(gtx C, click *widget.Clickable, label string, enabled, radio, on bool) D {
+// menuRow is one clickable line. mark, when there is one, is drawn before
+// the words: the theme's radio dot, ReplayGain's tick box. on sets the words
+// in SemiBold.
+func (u *UI) menuRow(gtx C, click *widget.Clickable, label string, enabled bool, mark layout.Widget, on bool) D {
 	if !enabled {
 		gtx = gtx.Disabled()
 	}
@@ -334,12 +348,10 @@ func (u *UI) menuRow(gtx C, click *widget.Clickable, label string, enabled, radi
 					Layout(gtx, func(gtx C) D {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 							layout.Rigid(func(gtx C) D {
-								if !radio {
+								if mark == nil {
 									return D{}
 								}
-								return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx C) D {
-									return u.radioDot(gtx, on)
-								})
+								return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, mark)
 							}),
 							layout.Rigid(func(gtx C) D {
 								l := material.Label(u.th, unit.Sp(13), label)
@@ -355,6 +367,30 @@ func (u *UI) menuRow(gtx C, click *widget.Clickable, label string, enabled, radi
 			}),
 		)
 	})
+}
+
+// tickBox is a 10 dp square: a Muted2 hairline, and filled with Ink and a
+// Surface tick when on.
+func (u *UI) tickBox(gtx C, on bool) D {
+	s := gtx.Dp(10)
+	sz := image.Pt(s, s)
+	r := gtx.Dp(2)
+	box := image.Rectangle{Max: sz}
+	if !on {
+		paint.FillShape(gtx.Ops, u.pal.Muted2, clip.UniformRRect(box, r).Op(gtx.Ops))
+		w := gtx.Dp(1)
+		paint.FillShape(gtx.Ops, u.pal.Plate, clip.UniformRRect(box.Inset(w), r-w).Op(gtx.Ops))
+		return D{Size: sz}
+	}
+	paint.FillShape(gtx.Ops, u.pal.Ink, clip.UniformRRect(box, r).Op(gtx.Ops))
+	f := float32(s)
+	var p clip.Path
+	p.Begin(gtx.Ops)
+	p.MoveTo(f32.Pt(f*0.22, f*0.52))
+	p.LineTo(f32.Pt(f*0.42, f*0.72))
+	p.LineTo(f32.Pt(f*0.78, f*0.30))
+	paint.FillShape(gtx.Ops, u.pal.Surface, clip.Stroke{Path: p.End(), Width: f * 0.14}.Op())
+	return D{Size: sz}
 }
 
 // radioDot is a 10 dp ring, with an ink centre when on.

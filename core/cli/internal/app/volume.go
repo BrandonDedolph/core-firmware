@@ -63,8 +63,18 @@ func (u *UI) initVolume() {
 		u.vol.level = clamp01(float64(*p) / 100)
 	}
 	u.volSlider.Value = float32(u.vol.level)
-	u.audio.SetVolume(u.vol.level)
+	u.applyVolume()
 }
+
+// volCurve is the slider's taper: the amplitude for a position p is p²,
+// so the slider moves through loudness evenly — 50 % is about -12 dB —
+// where a straight line puts all the audible change in its bottom fifth
+// and the top half sounds the same. 100 % is unity.
+func volCurve(p float64) float64 { return p * p }
+
+// applyVolume hands the player what is heard: the position through the
+// curve, or silence when muted.
+func (u *UI) applyVolume() { u.audio.SetVolume(volCurve(u.vol.effective())) }
 
 func clamp01(v float64) float64 {
 	switch {
@@ -83,7 +93,7 @@ func (u *UI) setVolume(v float64) {
 	u.vol.level, u.vol.muted = v, false
 	u.vol.changedAt, u.vol.dirty = u.now(), true
 	u.volSlider.Value = float32(v)
-	u.audio.SetVolume(v)
+	u.applyVolume()
 }
 
 // nudgeVolume is one step up (+1) or down (-1), from what is heard.
@@ -105,7 +115,7 @@ func (u *UI) toggleMute() {
 	}
 	u.vol.changedAt = u.now()
 	u.volSlider.Value = float32(u.vol.effective())
-	u.audio.SetVolume(u.vol.effective())
+	u.applyVolume()
 }
 
 // volumeEvents is the control's half of the frame: the slider, the mute,

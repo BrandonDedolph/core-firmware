@@ -389,6 +389,7 @@ func NewUI(o Options) *UI {
 		u.audio = player.New()
 	}
 	u.initVolume()
+	u.audio.SetReplayGain(u.replayGainOn())
 	u.audio.OnEnd(func() {
 		u.mu.Lock()
 		u.trackDone = true

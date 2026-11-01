@@ -3,8 +3,10 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,8 +57,9 @@ func savedVolume(t *testing.T, path string) (int, bool) {
 func TestTheSavedVolumeIsLoaded(t *testing.T) {
 	n := 35
 	_, fa, _, _ := volUI(t, &n)
-	if len(fa.vols) == 0 || fa.vols[0] != 0.35 {
-		t.Errorf("player levels %v, want 0.35 first", fa.vols)
+	// The slider's 35 % is the player's 0.35² — the curve.
+	if len(fa.vols) == 0 || math.Abs(fa.vols[0]-0.1225) > 1e-9 {
+		t.Errorf("player levels %v, want 0.35² first", fa.vols)
 	}
 	_, fa, _, _ = volUI(t, nil)
 	if fa.vols[0] != 1 {
@@ -164,8 +167,8 @@ func TestMuteTogglesAndRestores(t *testing.T) {
 	}
 	u.volMuteBtn.Click()
 	u.Layout(newTestContext(900, 600))
-	if u.vol.muted || fa.vols[len(fa.vols)-1] != 0.6 {
-		t.Errorf("unmute: muted %v, player %v — want 0.6 back", u.vol.muted, fa.vols)
+	if u.vol.muted || math.Abs(fa.vols[len(fa.vols)-1]-0.36) > 1e-9 {
+		t.Errorf("unmute: muted %v, player %v — want 0.6² back", u.vol.muted, fa.vols)
 	}
 }
 
@@ -177,5 +180,62 @@ func TestThePlayingStateDrawsTheVolumeControl(t *testing.T) {
 	u.Layout(newTestContext(900, 600))
 	if u.vol.effective() != 1 || u.volShowing() {
 		t.Errorf("level %v, showing %v", u.vol.effective(), u.volShowing())
+	}
+}
+
+// The slider's taper: position p plays at p², so 50 % is about -12 dB and
+// 100 % is unity; the label and config.json keep the position.
+func TestTheVolumeCurve(t *testing.T) {
+	for _, c := range []struct{ p, db float64 }{{1, 0}, {0.5, -12.04}, {0.25, -24.08}} {
+		if got := 20 * math.Log10(volCurve(c.p)); math.Abs(got-c.db) > 0.01 {
+			t.Errorf("%.0f %%: %.2f dB, want %.2f", c.p*100, got, c.db)
+		}
+	}
+	if volCurve(0) != 0 {
+		t.Error("0 % is not silence")
+	}
+	n := 50
+	u, fa, _, _ := volUI(t, &n)
+	if volPercent(u.vol.level) != 50 || math.Abs(fa.vols[0]-0.25) > 1e-9 {
+		t.Errorf("a saved 50: shown %d %%, played %v", volPercent(u.vol.level), fa.vols[0])
+	}
+}
+
+// "Use ReplayGain" in the ··· menu: on by default, a click turns it off on
+// the player and in config.json, and the album's facts and the log say the
+// track's gain while it plays.
+func TestTheReplayGainToggle(t *testing.T) {
+	u, fa, path, _ := volUI(t, nil)
+	if !u.replayGainOn() || len(fa.rg) == 0 || !fa.rg[0] {
+		t.Fatalf("ReplayGain should start on: %v", fa.rg)
+	}
+	u.st.MenuOpen = true
+	u.Layout(newTestContext(900, 600))
+	u.menuClicks[menuReplayGain].Click()
+	u.Layout(newTestContext(900, 600))
+	if u.replayGainOn() || fa.rg[len(fa.rg)-1] {
+		t.Fatalf("after the click: on %v, player %v", u.replayGainOn(), fa.rg)
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), `"replaygain": false`) {
+		t.Errorf("config.json: %s", b)
+	}
+	u.setReplayGain(true)
+
+	// A track with a gain: the log line, and the facts while it plays.
+	fa.gain = playerGain(-2125, -2125, false)
+	a := Album{Dir: "/m/b", Device: "Y - B", Title: "Y - B", TrackList: threeTracks()}
+	u.playFrom(a, a.TrackList, 0, false)
+	found := false
+	for _, l := range u.st.Log {
+		if strings.Contains(l, "replaygain −8.3 dB") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no replaygain line in the log: %q", u.st.Log[len(u.st.Log)-2:])
+	}
+	if got := gainWords(playerGain(1536, 0, true), true); got != "0.0 dB (capped)" {
+		t.Errorf("a capped boost reads %q", got)
 	}
 }

@@ -19,7 +19,9 @@ core/
 │   ├── hal.h    hardware contract shared by both backends
 │   ├── hw/      ARM drivers: lcd, ata, i2c, i2s, wm8758, dma, audio,
 │   │            clickwheel, backlight, battery, power, volume, piezo, uart
-│   └── sim/     host backend (SDL2)
+│   ├── sim/     host backend (SDL2)
+│   └── headless/ host fakes of the hw driver APIs: main.c on the host,
+│                in fake time, booted from a disk-image file
 ├── fs/          from-scratch read-only FAT32 reader (LFN → UTF-8) with a
 │                bounded path walk, plus an M3U8 playlist reader
 ├── lib/         freestanding mem.c (memcpy/memset)
@@ -34,7 +36,8 @@ core/
 ├── docs/design/ design notes (settings persistence, …)
 ├── cross/       Meson cross file (arm-none-eabi)
 ├── tools/       icon_gen.sh + source icons (UI glyph art)
-└── tests/       host unit + MMIO golden-trace tests
+└── tests/       host unit + MMIO golden-trace tests, and the headless
+                 firmware walk (tests/headless/)
 ```
 
 The player UI lives in `kernel/main.c` (the menu / browser / now-playing
@@ -68,7 +71,8 @@ make sim        # configures + builds the HOST TEST SUITE (see note below)
 make verify-hw  # static checks against a fresh `make hw` (see below)
 make help       # all targets
 
-meson test -C build-sim     # 83 host unit + MMIO golden-trace suites
+meson test -C build-sim     # 84 suites: host unit, MMIO golden-trace, and
+                            # firmware-walk (the real main.c, headless)
 ```
 
 `make verify-hw` is the static half of the safety net — the checks that
@@ -82,10 +86,18 @@ library name hash and the resume record.
 > what it does: past `hal/`, `meson.build`'s `sim` branch descends into
 > `codecs/` and `tests/` and nothing else. `tests/` reaches back into
 > individual device sources it wants to exercise (`ui/text.c`, `ui/thumb.c`,
-> `ui/settings.c`, the drivers), but `kernel/main.c` — the UI — is never
-> built for the host, and `hal/sim/sim_hal.c` compiles into a static library
-> that **no executable links**. There is nothing to run: no SDL2 window, no
-> host player. The device is still the only place the UI can be seen.
+> `ui/settings.c`, the drivers), and `hal/sim/sim_hal.c` compiles into a
+> static library that **no executable links**: there is no SDL2 window and no
+> interactive host player.
+>
+> `kernel/main.c` — the UI — IS built for the host once, headless: the
+> `firmware-walk` suite links the real firmware against `hal/headless/`
+> (fakes of the hw driver APIs, fake time, a disk-image file as the drive)
+> and walks it from a cold boot through browse, play, pause, idle-sleep,
+> suspend, wake and a PMU power-off, asserting on the framebuffer. The same
+> build gives `build-sim/tests/headless_explore`, which drives it by hand and
+> writes screenshots of what the real firmware draws. See
+> [`docs/testing-headless.md`](docs/testing-headless.md).
 
 The host (`sim`) target compiles the same freestanding driver, codec, and
 text-renderer sources the device links, plus MMIO golden-trace tests that

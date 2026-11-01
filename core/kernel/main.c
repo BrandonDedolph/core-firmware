@@ -10556,7 +10556,7 @@ _Noreturn void kernel_main(void) {
     uart_putc('\n');
 
     uart_puts("core: PROCESSOR_ID ");
-    uart_put_hex32(PROCESSOR_ID);
+    uart_put_hex32(mmio_read32(PROCESSOR_ID_ADDR));   /* through the seam: same load on hw */
     uart_putc('\n');
 
     /* Come off the 24 MHz boot clock up to CPUFREQ_NORMAL (30 MHz) before the

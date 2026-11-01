@@ -78,6 +78,27 @@ if target == 'sim'
   )
   test('flac-rg-chain', flac_rg_chain_test, args: [vectors_dir], suite: 'unit')
 
+  # flac-vectors: the FLACs a real library holds, not just the one 44.1/16
+  # sine. 24-bit at 44.1 and 96 kHz, 48 kHz, mono, a SEEKTABLE, the library's
+  # 4608-sample blocks with a short last block, a 330 KB PICTURE behind a
+  # 70 KB LYRICS comment with ReplayGain after it, APPLICATION and zero-length
+  # PADDING blocks. Each opens through flac_open_stream under player.c's
+  # 128 KB arena and is checked against libFLAC's own STREAMINFO MD5 (16-bit
+  # output exactly; 24-bit natively, then the dithered s16 within 1.5 LSB and
+  # unbiased), seeks into the short last block and past the end, and is parsed
+  # by flac_meta_read without READING the picture. Same flac.c, flac_meta.c
+  # and arena.c the ARM build links. The vectors and the library survey that
+  # chose them: codec-vectors/README.md.
+  flac_vectors_test = executable(
+    'flac_vectors_test',
+    sources: ['codecs/flac_vectors_test.c', '../codecs/arena.c',
+              '../codecs/flac_meta.c', '../codecs/meta_text.c'],
+    dependencies: [flac_dep],
+    include_directories: include_directories('../codecs', '../codecs/dr_flac'),
+    override_options: test_opts,
+  )
+  test('flac-vectors', flac_vectors_test, args: [vectors_dir], suite: 'unit')
+
   # mp3-freestanding: the STREAMING MP3 decode path used on hw — mirror of
   # flac-freestanding. Open the MP3 through mp3_open_stream (a decoder_source_t
   # pull source) with the static arena instead of libc malloc, decode every
@@ -93,6 +114,24 @@ if target == 'sim'
     override_options: test_opts,
   )
   test('mp3-freestanding', mp3_fs_test, args: [vectors_dir], suite: 'unit')
+
+  # mp3-vectors: the widened MP3 vectors through the same streaming open and
+  # arena budget as mp3-freestanding. 320 kbps CBR, 48 kHz VBR (Xing TOC) and
+  # the same stream with a Fraunhofer VBRI header, each pinned by an MD5 of our
+  # own decode (*.mp3.ref.pcm.md5); the 128 kbps file behind an ID3v2.4 tag
+  # with a footer and a 330 KB APIC, in front of an APEv2 + ID3v1 trailer, and
+  # behind 1500 bytes of sync-salted junk, each decoding to the bare file's
+  # audio sample for sample with the cover SEEKED over, not read; id3_meta_read
+  # on all of them; and MPEG-2.5 / free-format encoder output refused at open
+  # with a defined error and a reusable arena.
+  mp3_vectors_test = executable(
+    'mp3_vectors_test',
+    sources: ['codecs/mp3_vectors_test.c', '../codecs/arena.c'],
+    dependencies: [mp3_dep],
+    include_directories: include_directories('../codecs', '../codecs/pvmp3'),
+    override_options: test_opts,
+  )
+  test('mp3-vectors', mp3_vectors_test, args: [vectors_dir], suite: 'unit')
 
   # mp3-frame: the framing layer (codecs/pvmp3/mp3_frame.c) on its own — the
   # 4-byte header across every version/layer/bitrate/rate/padding combination,
@@ -128,8 +167,9 @@ if target == 'sim'
   test('id3-meta', id3_meta_test, suite: 'unit')
 
   # mp3-accuracy: is the decode RIGHT? The KAT only pins it against itself, so
-  # this one compares pvmp3 against ffmpeg's decoder on real music — CBR, VBR
-  # with a Xing TOC, and an MPEG-2 mono file — to the ISO 11172-4 full-accuracy
+  # this one compares pvmp3 against ffmpeg's decoder on real music — 128 and
+  # 320 kbps CBR, VBR with a Xing TOC at 44.1 and 48 kHz, the 48 kHz stream
+  # behind a VBRI header, and an MPEG-2 mono file — to the ISO 11172-4 full-accuracy
   # bounds (PSNR >= 96 dB, peak error <= 2 LSB after alignment). The reference
   # PCM is stored as FLAC and decoded here with the tree's own dr_flac, which
   # is lossless and half the size. See codec-vectors/README.md for provenance.
@@ -143,7 +183,8 @@ if target == 'sim'
   )
   test('mp3-accuracy', mp3_accuracy_test, args: [vectors_dir], suite: 'unit')
 
-  # mp3-seek: seeking by the Xing TOC. Seeks the VBR vector to a set of
+  # mp3-seek: seeking by the Xing TOC (44.1 kHz V5, 48 kHz V2) and, for the
+  # VBRI copy of the 48 kHz file, proportionally by byte. Seeks each to a set of
   # targets, decodes a slice at each, and finds where that slice actually sits
   # in the reference by correlation — so the assertion is about the audio the
   # listener would hear, not about arithmetic agreeing with itself. Landing

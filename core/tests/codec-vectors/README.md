@@ -82,3 +82,81 @@ To regenerate these three, point the script at a copy of the recording:
 Without `MUSOPEN_SRC` the script leaves them alone and regenerates only the
 synthetic vectors, so a routine re-run cannot silently replace the committed
 music with silence.
+
+## Widened coverage: what a real library holds
+
+Everything above is 44.1 kHz / 16-bit FLAC or LAME MP3 with no tags. A real
+library is not, so a second set of vectors exists for the cases it does hold.
+
+### The survey behind them
+
+`../scripts/survey_library.py` walks a library read-only and prints only the
+distribution — never a path, title or artist — so its output can go in a
+public issue. Run against the reference library (2026-11-01, 907 tracks in
+101 albums):
+
+| property | distribution |
+|---|---|
+| containers | 907 FLAC, **0 MP3** |
+| rate / depth / channels | 44100 / 16 / 2: 876 · 44100 / 24 / 2: 31 |
+| STREAMINFO block size | 4608 fixed: 898 · 4096 fixed: 9 |
+| SEEKTABLE | none: 867 · present: 40 (all ≤ 50 points) |
+| PICTURE | one per file: 906 (none: 1); ≤ 64 KB: 112, ≤ 128 KB: 68, ≤ 300 KB: 297, ≤ 512 KB: 306, ≤ 1 MB: 123; largest 622 KB |
+| VORBIS_COMMENT size | ≤ 1 KB: 40 · ≤ 16 KB: 96 · ≤ 64 KB: 678 · ≤ 128 KB: 93 |
+| ReplayGain | track gain + peak and album gain: 876 (album peak: 856) · none: 31 |
+| block order | STREAMINFO PADDING VORBIS_COMMENT PICTURE: 866 · the same with SEEKTABLE after PADDING: 40 |
+| PADDING | every file; ≤ 16 KB: 877, ≤ 64 KB: 29 |
+| APPLICATION, CUESHEET, ID3 prefix | none |
+| duration | 4 under 30 s, 4 over 6 min, the rest 30 s – 6 min |
+
+`--metaflac` cross-checks rate/depth/channels against `metaflac` (0
+mismatches). The MP3 half of the script (ID3v2 version/size/APIC, junk before
+the first frame, MPEG version and layer, Xing/Info/VBRI, CBR vs VBR,
+ID3v1/APEv2) found nothing to count here; the MP3 vectors below cover what an
+MP3 library commonly holds instead.
+
+### How they are checked
+
+- **Lossless FLAC needs no committed PCM.** The widened FLACs keep the
+  STREAMINFO MD5, which libFLAC's encoder computed over the unencoded audio.
+  `flac-vectors` hashes the decode and compares (16-bit: the wrapper's
+  output; 24-bit: dr_flac's native samples, and the wrapper's dithered s16
+  within 1.5 LSB of them with no DC bias).
+- **MP3 regression pins are MD5s.** `*.mp3.ref.pcm.md5` is `md5sum` of what
+  `capture_mp3_ref` (host build) decodes — the same pin as a `.ref.pcm`,
+  without 350 KB per vector. Accuracy against ffmpeg is still a
+  `*.ffmpeg.flac`.
+- **Container variants need no reference at all.** A tagged, trailed or
+  junk-prefixed copy of a committed file must decode to that file's audio
+  sample for sample.
+
+### Provenance
+
+All of them are derived from bytes already in this directory: the
+`beethoven_2s_cbr128_44k_stereo.ffmpeg.flac` reference (2 s of the
+public-domain Musopen recording above) and the sine. They regenerate without
+`MUSOPEN_SRC`, on every run of `gen_codec_vectors.sh`; the cover art is a
+640×640 JPEG of ffmpeg's `cellauto` pattern, the tag text is invented, and
+`metaflac` runs with `--no-utf8-convert` because on a host without the
+locale installed it otherwise turns every non-ASCII byte into `#`.
+
+### The vectors
+
+| file | what it is for |
+|---|---|
+| `beethoven_1s_44k_s24_stereo.flac` | 24-bit (31 library tracks). −1 dB in float first, so the low byte is real signal, not "wasted bits" |
+| `beethoven_1s_48k_s16_stereo.flac` | 48 kHz, the codec's other PLL preset |
+| `beethoven_1s_96k_s24_stereo.flac` | 96 kHz / 24-bit. Decodes fine; the HAL has no 96 kHz preset, so the player refuses it — `player-queue` asserts the skip is clean, unpaused, at a gapless hand-over and as the last track |
+| `beethoven_1s_44k_s16_mono.flac` | mono (the player up-mixes) |
+| `beethoven_2s_44k_s16_stereo_seektable.flac` | a 16-point SEEKTABLE, 1152-sample blocks, short last block |
+| `beethoven_2s_44k_s16_stereo_bs4608.flac` | the library's 4608-sample blocks; 88200 = 19 × 4608 + 648, so the last block is short |
+| `sine_440hz_1s_44k_s16_stereo_picture_rg.flac` | a 330 KB PICTURE, UTF-8 tags, a 70 KB LYRICS comment *before* the four ReplayGain tags, in the library's block order |
+| `sine_440hz_1s_44k_s16_stereo_app_padding.flac` | two APPLICATION blocks, a zero-length PADDING block, a PADDING block carrying the last-block flag |
+| `beethoven_1s_mpeg25_{11k,8k}_mono.mp3` | MPEG-2.5 from a real encoder; refused at open (below the DAC's floor) |
+| `beethoven_2s_cbr320_44k_stereo.mp3` | 320 kbps, the largest MPEG-1 frames (+ `.ffmpeg.flac`, `.mp3.ref.pcm.md5`) |
+| `beethoven_2s_vbr_v2_48k_stereo.mp3` | 48 kHz VBR with a Xing TOC (+ `.ffmpeg.flac`, `.mp3.ref.pcm.md5`) |
+| `beethoven_2s_vbr_v2_48k_stereo_vbri.mp3` | the same stream with its Xing frame rewritten as a Fraunhofer VBRI frame (LAME cannot write one); must decode identically to the Xing file |
+| `beethoven_quarter_s_freeformat_44k_stereo.mp3` | LAME `--freeformat` at 400 kbps; refused (ffmpeg cannot read it either) |
+| `beethoven_2s_cbr128_44k_stereo_id3v24_apic.mp3` | an ID3v2.4 tag with a footer, UTF-8 text frames and a 330 KB APIC in front |
+| `beethoven_2s_cbr128_44k_stereo_ape_id3v1.mp3` | an APEv2 tag (header + footer) and then an ID3v1.1 tag behind |
+| `beethoven_2s_cbr128_44k_stereo_junk.mp3` | 1500 bytes of junk in front, salted with sync words that do not chain |

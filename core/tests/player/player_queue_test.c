@@ -1421,6 +1421,108 @@ int main(void)
     player_set_repeat(0);
     stub_set_track_frames(8192u);
 
+    /* ---- 13e'''. a file at a rate the DAC cannot clock, PLAYING -------- *
+     *
+     * The decoders open a 96 kHz FLAC (or any rate) without complaint; the
+     * HAL's rate check is the only refusal (tests/codec-vectors has a real
+     * 96 kHz / 24-bit vector, and flac-vectors proves the decode). 13e''
+     * reaches that refusal at a paused resume; these reach it where a
+     * listener actually meets it — an unpaused open, and the gapless
+     * hand-over out of a 44.1 kHz track — and at the end of a queue, where
+     * a refused last track must leave the player idle rather than looping.
+     * A 48 kHz file in the same queue is in the codec's table and plays.
+     */
+    {
+        stub_reset();
+        stub_set_track_frames(44100u);
+        make_entries(ents, 4, 0);
+        player_set_repeat(0);
+        stub_set_cluster_rate(CLUS(0), 96000u);
+        player_play_queue(ents, 4, 0, 0, 0);
+        xpect(&c, "an unpaused open of a 96 kHz first track skips it",
+              player_queue_current() == 1 && player_playing() == 1 &&
+              stub_audio_running == 1 && stub_last_init_rate == 44100u);
+        xpect(&c, "...after exactly one refused bring-up, none at 96 kHz "
+                  "accepted", stub_audio_init_refusals == 1 &&
+              stub_audio_inits == 1);
+        xpect(&c, "...and the skip is not reported as an error once the "
+                  "next track plays", player_last_error() == PLAYER_OK);
+    }
+    {
+        stub_reset();
+        stub_set_track_frames(44100u);
+        make_entries(ents, 4, 0);
+        player_set_repeat(0);
+        stub_set_cluster_rate(CLUS(1), 96000u);
+        player_play_queue(ents, 4, 0, 0, 0);
+        int opens = stub_opens;
+        pump_to_track_end(5000);
+        xpect(&c, "a hand-over into a 96 kHz track skips it to the next "
+                  "playable one", player_queue_current() == 2 &&
+              player_playing() == 1 && stub_audio_running == 1);
+        xpect(&c, "...having opened it (the prefetch) but never clocked "
+                  "the DAC at 96 kHz", stub_opens == opens + 2 &&
+              stub_audio_init_refusals == 1 && stub_last_init_rate == 44100u);
+        xpect(&c, "...and no bring-up ran under a live DMA",
+              stub_audio_inits_while_running == 0);
+    }
+    {
+        stub_reset();
+        stub_set_track_frames(44100u);
+        make_entries(ents, 4, 0);
+        player_set_repeat(0);
+        stub_set_cluster_rate(CLUS(1), 48000u);
+        player_play_queue(ents, 4, 0, 0, 0);
+        pump_to_track_end(5000);
+        xpect(&c, "a hand-over into a 48 kHz track re-clocks the DAC and "
+                  "plays it", player_queue_current() == 1 &&
+              player_playing() == 1 && stub_last_init_rate == 48000u &&
+              stub_audio_init_refusals == 0 && stub_audio_inits == 2);
+        pump_to_track_end(5000);
+        xpect(&c, "...and the 44.1 kHz track after it re-clocks back",
+              player_queue_current() == 2 && stub_last_init_rate == 44100u &&
+              stub_audio_inits == 3);
+    }
+    {
+        stub_reset();
+        stub_set_track_frames(44100u);
+        make_entries(ents, 2, 0);
+        player_set_repeat(0);
+        stub_set_cluster_rate(CLUS(1), 96000u);
+        player_play_queue(ents, 2, 0, 0, 0);
+        pump_to_track_end(5000);
+        for (int i = 0; i < 200 && player_active(); i++) {
+            player_pump();
+            stub_drain(4096);
+        }
+        xpect(&c, "a 96 kHz LAST track ends the queue: the player goes idle",
+              player_active() == 0 && stub_audio_running == 0 &&
+              stub_audio_init_refusals >= 1);
+        int attempts = stub_open_attempts;
+        for (int i = 0; i < 50; i++) {
+            player_pump();
+            stub_drain(4096);
+        }
+        xpect(&c, "...and stays idle, not retrying the refused file",
+              stub_open_attempts == attempts && player_active() == 0);
+    }
+    {
+        stub_reset();
+        stub_set_track_frames(44100u);
+        make_entries(ents, 3, 0);
+        player_set_repeat(0);
+        for (int i = 0; i < 3; i++) {
+            stub_set_cluster_rate(CLUS(i), 96000u);
+        }
+        player_play_queue(ents, 3, 0, 0, 0);
+        xpect(&c, "a queue where NOTHING is clockable ends idle at once",
+              player_active() == 0 && stub_audio_running == 0 &&
+              stub_audio_init_refusals == 3);
+    }
+    player_set_repeat(0);
+    stub_reset();
+    stub_set_track_frames(8192u);
+
     /* ---- 13e. quiet playback parks the drive ONCE ---------------------- *
      *
      * Between refill bursts the anti-skip buffer is topped up and idle, and

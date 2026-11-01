@@ -15,3 +15,10 @@ option(
 # TODO(release): wire this through to a -DRELEASE define in the C build
 # once the kernel logging layer lands (PR introducing apps/ui or kernel/).
 # Until then this option is parsed but inert.
+
+option(
+  'fuzz',
+  type: 'boolean',
+  value: false,
+  description: 'Also build the libFuzzer harnesses in tests/fuzz (needs clang; see docs/testing-fuzz.md, or run `make fuzz`)',
+)

@@ -1581,4 +1581,9 @@ if target == 'sim'
                 'pack_ipod.py', '--selftest'],
          suite: 'unit')
   endif
+
+  # Fuzz harnesses for every parser that reads the user's disk, plus a
+  # replay of their committed corpus and regression inputs as unit tests.
+  # tests/fuzz/meson.build explains the two builds.
+  subdir('fuzz')
 endif

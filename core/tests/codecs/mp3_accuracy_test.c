@@ -17,9 +17,13 @@
  * instant red build; what it actually measures, with room to spare, is in
  * codec-vectors/README.md.
  *
- * Three vectors, because the interesting parts of the decoder only run on
- * real content: 128 kbps CBR, a VBR encode with a Xing TOC, and an MPEG-2
- * mono file at 22.05 kHz (half-rate frames, 576 samples, mono side info).
+ * Real content, because the interesting parts of the decoder only run on
+ * it: 128 kbps CBR, a VBR encode with a Xing TOC, an MPEG-2 mono file at
+ * 22.05 kHz (half-rate frames, 576 samples, mono side info), 320 kbps CBR
+ * (the largest frames, the most Huffman data per granule), 48 kHz VBR, and
+ * that same 48 kHz stream behind a Fraunhofer VBRI header instead of the
+ * Xing one — held to the Xing file's ffmpeg reference, since only the tag
+ * frame differs.
  */
 
 #include "mp3_vectors.h"
@@ -29,12 +33,13 @@
 
 static int g_fails;
 
-static void run_case(const char *dir, const char *stem, unsigned want_rate,
-                     unsigned want_ch)
+static void run_case_ref(const char *dir, const char *stem,
+                         const char *ref_stem, unsigned want_rate,
+                         unsigned want_ch)
 {
     char p_mp3[1024], p_ref[1024];
     snprintf(p_mp3, sizeof p_mp3, "%s/%s.mp3", dir, stem);
-    snprintf(p_ref, sizeof p_ref, "%s/%s.ffmpeg.flac", dir, stem);
+    snprintf(p_ref, sizeof p_ref, "%s/%s.ffmpeg.flac", dir, ref_stem);
 
     size_t   mp3_len = 0;
     uint8_t *mp3     = mp3v_slurp(p_mp3, &mp3_len);
@@ -97,7 +102,7 @@ static void run_case(const char *dir, const char *stem, unsigned want_rate,
                            ref.pcm, overlap, ours.channels, &peak);
     double psnr = mp3v_psnr(mse);
 
-    printf("%-34s aligned +%4ld  %zu frames  PSNR %6.2f dB  peak %d LSB\n",
+    printf("%-38s aligned +%4ld  %zu frames  PSNR %6.2f dB  peak %d LSB\n",
            stem, off, overlap, psnr, peak);
 
     if (psnr < PSNR_FLOOR) {
@@ -120,6 +125,12 @@ static void run_case(const char *dir, const char *stem, unsigned want_rate,
     mp3v_free(&ref);
 }
 
+static void run_case(const char *dir, const char *stem, unsigned want_rate,
+                     unsigned want_ch)
+{
+    run_case_ref(dir, stem, stem, want_rate, want_ch);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2) {
@@ -129,6 +140,10 @@ int main(int argc, char **argv)
     run_case(argv[1], "beethoven_2s_cbr128_44k_stereo", 44100, 2);
     run_case(argv[1], "beethoven_2s_vbr_v5_44k_stereo", 44100, 2);
     run_case(argv[1], "beethoven_2s_cbr32_22k_mono",    22050, 1);
+    run_case(argv[1], "beethoven_2s_cbr320_44k_stereo", 44100, 2);
+    run_case(argv[1], "beethoven_2s_vbr_v2_48k_stereo", 48000, 2);
+    run_case_ref(argv[1], "beethoven_2s_vbr_v2_48k_stereo_vbri",
+                 "beethoven_2s_vbr_v2_48k_stereo", 48000, 2);
 
     if (g_fails) {
         printf("mp3_accuracy_test: %d check%s failed\n",

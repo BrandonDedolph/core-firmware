@@ -16,6 +16,14 @@
  * binary-searches to a frame. Tight enough that resume lands within a second
  * on anything album-length, and loose enough not to pin an implementation
  * detail.
+ *
+ * Three vectors: the 44.1 kHz V5 encode, a 48 kHz V2 encode (the TOC and the
+ * frame maths at another rate), and that same 48 kHz stream with its Xing
+ * frame rewritten as a Fraunhofer VBRI frame. VBRI's own TOC is not used
+ * (codecs/pvmp3/mp3_frame.c), so that file seeks proportionally by byte —
+ * and is held to the SAME bound, because "proportional by byte" on a VBR
+ * file is only as good as the bitrate is even, and the bound is the promise
+ * the resume path makes either way.
  */
 
 #include "mp3_vectors.h"
@@ -38,25 +46,24 @@ static void xpect(const char *what, int cond)
  * as "not found". */
 #define SEARCH_SPAN  8000
 
-int main(int argc, char **argv)
+static int seek_case(const char *dir, const char *stem, const char *ref_stem,
+                     unsigned rate)
 {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <codec-vectors-dir>\n", argv[0]);
-        return 2;
-    }
     char p_mp3[1024], p_ref[1024];
-    snprintf(p_mp3, sizeof p_mp3, "%s/beethoven_2s_vbr_v5_44k_stereo.mp3",
-             argv[1]);
-    snprintf(p_ref, sizeof p_ref,
-             "%s/beethoven_2s_vbr_v5_44k_stereo.ffmpeg.flac", argv[1]);
+    snprintf(p_mp3, sizeof p_mp3, "%s/%s.mp3", dir, stem);
+    snprintf(p_ref, sizeof p_ref, "%s/%s.ffmpeg.flac", dir, ref_stem);
+    printf("--- %s\n", stem);
 
     size_t   mp3_len = 0;
     uint8_t *mp3 = mp3v_slurp(p_mp3, &mp3_len);
     mp3v_pcm_t ref = {0}, whole = {0};
     if (!mp3 || !mp3v_load_ref(p_ref, &ref) ||
         !mp3v_decode_mp3(mp3, mp3_len, &whole)) {
-        fprintf(stderr, "cannot load the VBR vector\n");
-        return 2;
+        fprintf(stderr, "cannot load %s\n", stem);
+        free(mp3);
+        mp3v_free(&ref);
+        mp3v_free(&whole);
+        return 0;
     }
     unsigned ch = whole.channels;
 
@@ -69,29 +76,30 @@ int main(int argc, char **argv)
     long base = mp3v_best_offset(whole.pcm, whole.frames, ref.pcm, ref.frames,
                                  ch, 4096, 8192, NULL);
     xpect("the straight decode aligns to the reference", base >= 0);
-    if (base < 0) return 1;
+    if (base < 0) return 0;
     printf("encoder-delay offset: %ld frames\n", base);
 
     const decoder_ops_t *ops = mp3_decoder_ops();
     decoder_t d = {0};
     xpect("the VBR vector opens", ops->open(&d, mp3, mp3_len, NULL) == DECODER_OK);
-    if (!d.ops) return 1;
-    xpect("the Xing frame count gives a length", d.total_frames > 0);
+    if (!d.ops) return 0;
+    xpect("the Xing/VBRI frame count gives a length", d.total_frames > 0);
     xpect("...of about two seconds",
-          d.total_frames > 44100u * 3u / 2u && d.total_frames < 44100u * 5u / 2u);
+          d.total_frames > rate * 3u / 2u && d.total_frames < rate * 5u / 2u);
+    xpect("...at the vector's rate", d.sample_rate == rate);
 
     /* One frame plus one percent of the file, which is what the TOC resolves
      * to. Stated in frames so the number in the message is the one that
      * matters. */
     long tol = 1152 + (long)(d.total_frames / 100u);
     printf("landing tolerance: %ld frames (%.0f ms)\n",
-           tol, 1000.0 * (double)tol / 44100.0);
+           tol, 1000.0 * (double)tol / (double)rate);
 
     static const double targets_s[] = { 0.0, 0.5, 1.0, 1.5 };
     static int16_t probe[PROBE_FRAMES * 2];
 
     for (size_t i = 0; i < sizeof targets_s / sizeof targets_s[0]; i++) {
-        uint64_t target = (uint64_t)(targets_s[i] * 44100.0);
+        uint64_t target = (uint64_t)(targets_s[i] * (double)rate);
         char     what[128];
 
         snprintf(what, sizeof what, "seek to %.1f s succeeds", targets_s[i]);
@@ -152,7 +160,7 @@ int main(int argc, char **argv)
         printf("target %7llu  landed %7ld  error %5ld frames (%.0f ms)  "
                "PSNR %6.2f dB\n",
                (unsigned long long)target, landed, err,
-               1000.0 * (double)err / 44100.0, psnr);
+               1000.0 * (double)err / (double)rate, psnr);
 
         snprintf(what, sizeof what,
                  "seek to %.1f s lands within a frame + the TOC's granularity",
@@ -168,14 +176,14 @@ int main(int argc, char **argv)
     /* A seek then a decode to the end: the remaining count has to be about
      * what is left of the track, not the whole thing again. */
     xpect("seek to 1.0 s for the tail count",
-          ops->seek(&d, 44100u) == DECODER_OK);
+          ops->seek(&d, rate) == DECODER_OK);
     size_t tail = 0;
     for (;;) {
         int n = ops->decode(&d, probe, PROBE_FRAMES);
         if (n <= 0) break;
         tail += (size_t)n;
     }
-    long want_tail = (long)whole.frames - (long)(44100u + (uint64_t)base);
+    long want_tail = (long)whole.frames - (long)(rate + (uint64_t)base);
     long tail_err  = (long)tail - want_tail;
     if (tail_err < 0) tail_err = -tail_err;
     printf("tail after 1.0 s: %zu frames (want ~%ld)\n", tail, want_tail);
@@ -200,6 +208,24 @@ int main(int argc, char **argv)
     free(mp3);
     mp3v_free(&ref);
     mp3v_free(&whole);
+    return 1;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <codec-vectors-dir>\n", argv[0]);
+        return 2;
+    }
+    if (!seek_case(argv[1], "beethoven_2s_vbr_v5_44k_stereo",
+                   "beethoven_2s_vbr_v5_44k_stereo", 44100u) ||
+        !seek_case(argv[1], "beethoven_2s_vbr_v2_48k_stereo",
+                   "beethoven_2s_vbr_v2_48k_stereo", 48000u) ||
+        !seek_case(argv[1], "beethoven_2s_vbr_v2_48k_stereo_vbri",
+                   "beethoven_2s_vbr_v2_48k_stereo", 48000u)) {
+        printf("mp3_seek_test: a vector could not be loaded\n");
+        return 1;
+    }
 
     if (g_fails) {
         printf("mp3_seek_test: %d check%s failed\n",

@@ -46,6 +46,7 @@ func (u *UI) startRefresh() {
 		u.newDev, u.newLib = &dev, &lib
 		u.mu.Unlock()
 		if dev.Found {
+			u.readBackups(ctx, dev.Serial)
 			emit(Event{Kind: EventLog, Text: fmt.Sprintf("device: %s — %s, %s",
 				dev.Path, dev.Model, disk.HumanSize(dev.Size))})
 			if dev.Installed.Description != "" {
@@ -234,6 +235,9 @@ func (u *UI) readBack(ctx context.Context, emit func(Event)) error {
 	u.mu.Lock()
 	u.newDev, u.newLib = &dev, &lib
 	u.mu.Unlock()
+	if dev.Found {
+		u.readBackups(ctx, dev.Serial)
+	}
 	now := dev.Installed.Description
 	if now == "" {
 		now = dev.Firmware
@@ -373,14 +377,25 @@ func devicePathFromPrompt(prompt string) (string, bool) {
 }
 
 func (u *UI) startBackup() {
+	serial := u.st.Device.Serial
 	u.start(JobBackup, func(ctx context.Context, emit func(Event)) error {
 		path, err := u.be.Backup(ctx, emit)
 		if err != nil {
 			return err
 		}
 		emit(Event{Kind: EventLog, Text: "backup written: " + path})
+		u.readBackups(ctx, serial)
 		return nil
 	})
+}
+
+// readBackups asks the backend what the backup folder holds for this iPod
+// and hands it to the window. Job goroutine; publishes under the mutex.
+func (u *UI) readBackups(ctx context.Context, serial string) {
+	apple, n, dir := u.be.Backups(ctx, serial)
+	u.mu.Lock()
+	u.newBackups = &Backups{Apple: apple, Count: n, Dir: dir}
+	u.mu.Unlock()
 }
 
 func (u *UI) startEject() {

@@ -195,7 +195,7 @@ type UI struct {
 	editingName bool
 
 	browseBtn                                   widget.Clickable
-	dryRunBtn, pruneBtn, cancelBtn              widget.Clickable
+	dryRunBtn, pruneBtn                         widget.Clickable
 	checkBtn, updateBtn, flashBtn, flashOpenBtn widget.Clickable
 	backupBtn, ejectBtn, copyBtn                widget.Clickable
 	nameClick, nameSaveBtn, nameCancelBtn       widget.Clickable
@@ -223,10 +223,15 @@ type UI struct {
 	// Clickable drawn twice in a frame is a button that only works in
 	// one of the two places), the "···" button and its menu.
 	headCancelBtn widget.Clickable
-	menuBtn       widget.Clickable
-	menuScrim     widget.Clickable
-	menuClicks    [menuCount]widget.Clickable
-	themeClicks   [3]widget.Clickable
+	// The iPod tab's own: Show folder, and the Advanced disclosure.
+	backupDirBtn widget.Clickable
+	advancedBtn  widget.Clickable
+	// newBackups is a job's read of the backup folder, for drain.
+	newBackups  *Backups
+	menuBtn     widget.Clickable
+	menuScrim   widget.Clickable
+	menuClicks  [menuCount]widget.Clickable
+	themeClicks [3]widget.Clickable
 	// topH is the top bar's height in the last frame: where the menu
 	// hangs from.
 	topH int
@@ -349,6 +354,9 @@ func (u *UI) SetState(st State) {
 	u.namesTick.Value = st.FixNames
 	u.organizeTick.Value = st.Organize
 	u.discTick.Value = st.DiscFolders
+	if st.Advanced {
+		u.revealAdvanced()
+	}
 }
 
 // --- the per-frame work ------------------------------------------------
@@ -362,6 +370,8 @@ func (u *UI) drain() {
 	u.inbox = nil
 	dev, lib, rel := u.newDev, u.newLib, u.newRel
 	u.newDev, u.newLib, u.newRel = nil, nil, nil
+	backups := u.newBackups
+	u.newBackups = nil
 	path, pathFor := u.newPath, u.pathFor
 	u.newPath, u.pathFor = "", JobNone
 	renamed := u.newName
@@ -396,6 +406,9 @@ func (u *UI) drain() {
 	}
 	if lib != nil {
 		u.st.Library = *lib
+	}
+	if backups != nil {
+		u.st.Backups = *backups
 	}
 	if rel != nil {
 		u.st.Release = *rel
@@ -671,6 +684,9 @@ func (u *UI) events(gtx C) {
 		if u.flashBtn.Clicked(gtx) {
 			u.startFlash(strings.TrimSpace(u.flashEd.Text()))
 		}
+		if u.backupDirBtn.Clicked(gtx) {
+			u.openBackupFolder()
+		}
 		if u.backupBtn.Clicked(gtx) {
 			u.startBackup()
 		}
@@ -684,16 +700,18 @@ func (u *UI) events(gtx C) {
 		}
 	}
 	u.nameEvents(gtx, busy)
-	cancel := u.cancelBtn.Clicked(gtx)
-	if u.headCancelBtn.Clicked(gtx) {
-		cancel = true
-	}
-	if u.st.CanCancel() && cancel {
+	if u.headCancelBtn.Clicked(gtx) && u.st.CanCancel() {
 		u.st.Logf("cancel requested")
 		u.run.Cancel()
 	}
 	if u.copyBtn.Clicked(gtx) {
 		u.copyLog(gtx)
+	}
+	if u.advancedBtn.Clicked(gtx) {
+		u.st.Advanced = !u.st.Advanced
+		if u.st.Advanced {
+			u.revealAdvanced()
+		}
 	}
 	if u.menuBtn.Clicked(gtx) {
 		u.st.MenuOpen = !u.st.MenuOpen
@@ -1337,7 +1355,7 @@ func (u *UI) body(gtx C) D {
 	case TabLibrary:
 		return u.libraryPane(gtx)
 	case TabDetails:
-		return u.detailsPane(gtx)
+		return u.ipodPane(gtx)
 	default:
 		return u.albumsPane(gtx)
 	}
@@ -1486,52 +1504,6 @@ func appleBackupName(serial string) string {
 // longer is a pane that pushes its button row off the bottom of the
 // window on the machine where it matters.
 
-// nameRow is the iPod's name: a label until it is clicked, then a field
-// with Save and Cancel.
-//
-// It shows DisplayName — the friendly name, else the volume label as FAT
-// stores it, else "iPod Video 80 GB". "Apple iPod" (the SCSI model string
-// every iPod ever made reports) is never a name; the hardware line below
-// carries what this device actually is.
-func (u *UI) nameRow(gtx C) D {
-	d := u.st.Device
-	if u.editingName {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx C) D {
-						return u.field(gtx, &u.nameEd, "Brandon's iPod")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return u.button(gtx, btn{&u.nameSaveBtn, "Save", true, !u.st.Busy()})
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return u.button(gtx, btn{&u.nameCancelBtn, "Cancel", false, true})
-					}),
-				)
-			}),
-			layout.Rigid(u.line(11, u.pal.Muted2, u.namePreview())),
-		)
-	}
-	head := d.DisplayName()
-	if d.Size > 0 {
-		head += "  ·  " + disk.HumanSize(d.Size)
-	}
-	hint := "click to rename"
-	if u.st.Busy() {
-		hint = ""
-	}
-	return u.nameClick.Layout(gtx, func(gtx C) D {
-		return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-			layout.Flexed(1, u.line(14, u.pal.Ink, head)),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(u.text(10, u.pal.Muted2, hint)),
-		)
-	})
-}
-
 // namePreview is the sentence under the field while it is being typed
 // in. A FAT label is eleven upper-case ASCII bytes, so most names come
 // out shorter and louder than they went in, and finding that out in
@@ -1549,18 +1521,6 @@ func (u *UI) namePreview() string {
 	default:
 		return "Windows will show it as " + label + " — a FAT label is 11 upper-case ASCII bytes."
 	}
-}
-
-// cancelLabel says out loud that the two write jobs cannot be stopped
-// between the body write and the directory write. A Cancel that would
-// leave a partition with a new body and an old directory row is a
-// Cancel that bricks the device, so it is not offered — the button says
-// why instead of pretending.
-func (u *UI) cancelLabel() string {
-	if u.st.Job != nil && u.st.Job.Kind.Writes() && u.st.Busy() {
-		return "Cannot cancel once writing"
-	}
-	return "Cancel"
 }
 
 // flashNote is the sentence that decides whether a user can flash at
@@ -1753,12 +1713,15 @@ func (u *UI) text(size unit.Sp, col color.NRGBA, txt string) layout.Widget {
 // is the only elevation this design has. No shadows — the device has
 // none and a drop shadow under a rectangle is the thing that makes a
 // flat palette look like a mistake.
-func (u *UI) plate(gtx C, w layout.Widget) D {
-	return widget.Border{Color: u.pal.Border, CornerRadius: unit.Dp(8), Width: unit.Dp(1)}.Layout(gtx,
+func (u *UI) plate(gtx C, w layout.Widget) D { return u.plateR(gtx, 8, w) }
+
+// plateR is plate with a chosen corner radius.
+func (u *UI) plateR(gtx C, radius unit.Dp, w layout.Widget) D {
+	return widget.Border{Color: u.pal.Border, CornerRadius: radius, Width: unit.Dp(1)}.Layout(gtx,
 		func(gtx C) D {
 			return layout.Stack{}.Layout(gtx,
 				layout.Expanded(func(gtx C) D {
-					r := gtx.Dp(8)
+					r := gtx.Dp(radius)
 					defer clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, r).Push(gtx.Ops).Pop()
 					paint.ColorOp{Color: u.pal.Plate}.Add(gtx.Ops)
 					paint.PaintOp{}.Add(gtx.Ops)

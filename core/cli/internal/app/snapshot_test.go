@@ -101,6 +101,7 @@ func TestSnapshotTheTabs(t *testing.T) {
 		{"library", LibraryState()},
 		{"details", func() State { st := DemoState(); st.Tab = TabDetails; return st }()},
 		{"menu", MenuState()},
+		{"advanced", AdvancedState()},
 	}
 	sizes := [][2]int{{900, 600}, {MinWidth, MinHeight}}
 	for _, c := range cases {

@@ -63,6 +63,10 @@ type fakeBackend struct {
 	// releaseCalls and refreshCalls count the two reads the header's
 	// after-job behaviour adds; flashFirmware is what a successful fake
 	// Flash leaves installed, so a test can see the header follow it.
+	backupsApple time.Time
+	backupsN     int
+	backupsDir   string
+
 	releaseCalls  int
 	refreshCalls  int
 	flashFirmware string
@@ -443,4 +447,11 @@ func answerDialogs(u *UI, answers ...string) chan int {
 		done <- n
 	}()
 	return done
+}
+
+// Backups answers from three fields a test sets.
+func (f *fakeBackend) Backups(ctx context.Context, serial string) (time.Time, int, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.backupsApple, f.backupsN, f.backupsDir
 }

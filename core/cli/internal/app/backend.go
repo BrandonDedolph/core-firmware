@@ -42,6 +42,12 @@ type Backend interface {
 	// Refresh identifies the attached iPod and inspects its library
 	// volume. Read-only, top to bottom.
 	Refresh(ctx context.Context) (Device, Library, error)
+	// Backups is what the backup folder holds for this iPod: the date
+	// Apple's firmware was saved (zero when there is no apple-*.bin for
+	// this serial), how many whole-partition backups (fwpart-*.bin)
+	// there are, and the folder itself. Read-only; a folder that does
+	// not exist yet is zero and 0, not an error.
+	Backups(ctx context.Context, serial string) (apple time.Time, n int, dir string)
 	// Detect is the cheap half of Refresh: which iPods are attached,
 	// one raw open each, no volume walk and no checksum. The 2-second
 	// poll calls it; a change is what starts a Refresh.
@@ -420,7 +426,7 @@ func (b *RealBackend) Release(ctx context.Context) (Release, error) {
 	if err != nil {
 		return Release{Checked: true, Err: err.Error()}, err
 	}
-	out := Release{Checked: true, Tag: rel.Tag, Notes: rel.Notes}
+	out := Release{Checked: true, Tag: rel.Tag, Notes: rel.Notes, Published: rel.Published}
 	if a, ok := ghrelease.FirmwareAsset(rel); ok {
 		out.Asset = a.Name
 	}
@@ -769,3 +775,54 @@ func (b *RealBackend) FetchThumb(ctx context.Context, url string) (image.Image, 
 
 // maxThumbBytes is the cap on a candidate thumbnail download.
 const maxThumbBytes = 2 << 20
+
+// --- Backups -------------------------------------------------------------
+
+// Backups lists the backup folder: the one the flasher writes to (the
+// configured BackupDir, else flasher.DefaultBackupDir — the CLI's).
+func (b *RealBackend) Backups(ctx context.Context, serial string) (time.Time, int, string) {
+	dir := b.BackupDir
+	if dir == "" {
+		if d, err := flasher.DefaultBackupDir(); err == nil {
+			dir = d
+		}
+	}
+	if dir == "" {
+		return time.Time{}, 0, ""
+	}
+	apple, n := scanBackups(dir, serial)
+	return apple, n, dir
+}
+
+// scanBackups is Backups over one folder, apart so a test can point it at a
+// temp dir. Apple's backup is matched by this serial's file-name prefix
+// (flasher.AppleBackupFileName) and dated by the date in its name; the
+// newest wins.
+func scanBackups(dir, serial string) (time.Time, int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return time.Time{}, 0
+	}
+	// "apple-<serial>-2006-01-02.bin": the prefix is everything before
+	// the date and its extension.
+	sample := flasher.AppleBackupFileName(serial, time.Time{})
+	prefix := sample[:len(sample)-len("0001-01-01.bin")]
+	var apple time.Time
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".bin") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(name, "fwpart-"):
+			n++
+		case strings.HasPrefix(name, prefix):
+			date := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".bin")
+			if t, err := time.Parse("2006-01-02", date); err == nil && t.After(apple) {
+				apple = t
+			}
+		}
+	}
+	return apple, n
+}

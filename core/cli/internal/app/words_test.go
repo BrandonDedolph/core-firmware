@@ -25,6 +25,14 @@ func frontStrings(u *UI) []string {
 	for _, t := range []Tab{TabAlbums, TabLibrary, TabDetails} {
 		out = append(out, t.String())
 	}
+	// The iPod tab's rows, with Advanced closed: Advanced is the one
+	// place the disk path, the OSOS entry and the device files may appear.
+	if u.st.Device.Found {
+		adv := u.st.Advanced
+		u.st.Advanced = false
+		out = append(out, u.ipodStrings()...)
+		u.st.Advanced = adv
+	}
 	out = append(out, menuLabels[:]...)
 	for k := JobNone; k <= JobUndoFix; k++ {
 		out = append(out, k.String())

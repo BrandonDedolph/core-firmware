@@ -121,17 +121,20 @@ func TestSetStateFillsTheEditors(t *testing.T) {
 	}
 }
 
-// The Cancel button says out loud that the two write jobs cannot be
-// stopped between the body write and the directory write.
-func TestCancelLabelForAWriteJob(t *testing.T) {
+// The header's Cancel is only there for a job that can stop: the two
+// write jobs cannot be stopped between the body write and the directory
+// write, so during a flash there is no Cancel at all (the primary stays,
+// disabled) and the status line says what is happening.
+func TestHeaderCancelOnlyForJobsThatCanStop(t *testing.T) {
 	ui := NewUI(Options{})
+	ui.SetState(DemoState())
 	ui.st.Job = &JobStatus{Kind: JobFlash}
-	if got := ui.cancelLabel(); !strings.Contains(got, "Cannot cancel") {
-		t.Errorf("cancelLabel() during a flash = %q", got)
+	if ui.st.CanCancel() {
+		t.Error("a flash offers Cancel")
 	}
 	ui.st.Job = &JobStatus{Kind: JobSync}
-	if got := ui.cancelLabel(); got != "Cancel" {
-		t.Errorf("cancelLabel() during a sync = %q", got)
+	if !ui.st.CanCancel() {
+		t.Error("a sync does not offer Cancel")
 	}
 }
 

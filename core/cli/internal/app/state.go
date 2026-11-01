@@ -274,6 +274,17 @@ type Release struct {
 	Notes   string
 	Asset   string
 	Err     string
+	// Published is the release date, for the iPod tab's firmware row.
+	Published time.Time
+}
+
+// Backups is what the backup folder holds for the attached iPod: the date
+// Apple's firmware was saved (zero: none here), the number of
+// whole-partition backups, and the folder.
+type Backups struct {
+	Apple time.Time
+	Count int
+	Dir   string
 }
 
 // JobStatus is the running (or last-finished) job.
@@ -317,6 +328,11 @@ type State struct {
 	// is not installing: the button then reads "Install from <name>"
 	// and pressing THAT runs the install, through the usual gate.
 	InstallFile string
+	// Backups is the backup folder's answer, read with each Refresh.
+	Backups Backups
+	// Advanced is the iPod tab's disclosure. A view field, like Tab: it
+	// is not remembered between runs.
+	Advanced bool
 	// CheckedAt is when the last update check answered, for the iPod
 	// tab's note ("checked for updates 3 min ago"); zero is never.
 	CheckedAt time.Time

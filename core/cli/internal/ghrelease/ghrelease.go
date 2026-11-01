@@ -83,6 +83,9 @@ type Release struct {
 	Name   string  `json:"name"`
 	Notes  string  `json:"body"`
 	Assets []Asset `json:"assets"`
+	// Published is when the release went out (GitHub's published_at);
+	// zero when the API did not say.
+	Published time.Time `json:"published_at"`
 }
 
 // Client is the HTTP front end. The zero value works: New fills the

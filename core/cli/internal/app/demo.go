@@ -75,6 +75,12 @@ func DemoState() State {
 		Organize:  true,
 	}
 	st.CheckedAt = time.Now().Add(-3 * time.Minute)
+	st.Release.Published = time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	st.Backups = Backups{
+		Apple: time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC),
+		Count: 3,
+		Dir:   `C:\Users\brandon-home\AppData\Roaming\core\backups`,
+	}
 	st.Albums = demoAlbums()
 	for _, line := range strings.Split(strings.TrimSpace(demoLog), "\n") {
 		st.Log = append(st.Log, line)
@@ -239,6 +245,14 @@ func LibraryState() State {
 	}
 	st.Logf("--- scan the library ---")
 	st.Logf("14:06:12  101 album(s), 928 track(s): 3 need art, 4 misnamed, 5 to re-folder, 2 need attention")
+	return st
+}
+
+// AdvancedState is the demo on the iPod tab with Advanced open.
+func AdvancedState() State {
+	st := DemoState()
+	st.Tab = TabDetails
+	st.Advanced = true
 	return st
 }
 

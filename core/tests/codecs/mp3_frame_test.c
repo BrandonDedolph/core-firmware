@@ -590,6 +590,20 @@ static void test_scan(void)
           mid < si.seek_start + si.audio_bytes / 2u + si.audio_bytes / 50u);
     xpect("a seek past the end is clamped inside the file",
           mp3_seek_offset(&si, si.total_frames * 10u) < si.audio_end);
+
+    /* The same file cut three bytes past its Xing frame: the audio region is
+     * [417, 420), and a seek must land in it — not at audio_end - 4, which
+     * is inside the Xing frame (found by fuzz_mp3_frame;
+     * regress/mp3_frame/cut-after-xing). */
+    m = (mem_t){ buf, 417u + 3u, 0 };
+    xpect("a file cut just past its Xing frame scans",
+          mp3_stream_scan(&src, &si) == 0 &&
+          si.audio_start == 417u && si.audio_end == 420u);
+    for (uint64_t t = 0; t < 3u; t++) {
+        uint64_t off = mp3_seek_offset(&si, t * si.total_frames / 2u + t);
+        xpect("...and every seek in it stays in [audio_start, audio_end)",
+              off >= si.audio_start && off < si.audio_end);
+    }
     /* Not an MP3 at all. */
     memset(buf, 0x00, 4096);
     m = (mem_t){ buf, 4096, 0 };

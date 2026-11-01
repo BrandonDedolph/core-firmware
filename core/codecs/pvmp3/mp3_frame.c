@@ -428,9 +428,15 @@ uint64_t mp3_seek_offset(const mp3_stream_info_t *si, uint64_t target_frame)
         }
     }
 
-    if (off < si->audio_start) off = si->audio_start;
+    /* End clamp FIRST, start clamp last, so the start bound always wins.
+     * The other way round, a file cut off a few bytes past its Xing frame
+     * (audio_start within 4 bytes of audio_end) was clamped back to
+     * audio_end - 4 — inside the Xing frame, the one frame that must never
+     * be decoded — and outside the [audio_start, audio_end) the header
+     * promises. */
     if (si->audio_end > 4u && off > si->audio_end - 4u) {
         off = si->audio_end - 4u;
     }
+    if (off < si->audio_start) off = si->audio_start;
     return off;
 }

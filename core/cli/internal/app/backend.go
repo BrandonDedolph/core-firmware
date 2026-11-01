@@ -367,13 +367,13 @@ func (b *RealBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 		return nil, err
 	}
 	emit(Event{Kind: EventLog, Text: fmt.Sprintf(
-		"%s  plan: %d albums, %d to copy, %d already there, %d to rename, %d orphan(s)",
+		"%s  plan: %d albums, %d to copy, %d already there, %d to rename, %d not in the music folder",
 		stamp(time.Now()), plan.Albums, len(plan.Copy), len(plan.Skip), len(plan.Rename), len(plan.Prune))})
 	for _, w := range plan.Warnings {
 		emit(Event{Kind: EventLog, Text: "warning: " + w})
 	}
 	if o.DryRun {
-		emit(Event{Kind: EventProgress, Text: "dry run — nothing was written", Pct: 1})
+		emit(Event{Kind: EventProgress, Text: "preview — nothing was written", Pct: 1})
 		return plan, nil
 	}
 
@@ -401,7 +401,7 @@ func (b *RealBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 	rep, err := syncer.Execute(ctx, plan, o)
 	if rep != nil {
 		emit(Event{Kind: EventLog, Text: fmt.Sprintf(
-			"%s  %d copied (%s), %d skipped, %d pruned, art %d written / %d kept, index %d bytes",
+			"%s  %d copied (%s), %d skipped, %d removed, art %d written / %d kept, index %d bytes",
 			stamp(time.Now()), rep.Copied, disk.HumanSize(rep.CopiedBytes), rep.Skipped,
 			rep.Pruned, rep.ArtWritten, rep.ArtSkipped, rep.IndexBytes)})
 	}
@@ -627,7 +627,7 @@ func verifyBackup(path string) error {
 // what keeps those two apart.
 func (b *RealBackend) Rename(ctx context.Context, volume, name string) (string, error) {
 	if volume == "" {
-		return "", fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) and press Refresh")
+		return "", fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
 	}
 	label := disk.LegalLabel(name)
 	if strings.TrimSpace(name) != "" && label == "" {

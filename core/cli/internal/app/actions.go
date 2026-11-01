@@ -8,6 +8,7 @@ import (
 
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/fwpart"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/installer"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/library"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
@@ -47,6 +48,17 @@ func (u *UI) startRefresh() {
 		if dev.Found {
 			emit(Event{Kind: EventLog, Text: fmt.Sprintf("device: %s — %s, %s",
 				dev.Path, dev.Model, disk.HumanSize(dev.Size))})
+			if dev.Installed.Description != "" {
+				emit(Event{Kind: EventLog, Text: "firmware: " + dev.Installed.Description})
+			}
+			if dev.Installed.Kind == fwpart.Other {
+				// The Install screen says this in plain words; the
+				// file names and the paths are the log's.
+				emit(Event{Kind: EventLog, Text: "install: Apple's firmware is saved first, as " +
+					appleBackupName(dev.Serial) + "; then the image is written and read back, and " +
+					"CORECFG.DAT, CORELOG.BIN and Music\\ are created on " + dev.Volume +
+					" (the firmware can overwrite those files but cannot create them)"})
+			}
 		} else {
 			emit(Event{Kind: EventLog, Text: "no iPod found: " + dev.Err})
 		}
@@ -66,10 +78,10 @@ func (u *UI) startSync(kind JobKind) {
 	dst := u.st.Device.Volume
 	u.start(kind, func(ctx context.Context, emit func(Event)) error {
 		if src == "" {
-			return fmt.Errorf("no music folder: type one in the Music card, or press Browse")
+			return fmt.Errorf("no music folder: choose it on the Library tab")
 		}
 		if dst == "" {
-			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) and press Refresh")
+			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
 		}
 		o := syncer.Options{Src: src, Dst: dst, GenreMap: library.GenreMapEmbedded}
 		switch kind {
@@ -86,8 +98,8 @@ func (u *UI) startSync(kind JobKind) {
 
 		// JobSyncPrune.
 		answer, err := u.ask(ctx, &dialogRequest{
-			title:   "Sync + prune deletes music",
-			body:    "Prune removes everything under Music/ on the iPod that this source folder does\nnot produce — tracks, albums and their art sidecars.\n\nsource  " + src + "\niPod    " + dst + "\n\nA dry run comes next and will list exactly what would go.",
+			title:   "Sync and remove deletes music",
+			body:    "Sync and remove deletes everything under Music/ on the iPod that this music folder\ndoes not produce — tracks, albums and their art sidecars.\n\nsource  " + src + "\niPod    " + dst + "\n\nA preview comes next and will list exactly what would go.",
 			prompt:  "Continue to the list?",
 			okLabel: "Show me the list",
 		})
@@ -95,7 +107,7 @@ func (u *UI) startSync(kind JobKind) {
 			return err
 		}
 		if answer == "" {
-			return fmt.Errorf("cancelled before the dry run")
+			return fmt.Errorf("cancelled before the preview")
 		}
 
 		dry := o
@@ -105,7 +117,7 @@ func (u *UI) startSync(kind JobKind) {
 			return err
 		}
 		if len(plan.Prune) == 0 {
-			emit(Event{Kind: EventLog, Text: "nothing to prune; running a plain sync instead"})
+			emit(Event{Kind: EventLog, Text: "nothing to remove; running a plain sync instead"})
 			_, err := u.be.Sync(ctx, o, emit)
 			return err
 		}
@@ -113,14 +125,14 @@ func (u *UI) startSync(kind JobKind) {
 			title: fmt.Sprintf("Delete %d item(s) from the iPod?", len(plan.Prune)),
 			body: fmt.Sprintf("%s would be deleted from %s:\n\n%s",
 				disk.HumanSize(plan.PruneBytes), dst, strings.Join(plan.Prune, "\n")),
-			prompt:  "Type  prune  to confirm:",
-			want:    "prune",
+			prompt:  "Type  remove  to confirm:",
+			want:    "remove",
 			okLabel: "Delete and sync",
 		})
 		if err != nil {
 			return err
 		}
-		if answer != "prune" {
+		if answer != "remove" {
 			return fmt.Errorf("aborted: the confirmation did not match")
 		}
 		o.Prune, o.Yes = true, true
@@ -164,7 +176,7 @@ func (u *UI) startUpdate() {
 	cli := u.st.CLIPath
 	u.start(JobUpdate, func(ctx context.Context, emit func(Event)) error {
 		if !rel.Checked || rel.Tag == "" {
-			return fmt.Errorf("press Check first, so there is a release to install")
+			return fmt.Errorf("no release known yet: use ··· → Check for updates first")
 		}
 		if installed != "" && installed == rel.Tag {
 			// Not a refusal — `core update --tag` re-flashes on purpose
@@ -197,7 +209,7 @@ func (u *UI) startFlash(file string) {
 	cli := u.st.CLIPath
 	u.start(JobFlash, func(ctx context.Context, emit func(Event)) error {
 		if file == "" {
-			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or press Flash file…")
+			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or use ··· → Flash an image file…")
 		}
 		if err := u.flashFile(ctx, file, cli, emit); err != nil {
 			return err
@@ -375,7 +387,7 @@ func (u *UI) startEject() {
 	vol := u.st.Device.Volume
 	u.start(JobEject, func(ctx context.Context, emit func(Event)) error {
 		if vol == "" {
-			return fmt.Errorf("no volume to eject; press Refresh with the iPod plugged in")
+			return fmt.Errorf("no volume to eject — plug the iPod in, or use ··· → Read the iPod again")
 		}
 		return u.be.Eject(ctx, vol, emit)
 	})
@@ -466,7 +478,7 @@ func (u *UI) setSource(path string) {
 func (u *UI) startInspect(src string) {
 	src = strings.TrimSpace(src)
 	if src == "" {
-		u.st.Logf("scan: no music folder yet — press Browse")
+		u.st.Logf("scan: no music folder yet — choose one on the Library tab")
 		return
 	}
 	discs := u.st.DiscFolders

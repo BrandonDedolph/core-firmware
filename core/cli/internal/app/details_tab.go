@@ -147,7 +147,7 @@ func (u *UI) firmwareFacts(gtx C) D {
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(func(gtx C) D {
-						return u.button(gtx, btn{&u.flashOpenBtn, "Flash file…", false, !busy && u.pickerOK})
+						return u.button(gtx, btn{&u.flashOpenBtn, "Choose an image…", false, !busy && u.pickerOK})
 					}),
 				)
 			}),
@@ -182,8 +182,8 @@ func (u *UI) musicFacts(gtx C) D {
 			layout.Rigid(func(gtx C) D {
 				ready := !busy && u.st.Device.Volume != ""
 				return u.buttonRow(gtx,
-					btn{&u.dryRunBtn, "Dry run", false, ready},
-					btn{&u.pruneBtn, "Sync + prune", false, ready},
+					btn{&u.dryRunBtn, "Preview sync", false, ready},
+					btn{&u.pruneBtn, "Sync and remove", false, ready},
 				)
 			}),
 		)

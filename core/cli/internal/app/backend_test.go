@@ -193,7 +193,7 @@ func TestSyncPruneIsTwoDialogsAndADryRunFirst(t *testing.T) {
 		{Albums: 3, Prune: []string{"Music/Old - Band/01. a.flac", "Music/Old - Band/folder.art"}, PruneBytes: 1234},
 	}}
 	u := newTestUI(f)
-	answered := answerDialogs(u, "yes", "prune")
+	answered := answerDialogs(u, "yes", "remove")
 	u.startSync(JobSyncPrune)
 	settle(u)
 
@@ -277,7 +277,7 @@ func TestUpdateWithoutACheckRefuses(t *testing.T) {
 	u := newTestUI(f)
 	u.startUpdate()
 	settle(u)
-	if u.st.Job == nil || !u.st.Job.Failed || !strings.Contains(u.st.Job.Text, "Check first") {
+	if u.st.Job == nil || !u.st.Job.Failed || !strings.Contains(u.st.Job.Text, "Check for updates first") {
 		t.Errorf("update with no release ran anyway: %+v", u.st.Job)
 	}
 }

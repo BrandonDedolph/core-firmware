@@ -199,7 +199,7 @@ type UI struct {
 	checkBtn, updateBtn, flashBtn, flashOpenBtn widget.Clickable
 	backupBtn, ejectBtn, copyBtn                widget.Clickable
 	nameClick, nameSaveBtn, nameCancelBtn       widget.Clickable
-	installBtn, installFileBtn                  widget.Clickable
+	installBtn, installFileBtn, installPickBtn  widget.Clickable
 	dlgOK, dlgCancel                            widget.Clickable
 
 	// The top bar's one primary button, the tabs, and the footer's
@@ -399,6 +399,7 @@ func (u *UI) drain() {
 	}
 	if rel != nil {
 		u.st.Release = *rel
+		u.st.CheckedAt = time.Now()
 	}
 	// The events go after the results they announce: a job publishes its
 	// result and THEN returns, so a Done and the device it read arrive in
@@ -419,15 +420,15 @@ func (u *UI) drain() {
 		u.flashEd.SetText(path)
 		u.st.Tab = TabDetails
 	case path != "" && pathFor == JobInstall:
-		// "Install from a file…" is one gesture: the file dialog IS the
-		// decision, and a second click on a button that appeared where
-		// the first one was is a click nobody expects to need.
-		u.st.FlashFile = path
-		u.flashEd.SetText(path)
-		u.startInstall(path)
+		// Picking a file is choosing it, not installing it: the button
+		// becomes "Install from <name>" and that click runs the install
+		// through the same gate as Install Core.
+		u.st.InstallFile = path
+		u.st.Logf("install image: %s", path)
 	}
 	if report != nil {
 		u.st.Report, u.st.Scanned = report, time.Now()
+		u.logReport(report)
 		// A rescan of the same tree (Rescan, or ticking the multi-disc
 		// row) keeps the lookup and the Take/Skip decisions for every
 		// album that is still coverless: the keys are the album folders,
@@ -454,6 +455,12 @@ func (u *UI) drain() {
 				continue
 			}
 			u.setChoice(key, dec)
+		}
+		for _, key := range sortedKeys(cands) {
+			if cs := cands[key]; len(cs) > 0 {
+				u.st.Logf("cover art: %s — %.2f %s %s — %s", key, cs[0].Score, cs[0].Provider,
+					cs[0].Artist, cs[0].Album)
+			}
 		}
 		u.st.Logf("cover art: %d album(s) matched, %d accepted at %.2f or better",
 			len(cands), len(u.st.ArtChoices), librarian.DefaultMinScore)
@@ -634,6 +641,13 @@ func (u *UI) events(gtx C) {
 			u.startInstall("")
 		}
 		if u.installFileBtn.Clicked(gtx) {
+			if f := u.st.InstallFile; f != "" {
+				u.startInstall(f)
+			} else {
+				u.pick(JobInstall)
+			}
+		}
+		if u.installPickBtn.Clicked(gtx) {
 			u.pick(JobInstall)
 		}
 		if u.browseBtn.Clicked(gtx) {
@@ -761,7 +775,7 @@ func (u *UI) nameEvents(gtx C, busy bool) {
 func (u *UI) startRename(name string) {
 	vol, serial := u.st.Device.Volume, u.st.Device.Serial
 	if vol == "" {
-		u.st.Logf("rename: no iPod volume yet — press Refresh")
+		u.st.Logf("rename: no iPod volume yet — plug the iPod in (disk mode: Select+Play)")
 		return
 	}
 	u.start(JobRename, func(ctx context.Context, emit func(Event)) error {
@@ -1210,7 +1224,10 @@ func (u *UI) tabNote() string {
 		}
 		return ""
 	default:
-		return u.st.CLIPath
+		if u.st.CheckedAt.IsZero() {
+			return "checked for updates: never"
+		}
+		return "checked for updates " + ago(time.Since(u.st.CheckedAt))
 	}
 }
 
@@ -1388,34 +1405,49 @@ func (u *UI) lookingNote() string {
 func (u *UI) installPane(gtx C) D {
 	d := u.st.Device
 	busy := u.st.Busy()
+	model := strings.TrimSpace(d.Model)
+	if model == "" {
+		model = DefaultDeviceName
+	}
 	return u.topPlate(gtx, func(gtx C) D {
 		return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(u.line(18, u.pal.Ink, "Core is not installed on this iPod")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-				layout.Rigid(u.line(13, u.pal.Ink, "found      "+d.DisplayName()+"  ·  "+disk.HumanSize(d.Size))),
-				layout.Rigid(u.line(12, u.pal.Muted, "           "+d.Path+"  ·  "+installedText(d))),
+				layout.Rigid(u.line(13, u.pal.Ink, "found  "+model+"  ·  "+disk.HumanSize(d.Size))),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 				layout.Rigid(u.wrap(12, u.pal.MutedD, u.appleBackupPromise())),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(u.wrap(11, u.pal.Muted, "Then the image is written and read back, and CORECFG.DAT, "+
-					"CORELOG.BIN and Music\\ are created on the music volume — the firmware can "+
-					"overwrite those files but cannot create them.")),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(u.wrap(11, u.pal.Muted2, "The write asks for the device path typed out first, and cannot be "+
-					"stopped once it starts. If anything goes wrong: hold Select+Menu, then Select+Play at the "+
-					"Apple logo. That is disk mode and it is in ROM.")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(u.wrap(12, u.pal.MutedD, "Then Core is written and read back. Your music is untouched.")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(u.wrap(11, u.pal.Muted, "If anything goes wrong, hold Select+Menu, then Select+Play "+
+					"at the Apple logo: that is disk mode, it is in ROM, and this window will find the iPod again.")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 				layout.Rigid(func(gtx C) D {
-					return u.buttonRow(gtx,
-						btn{&u.installBtn, "Install Core", true, !busy},
-						btn{&u.installFileBtn, "Install from a file…", false, !busy && u.pickerOK},
-					)
+					bs := []btn{{&u.installBtn, "Install Core", true, !busy}}
+					if f := u.st.InstallFile; f != "" {
+						bs = append(bs,
+							btn{&u.installFileBtn, "Install from " + fileBase(f), false, !busy},
+							btn{&u.installPickBtn, "Choose another file…", false, !busy && u.pickerOK})
+					} else {
+						bs = append(bs, btn{&u.installFileBtn, "Install from a file…", false, !busy && u.pickerOK})
+					}
+					return u.buttonRow(gtx, bs...)
 				}),
 			)
 		})
 	})
+}
+
+// fileBase is the last element of a path written on either OS, for a button
+// that has room for a file name and not for where it lives.
+func fileBase(p string) string {
+	p = strings.TrimRight(p, `\/`)
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // topPlate is a plate that hugs its content at the top of the space it
@@ -1431,24 +1463,19 @@ func (u *UI) topPlate(gtx C, w layout.Widget) D {
 	)
 }
 
-// installedText is the classification, in the words fwpart chose, with
-// a fallback for a device nobody managed to classify.
-func installedText(d Device) string {
-	if s := strings.TrimSpace(d.Installed.Description); s != "" {
-		return s
-	}
-	return "firmware not recognised"
+// appleBackupPromise is the Install screen's first sentence: what happens
+// to Apple's firmware, in words. The file's name (it carries today's date)
+// is in the log, where somebody looking for the file will look.
+func (u *UI) appleBackupPromise() string {
+	return "Apple's firmware on this iPod is saved to a file first — it is the only copy there is, " +
+		"and it is never deleted."
 }
 
-// appleBackupPromise names the file Apple's firmware is about to be
-// copied into. It calls the clock, which a layout function should not
-// do lightly — but the name carries today's date and a promise about a
-// file with a different name in it is not a promise.
-func (u *UI) appleBackupPromise() string {
-	name := flasher.AppleBackupFileName(u.st.Device.Serial, time.Now())
-	return "Apple's firmware on this iPod is copied to " + name +
-		" before a single byte is written. Apple does not distribute it and it cannot be " +
-		"taken from another iPod, so that file is the only copy there is — it is never deleted."
+// appleBackupName is the file that promise is about: the name the flasher
+// will give Apple's firmware for this serial today. The log carries it (see
+// startRefresh); the screen says it in words.
+func appleBackupName(serial string) string {
+	return flasher.AppleBackupFileName(serial, time.Now())
 }
 
 // --- the iPod's name and the firmware note ------------------------------
@@ -1569,7 +1596,7 @@ func (u *UI) logPane(gtx C) D {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(u.text(11, u.pal.Muted2, fmt.Sprintf("LOG · %d lines", len(u.st.Log)))),
+						layout.Rigid(u.text(11, u.pal.Muted2, fmt.Sprintf("Log · %d lines", len(u.st.Log)))),
 						layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
 						layout.Rigid(func(gtx C) D {
 							return u.button(gtx, btn{&u.copyBtn, "Copy", false, len(u.st.Log) > 0})

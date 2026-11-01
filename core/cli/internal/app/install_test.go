@@ -186,18 +186,21 @@ func TestInstallCannotBeCancelled(t *testing.T) {
 	}
 }
 
-// The Install screen's promise names a file that does not exist yet.
-// If the name it prints is not the name the flasher will use, the
-// sentence is a lie the first time somebody goes looking for it.
+// The Install screen says what happens to Apple's firmware in words, and
+// the log names the file — the name the flasher will really use, so a
+// person who goes looking for it finds it.
 func TestTheInstallScreenNamesTheRealBackupFile(t *testing.T) {
 	ui := NewUI(Options{})
 	ui.SetState(NotInstalledState())
-	got := ui.appleBackupPromise()
-	want := "apple-000A2700168F1E3C-" + time.Now().Format("2006-01-02") + ".bin"
-	if !strings.Contains(got, want) {
-		t.Errorf("the promise does not name %s:\n%s", want, got)
-	}
-	if !strings.Contains(got, "only copy") {
+	if got := ui.appleBackupPromise(); !strings.Contains(got, "only copy") {
 		t.Errorf("the promise does not say why the file matters:\n%s", got)
+	}
+	f := &fakeBackend{dev: NotInstalledState().Device}
+	u := newTestUI(f)
+	u.startRefresh()
+	settle(u)
+	want := "apple-000A2700168F1E3C-" + time.Now().Format("2006-01-02") + ".bin"
+	if !strings.Contains(strings.Join(u.st.Log, "\n"), want) {
+		t.Errorf("the log does not name %s:\n%s", want, strings.Join(u.st.Log, "\n"))
 	}
 }

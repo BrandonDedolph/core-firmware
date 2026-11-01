@@ -66,15 +66,15 @@ func (k JobKind) String() string {
 	case JobRefresh:
 		return "refresh"
 	case JobDryRun:
-		return "dry run"
+		return "preview"
 	case JobSync:
 		return "sync"
 	case JobSyncPrune:
-		return "sync + prune"
+		return "sync and remove"
 	case JobCheck:
-		return "check for updates"
+		return "update check"
 	case JobUpdate:
-		return "update firmware"
+		return "firmware update"
 	case JobFlash:
 		return "flash"
 	case JobBackup:
@@ -86,11 +86,11 @@ func (k JobKind) String() string {
 	case JobInstall:
 		return "install"
 	case JobInspect:
-		return "scan the library"
+		return "library scan"
 	case JobArt:
-		return "look for cover art"
+		return "cover art lookup"
 	case JobFix:
-		return "fix the library"
+		return "library fix"
 	case JobUndoFix:
 		return "undo"
 	default:
@@ -313,8 +313,15 @@ type State struct {
 	// MenuOpen is the "···" menu. It is a view field, like Tab, so a
 	// canned state can be shot with the menu on screen.
 	MenuOpen bool
-	Job      *JobStatus
-	Log      []string
+	// InstallFile is the image "Install from a file…" picked. Picking
+	// is not installing: the button then reads "Install from <name>"
+	// and pressing THAT runs the install, through the usual gate.
+	InstallFile string
+	// CheckedAt is when the last update check answered, for the iPod
+	// tab's note ("checked for updates 3 min ago"); zero is never.
+	CheckedAt time.Time
+	Job       *JobStatus
+	Log       []string
 
 	// Tab is which of the three screens the body shows.
 	Tab Tab
@@ -378,7 +385,7 @@ func (t Tab) String() string {
 	case TabLibrary:
 		return "Library"
 	case TabDetails:
-		return "Details"
+		return "iPod"
 	default:
 		return "Albums"
 	}

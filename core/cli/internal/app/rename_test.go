@@ -164,7 +164,7 @@ func TestRenameWithoutAVolumeRefuses(t *testing.T) {
 	if len(f.renameCalls) != 0 {
 		t.Fatalf("Rename was called with no volume: %+v", f.renameCalls)
 	}
-	if !strings.Contains(strings.Join(u.st.Log, "\n"), "Refresh") {
+	if !strings.Contains(strings.Join(u.st.Log, "\n"), "plug the iPod in") {
 		t.Errorf("the log does not say what to do:\n%s", strings.Join(u.st.Log, "\n"))
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -387,7 +388,7 @@ func (u *UI) previewContent() []layout.Widget {
 }
 
 func more(n int) string {
-	return fmt.Sprintf("… and %d more (core fix --dry-run prints them all)", n)
+	return fmt.Sprintf("… and %d more — the log lists them all", n)
 }
 
 // moveRow is one before → after line: the reason in small caps, the old name
@@ -444,7 +445,7 @@ func (u *UI) artRow(gtx C, a librarian.AlbumRef, idx int) D {
 			layout.Rigid(func(gtx C) D {
 				take := !decided || dec.Skip
 				return u.buttonRow(gtx,
-					btn{u.artTake[idx], "Take", take, !busy && len(cands) > 0 && take},
+					btn{u.artTake[idx], "Use this cover", take, !busy && len(cands) > 0 && take},
 					btn{u.artSkip[idx], "Skip", false, !busy && (!decided || !dec.Skip)},
 				)
 			}),
@@ -459,14 +460,28 @@ func candLine(cands []artfetch.Candidate, dec librarian.Decision, decided bool) 
 	case decided && dec.Skip:
 		return "skipped — this album keeps no cover"
 	case decided:
-		return fmt.Sprintf("taking %.2f  %s  %s — %s", dec.Candidate.Score,
-			dec.Candidate.Provider, dec.Candidate.Artist, dec.Candidate.Album)
+		return "using " + dec.Candidate.Artist + " — " + dec.Candidate.Album + ", " +
+			providerWords(dec.Candidate.Provider)
 	case len(cands) == 0:
 		return "nothing found yet"
 	default:
 		c := cands[0]
-		return fmt.Sprintf("%.2f  %s  %s — %s", c.Score, c.Provider, c.Artist, c.Album)
+		return c.Artist + " — " + c.Album + ", " + providerWords(c.Provider)
 	}
+}
+
+// providerWords is where a cover came from, as a person would say it. The
+// provider id and the match score are the log's (see drain).
+func providerWords(id string) string {
+	switch id {
+	case "itunes":
+		return "found on iTunes"
+	case "musicbrainz":
+		return "found on Cover Art Archive"
+	case "":
+		return "found online"
+	}
+	return "found on " + id
 }
 
 // candThumb draws the candidate's 200 px thumbnail, fetched through the
@@ -535,7 +550,7 @@ func (u *UI) libraryEvents(gtx C, busy bool) {
 		return
 	}
 	if u.rescanBtn.Clicked(gtx) {
-		u.startInspect(strings.TrimSpace(u.st.Source))
+		u.rescan()
 	}
 	if u.artFindBtn.Clicked(gtx) {
 		u.startCandidates()
@@ -643,4 +658,49 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// rescan is the Rescan button on the Library tab and on the empty grid: the
+// same scan-then-preview a newly chosen folder gets, so the grid fills as
+// well as the problem list.
+func (u *UI) rescan() {
+	src := strings.TrimSpace(u.st.Source)
+	if src == "" {
+		return
+	}
+	u.startInspect(src)
+	if u.st.Device.Volume != "" {
+		u.later(func() { u.startSync(JobDryRun) })
+	}
+}
+
+// logReport writes a finished scan into the log, one line per item, so the
+// preview's "… and N more — the log lists them all" is true.
+func (u *UI) logReport(r *librarian.Report) {
+	u.st.Logf("scan: %d albums, %d tracks — %d without a cover, %d misnamed, %d to re-folder, "+
+		"%d multi-disc, %d need attention", r.Albums, r.Tracks, len(r.MissingArt),
+		len(TrackMoves(r.Misnamed)), len(TrackMoves(FolderMoves(r))), len(DiscMoves(r)),
+		len(r.NeedsAttention))
+	for _, a := range r.MissingArt {
+		u.st.Logf("  no cover   %s — %s", a.Artist, a.Album)
+	}
+	for _, group := range [][]organizer.Move{TrackMoves(r.Misnamed), TrackMoves(FolderMoves(r)), DiscMoves(r)} {
+		for _, m := range group {
+			u.st.Logf("  %-9s  %s → %s", m.Reason, relPath(r.Root, m.From), relPath(r.Root, m.To))
+		}
+	}
+	for _, a := range r.NeedsAttention {
+		u.st.Logf("  attention  %s — %s", relPath(r.Root, a.Path), a.Reason)
+	}
+}
+
+// sortedKeys is a map's album keys in order, so the log reads the same
+// every run.
+func sortedKeys[V any](m map[librarian.AlbumKey]V) []librarian.AlbumKey {
+	keys := make([]librarian.AlbumKey, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
 }

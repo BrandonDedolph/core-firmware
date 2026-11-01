@@ -74,6 +74,7 @@ func DemoState() State {
 		FixNames:  true,
 		Organize:  true,
 	}
+	st.CheckedAt = time.Now().Add(-3 * time.Minute)
 	st.Albums = demoAlbums()
 	for _, line := range strings.Split(strings.TrimSpace(demoLog), "\n") {
 		st.Log = append(st.Log, line)
@@ -259,7 +260,7 @@ func EmptyState() State {
 	}
 	st.Logf("core-app (devel)")
 	st.Logf("core CLI: not found beside this app — Flash and Update will print the command instead")
-	st.Logf("press Refresh once the iPod is in disk mode (Select + Play) and plugged in")
+	st.Logf("plug the iPod in (disk mode: Select + Play) — this window finds it on its own")
 	return st
 }
 

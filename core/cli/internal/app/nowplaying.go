@@ -115,13 +115,13 @@ func (u *UI) togglePlay() {
 		u.playFrom(np.Album, np.Album.TrackList, 0, false)
 	case !u.npLive:
 		// A canned state: flip the picture and nothing else.
-		np.Playing = !np.Playing
+		u.setPlaying(np, !np.Playing)
 	case u.audio.State() == player.Playing:
 		u.audio.Pause()
-		np.Playing = false
+		u.setPlaying(np, false)
 	case u.audio.State() == player.Paused:
 		u.audio.Resume()
-		np.Playing = true
+		u.setPlaying(np, true)
 	default:
 		u.playFrom(np.Album, np.Album.TrackList, np.TrackIndex, false)
 	}
@@ -238,11 +238,30 @@ func (u *UI) syncNowPlaying(gtx C) {
 	}
 	switch u.audio.State() {
 	case player.Playing:
-		np.Playing = true
+		u.setPlaying(np, true)
 		gtx.Execute(op.InvalidateCmd{At: u.now().Add(100 * time.Millisecond)})
 	case player.Paused:
-		np.Playing = false
+		u.setPlaying(np, false)
 	}
+}
+
+// setPlaying flips np.Playing and keeps the bars' clock with it: a pause
+// notes when it began, a resume adds that pause to BarsHold. Flipping to
+// the state it is already in changes nothing.
+func (u *UI) setPlaying(np *NowPlaying, playing bool) {
+	if np.Playing == playing {
+		return
+	}
+	now := u.now()
+	if playing {
+		if !np.BarsPausedAt.IsZero() {
+			np.BarsHold += now.Sub(np.BarsPausedAt)
+			np.BarsPausedAt = time.Time{}
+		}
+	} else {
+		np.BarsPausedAt = now
+	}
+	np.Playing = playing
 }
 
 // reindexNowPlaying finds the playing album again in a new grid.

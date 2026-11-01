@@ -17,10 +17,12 @@ import (
 // on a 760 ms triangle wave, phases 0 / 250 / 500 ms, heights 3..9 of a
 // 9×9 box, bars 2 wide with a gap of 1, bottom-aligned.
 //
-// Paused: the firmware animates them for as long as player_active() — which
-// stays true while paused (player.c: player_active is g_pl_active, not
-// player_playing) — so on the iPod a paused track's bars keep bouncing, and
-// so they do here.
+// Paused: the bars stop. The firmware's keep bouncing (player_active() is
+// g_pl_active, not player_playing, and nowplaying_bars never asks), which
+// the owner called wrong: "the bars should only be moving if music is
+// actually playing". Here the caller hands in a clock that stops with the
+// music (UI.barsTime / NowPlaying.BarsPausedAt), and a paused draw asks for
+// no further frame. The firmware is a follow-up.
 
 // npPeriod and npPhases are the firmware's, in ms.
 const npPeriod = 760
@@ -49,10 +51,9 @@ func npBarHeight(tMs int64, phase int64) int {
 // so a screenshot is the same every time). The geometry is the firmware's
 // 9×9 scaled to the box, each edge rounded to a whole device pixel so the
 // bars stay crisp. While it draws a moving picture it asks for the next
-// frame npFrame on. paused is accepted for the callers' sake and changes
-// nothing: the firmware's bars do not stop for a pause (see above).
+// frame npFrame on — unless paused, when the picture is still and no
+// frame is asked for.
 func npBars(gtx C, box unit.Dp, ink color.NRGBA, now time.Time, paused bool) D {
-	_ = paused
 	px := float64(gtx.Dp(box))
 	u := px / 9
 	at := func(v float64) int { return int(math.Round(v * u)) }
@@ -60,7 +61,9 @@ func npBars(gtx C, box unit.Dp, ink color.NRGBA, now time.Time, paused bool) D {
 	var t int64
 	if !now.IsZero() {
 		t = now.UnixMilli()
-		gtx.Execute(op.InvalidateCmd{At: now.Add(npFrame)})
+		if !paused {
+			gtx.Execute(op.InvalidateCmd{At: now.Add(npFrame)})
+		}
 	}
 	for i, ph := range npPhases {
 		h := npBarHeight(t, ph)
@@ -77,8 +80,18 @@ func (u *UI) barsTime(gtx C) time.Time {
 	if !u.npLive {
 		return time.Time{}
 	}
-	if !gtx.Now.IsZero() {
-		return gtx.Now
+	np := u.st.NowPlaying
+	base := gtx.Now
+	if base.IsZero() {
+		base = u.now()
 	}
-	return u.now()
+	if np == nil {
+		return base
+	}
+	// Paused: the clock stopped when the music did, and the bars hold the
+	// shape they had then; playing: wall time less every pause so far.
+	if !np.BarsPausedAt.IsZero() {
+		base = np.BarsPausedAt
+	}
+	return base.Add(-np.BarsHold)
 }

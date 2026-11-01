@@ -430,6 +430,13 @@ type NowPlaying struct {
 	// "ended" until EndedAt + EndedFor, and then Now Playing clears.
 	Ended   bool
 	EndedAt time.Time
+	// The bars' own clock. They move only while music is actually
+	// playing (the owner's rule; the iPod's keep bouncing when paused):
+	// BarsPausedAt is when the current pause began (zero while playing)
+	// and BarsHold is every pause so far added up, so the bars freeze
+	// mid-bounce and carry on from there when the music does.
+	BarsPausedAt time.Time
+	BarsHold     time.Duration
 }
 
 // EndedFor is how long an album that has played out stays in the footer.

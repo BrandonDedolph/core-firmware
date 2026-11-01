@@ -218,6 +218,10 @@ then reads and flashes the iPod itself.
   <img src="docs/screens/core_app.png" alt="the core desktop app, Linen" width="420">
   <img src="docs/screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="420">
 </p>
+<p align="center">
+  <img src="docs/screens/core_app_album.png" alt="an album open: its tracklist, with the player below" width="420">
+  <img src="docs/screens/core_app_fix.png" alt="the Fix tab" width="420">
+</p>
 
 ```bash
 core info                                   # identify the iPod, in disk mode

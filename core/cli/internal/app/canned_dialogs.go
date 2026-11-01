@@ -47,13 +47,15 @@ func cannedDialog(u *UI, kind string) error {
 		u.showAbout()
 		return nil
 	case "album":
-		// The sheet on Remain in Light, its third track playing.
+		// The sheet on Remain in Light (or a real library's hero album),
+		// its third track playing.
 		if u.st.NowPlaying == nil {
 			setDemoPlaying(&u.st)
 		}
 		np := u.st.NowPlaying
 		if np == nil {
-			return fmt.Errorf("--dialog album: the state has no %q", demoSheetAlbum)
+			return fmt.Errorf("--dialog album: no album in the state carries a tracklist "+
+				"(with --source: no album with %d+ tracks and a square embedded cover)", heroTracks)
 		}
 		u.openSheet(u.st.Albums[np.AlbumIndex])
 		return nil

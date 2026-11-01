@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
@@ -169,6 +171,11 @@ type thumbCache struct {
 	items map[string]*thumbItem
 	sem   chan struct{}
 	loads int
+	// pending is how many decodes are still running, and settled is
+	// closed (and replaced) each time one finishes: Wait's barrier. The
+	// window never waits; a one-frame screenshot has to.
+	pending int
+	settled chan struct{}
 }
 
 // thumbWorkers is how many covers are decoded at once.
@@ -183,6 +190,7 @@ func newThumbCache(load func(string) (image.Image, error), invalidate func()) *t
 		invalidate: invalidate,
 		items:      map[string]*thumbItem{},
 		sem:        make(chan struct{}, thumbWorkers),
+		settled:    make(chan struct{}),
 	}
 }
 
@@ -214,6 +222,7 @@ func (c *thumbCache) get(dir string, mod time.Time) (paint.ImageOp, bool) {
 	it = &thumbItem{mod: mod, state: thumbPending}
 	c.items[dir] = it
 	c.loads++
+	c.pending++
 	c.mu.Unlock()
 
 	go func() {
@@ -231,6 +240,9 @@ func (c *thumbCache) get(dir string, mod time.Time) (paint.ImageOp, bool) {
 				it.img, it.state = img, thumbReady
 			}
 		}
+		c.pending--
+		close(c.settled)
+		c.settled = make(chan struct{})
 		c.mu.Unlock()
 		c.invalidate()
 	}()
@@ -254,6 +266,38 @@ func (c *thumbCache) Loads() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.loads
+}
+
+// Pending is how many decodes have been started and not yet finished.
+func (c *thumbCache) Pending() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pending
+}
+
+// Wait blocks until every decode started so far has finished — a picture
+// or a failure, either is settled — or ctx ends. It is the screenshot's
+// barrier: a one-frame render that did not wait would ship the letter
+// plates the covers are still being decoded behind. The window never calls
+// it; there the picture arrives on a later frame.
+func (c *thumbCache) Wait(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	for {
+		c.mu.Lock()
+		if c.pending == 0 {
+			c.mu.Unlock()
+			return nil
+		}
+		ch := c.settled
+		c.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return fmt.Errorf("%d cover(s) still decoding: %w", c.Pending(), ctx.Err())
+		}
+	}
 }
 
 // --- decoding an album's cover ------------------------------------------

@@ -163,10 +163,12 @@ func PlayingState() State {
 	return st
 }
 
-// setDemoPlaying puts the canned album's third track in Now Playing.
+// setDemoPlaying puts the canned album's third track in Now Playing: the
+// first album that carries its tracklist — Remain in Light in the canned
+// grid, the hero album under a real library (UseShotLibrary).
 func setDemoPlaying(st *State) {
 	for i, a := range st.Albums {
-		if a.Device != demoSheetAlbum {
+		if len(a.TrackList) < 3 {
 			continue
 		}
 		st.NowPlaying = &NowPlaying{

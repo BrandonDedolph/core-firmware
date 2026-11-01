@@ -388,19 +388,43 @@ The binaries are attached from v0.1.3 on; for an earlier release, build it with
 `cd core/cli && go build -o core ./cmd/core`. On macOS and Linux, `chmod +x` the downloaded file.
 The examples below call it `core`.
 
-**The window.** `core-app` is the same thing as a desktop application: one window with an iPod card,
-a Music card (folder, Dry run, Sync, Sync + prune), a Firmware card (Check, Update, Flash file,
-Backup), Eject, and a log. It ships beside the command line from v0.1.3 as
-`core-app-windows-amd64.exe`, `core-app-darwin-arm64`, `core-app-darwin-amd64`,
+**The window.** `core-app` is the same thing as a desktop application. It ships beside the command
+line as `core-app-windows-amd64.exe`, `core-app-darwin-arm64`, `core-app-darwin-amd64`,
 `core-app-linux-amd64` and `core-app-linux-arm64`. On Windows it asks for Administrator when it
 opens (one UAC prompt), because reading the iPod's raw disk needs it; that is also what lets it
 flash from the window with no second prompt. Keep `core` in the same folder anyway: a window that
-is somehow not elevated runs `core.exe` under Administrator for the flash, and without it the
-Firmware card prints the command to run instead. The confirmations are the ones the command line asks for — the device
-path typed exactly before a flash, the word `prune` before anything is deleted. It has not been on
-a device yet; it drives the same code the commands below do.
+is somehow not elevated runs `core.exe` under Administrator for the flash.
 
-<p align="center"><img src="screens/core_app.png" alt="the core desktop app" width="640"></p>
+It finds the iPod by itself — there is nothing to press. Plug it in, in disk mode, and the window
+shows it within two seconds.
+
+- **The header** says which iPod it is (the name you gave it, and its model), the firmware on it,
+  whether a newer Core is out, and how much space is free. Its one button says what it will do:
+  *Sync 7 albums*, *Update to v0.2.2*, *Install Core*, or *Eject*. The window asks GitHub for the
+  latest release once when it first finds the iPod, so an update is offered without you asking.
+- **Albums** is your music folder as covers, with the ones that are new or changed marked.
+- **Library** is where the music folder is set (the field and *Browse…*), and what is wrong with
+  it — filenames that do not match their tags, folders to organize, missing covers — with *Fix
+  all* and *Undo*. Clicking the folder at the bottom of the window brings you here.
+- **iPod** is this iPod in five rows — Name (*Rename*), Firmware (*Update* / *Check*), Storage,
+  Hardware, Backups (*Show folder*, *Back up now*) — and an *Advanced* section with the disk path,
+  the partition entry, the device files and *Flash this image* for an image file of your own.
+- **The log** is the line at the bottom right of every screen: the last thing that happened.
+  Click it (or press Ctrl+L) to open the whole log, with *Copy* and *Clear*.
+- **···** holds the rest: back up the firmware, flash an image file, read the iPod again, check for
+  updates, copy the log, open the music folder, the theme (System, Linen, Onyx — System follows
+  Windows' dark-mode setting) and About.
+
+Writing firmware — Install, Update, or an image of your own — is confirmed in one dialog that says
+which iPod will be written: its name, model, serial, which disk on this PC and how much is
+written. On the iPod Video 5.5G 80 GB, the hardware Core has been tested on, you confirm by
+**holding the button for two seconds**; on anything else you type the disk path, as the command
+line asks. *Sync and remove* lists the albums it would delete and says how many on its button.
+After any write the window reads the iPod again, so the header shows the new version at once.
+
+<p align="center"><img src="screens/core_app.png" alt="the core desktop app, Linen" width="640"></p>
+<p align="center"><img src="screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="640"></p>
+<p align="center"><img src="screens/core_app_ipod.png" alt="the iPod tab" width="640"></p>
 
 **Connect.** Put the iPod in disk mode — Settings, Disk Mode on the device, or hold Select + Play
 at power-on — plug it in, and ask what is there:

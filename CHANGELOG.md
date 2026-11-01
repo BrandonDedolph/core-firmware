@@ -3,6 +3,21 @@
 Each release lists what changed on the device since the previous one. Versions are git tags;
 the boot screen and Settings → About show the one the device runs.
 
+## Unreleased
+
+- **The firmware is unchanged; this is the desktop app.** `core-app` looks
+  like the iPod now: its Linen and Onyx palettes (Onyx when Windows is in dark
+  mode, or chosen in the ··· menu), the boot screen's ring-and-dot mark in the
+  header and as the window icon, and Nunito. The header says which iPod it is,
+  how full it is and what its one button will do — "Sync 7 albums", "Update to
+  v0.2.2" — and the update is offered as soon as the iPod is found, without
+  pressing Check. A new iPod tab puts its name, firmware, storage, hardware and
+  backups in five rows, with the technical facts under Advanced. The log is a
+  line at the bottom of every screen that opens into the whole log. A firmware
+  write shows the iPod's name, model, serial and disk and is confirmed by
+  holding the button for two seconds, and the window reads the iPod again
+  after every write, so it no longer shows the old version until a replug.
+
 ## v0.2.1 — 2026-10-31
 
 - **Smoother list rows.** The selection bar's corners are anti-aliased instead

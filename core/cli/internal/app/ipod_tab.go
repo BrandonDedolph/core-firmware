@@ -9,6 +9,7 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/font"
+	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -496,9 +497,14 @@ func (u *UI) openBackupFolder() {
 }
 
 // sourceRow is the music folder field and its Browse button, on the Library
-// tab's header — the one place the folder is typed (A7 consolidates the
-// other entry points onto it).
+// tab's header — the one place the folder is set. The footer's folder text
+// comes here (and focuses the field); the empty grid's button and Browse
+// both run chooseMusicFolder.
 func (u *UI) sourceRow(gtx C, busy bool) D {
+	if u.focusSource {
+		u.focusSource = false
+		gtx.Execute(key.FocusCmd{Tag: &u.sourceEd})
+	}
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
 			return u.field(gtx, &u.sourceEd, `C:\Users\you\Music`)
@@ -509,6 +515,11 @@ func (u *UI) sourceRow(gtx C, busy bool) D {
 		}),
 	)
 }
+
+// chooseMusicFolder is the folder picker, from wherever it is offered: the
+// Library tab's Browse and the empty grid's button. The choice lands in
+// setSource through drain, like every picker result.
+func (u *UI) chooseMusicFolder() { u.pick(JobSync) }
 
 // footerSource is the bottom strip's left half: the music folder, which the
 // mockup keeps in the footer with a Change beside it.

@@ -209,10 +209,15 @@ v0.1.3 on, or build it from [`core/cli/`](core/cli/README.md).
 | `core-linux-arm64` | Linux, ARM |
 
 The same five come as `core-app-*`: a desktop window over the same code, for people who would
-rather press Sync than type it. On Windows it asks for Administrator when it opens, then reads and
-flashes the iPod itself.
+rather press Sync than type it — in the iPod's own Linen or Onyx, following the system's dark mode.
+It finds the iPod by itself, offers the update when there is one, and confirms a firmware write
+with the iPod's identity and a two-second hold. On Windows it asks for Administrator when it opens,
+then reads and flashes the iPod itself.
 
-<p align="center"><img src="docs/screens/core_app.png" alt="the core desktop app" width="640"></p>
+<p align="center">
+  <img src="docs/screens/core_app.png" alt="the core desktop app, Linen" width="420">
+  <img src="docs/screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="420">
+</p>
 
 ```bash
 core info                                   # identify the iPod, in disk mode
@@ -289,4 +294,6 @@ Apache-2.0 ([`core/LICENSE`](core/LICENSE)). The vendored FLAC decoder `dr_flac`
 MIT-0; the MP3 decoder is PacketVideo's `pvmp3` from AOSP, Apache-2.0, vendored at a pinned commit
 with its NOTICE and its patent disclaimer
 ([`core/codecs/pvmp3/`](core/codecs/pvmp3/README.md)). Nunito is under the SIL Open Font
-License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)).
+License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)); `core-app` embeds three of its
+weights, with the licence beside them in
+[`core/cli/internal/app/fonts/OFL.txt`](core/cli/internal/app/fonts/OFL.txt).

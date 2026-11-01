@@ -135,3 +135,13 @@ func TestScanListsEveryItemInTheLog(t *testing.T) {
 		}
 	}
 }
+
+func TestShortName(t *testing.T) {
+	if got := shortName("core-v0.2.1.ipod", 28); got != "core-v0.2.1.ipod" {
+		t.Errorf("short = %q", got)
+	}
+	got := shortName("core-v0.2.1-with-a-very-long-name.ipod", 28)
+	if len([]rune(got)) != 28 || !strings.HasSuffix(got, "name.ipod") || !strings.HasPrefix(got, "core-v0.2.1") {
+		t.Errorf("long = %q", got)
+	}
+}

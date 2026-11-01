@@ -187,22 +187,26 @@ type Device struct {
 	ElevationAdviceNeeded bool
 }
 
-// DefaultDeviceName is what an iPod with no name at all is called.
-// Not "Apple iPod": that is the SCSI model string, it is the same on
-// every iPod ever made, and it reads like the app failed to find out
-// anything. It belongs on the details line with the path and the
-// serial, not where a name goes.
-const DefaultDeviceName = "iPod Video 80 GB"
+// DefaultDeviceName is what an iPod is called when nothing better is
+// known: no friendly name, no volume label and no detected model. It used
+// to be "iPod Video 80 GB", which was this project's bench iPod and a lie
+// about anyone else's. (Device.Model is disk.IPod's human description —
+// "iPod Video 5.5G 80 GB" — never the SCSI "Apple iPod" string.)
+const DefaultDeviceName = "iPod"
 
 // DisplayName is the name resolution, in one place: the friendly name
 // the user gave this serial, else the volume label as it is stored
-// (upper-case — what Explorer shows), else DefaultDeviceName.
+// (upper-case — what Explorer shows), else the detected model, else
+// DefaultDeviceName.
 func (d Device) DisplayName() string {
 	if n := strings.TrimSpace(d.Name); n != "" {
 		return n
 	}
 	if l := strings.TrimSpace(d.Label); l != "" {
 		return l
+	}
+	if m := strings.TrimSpace(d.Model); m != "" {
+		return m
 	}
 	return DefaultDeviceName
 }
@@ -324,6 +328,11 @@ type State struct {
 	// safe to unplug until the poll loses it (or a Refresh reads it
 	// again).
 	Ejected bool
+	// Notice is a one-off result the header's line 2 shows for a few
+	// seconds (NoticeFor) after NoticeAt — "Backed up to …" — or until
+	// the next job starts.
+	Notice   string
+	NoticeAt time.Time
 	// MenuOpen is the "···" menu. It is a view field, like Tab, so a
 	// canned state can be shot with the menu on screen.
 	MenuOpen bool

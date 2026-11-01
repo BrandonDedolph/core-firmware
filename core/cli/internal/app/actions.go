@@ -31,6 +31,7 @@ func (u *UI) start(kind JobKind, fn func(ctx context.Context, emit func(Event)) 
 		return
 	}
 	u.st.Job = &JobStatus{Kind: kind, Pct: -1}
+	u.st.Notice = ""
 	u.st.Logf("--- %s ---", kind)
 }
 
@@ -346,6 +347,9 @@ func (u *UI) startBackup() {
 			return err
 		}
 		emit(Event{Kind: EventLog, Text: "backup written: " + path})
+		u.mu.Lock()
+		u.newNotice = "Backed up to " + path
+		u.mu.Unlock()
 		u.readBackups(ctx, serial)
 		return nil
 	})
@@ -366,7 +370,13 @@ func (u *UI) startEject() {
 		if vol == "" {
 			return fmt.Errorf("no volume to eject — plug the iPod in, or use ··· → Read the iPod again")
 		}
-		return u.be.Eject(ctx, vol, emit)
+		if err := u.be.Eject(ctx, vol, emit); err != nil {
+			return err
+		}
+		// The strip shows the last log line; it should say the same thing
+		// as the header.
+		emit(Event{Kind: EventLog, Text: "ejected " + vol + " — safe to unplug"})
+		return nil
 	})
 }
 

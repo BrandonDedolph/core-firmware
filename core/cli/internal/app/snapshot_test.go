@@ -71,6 +71,13 @@ func TestSnapshotLaunchPhases(t *testing.T) {
 		{"notinstalled", NotInstalledState()},
 		{"looking-drawer", func() State { st := LookingState(); st.LogOpen = true; return st }()},
 		{"notinstalled-drawer", func() State { st := NotInstalledState(); st.LogOpen = true; return st }()},
+		// The picked-file row is the widest the Install screen gets; it
+		// has to fit the 720 dp minimum.
+		{"notinstalled-file", func() State {
+			st := NotInstalledState()
+			st.InstallFile = `C:\Users\brandon-home\Downloads\core-v0.2.1-with-a-long-name.ipod`
+			return st
+		}()},
 	}
 	sizes := [][2]int{{900, 600}, {MinWidth, MinHeight}}
 	for _, c := range cases {

@@ -216,9 +216,13 @@ type UI struct {
 
 	// The top bar's one primary button, the tabs, and the footer's
 	// "Change" for the music folder.
-	primaryBtn   widget.Clickable
-	tabClicks    [3]widget.Clickable
-	changeBtn    widget.Clickable
+	primaryBtn widget.Clickable
+	tabClicks  [3]widget.Clickable
+	// folderLink is the footer's music folder: it goes to the Library
+	// tab and focuses the field there (focusSource asks the field to take
+	// focus on the frame it is next drawn).
+	folderLink   widget.Clickable
+	focusSource  bool
 	tileClicks   []*widget.Clickable
 	catClicks    [5]widget.Clickable
 	artTake      []*widget.Clickable
@@ -255,8 +259,10 @@ type UI struct {
 	logStripBtn, logCloseBtn, clearLogBtn, drawerBlock widget.Clickable
 	footH                                              int
 	logFrames                                          int
-	// newBackups is a job's read of the backup folder, for drain.
+	// newBackups is a job's read of the backup folder, for drain;
+	// newNotice is a result for the header's line 2 (State.Notice).
 	newBackups  *Backups
+	newNotice   string
 	menuBtn     widget.Clickable
 	menuScrim   widget.Clickable
 	menuClicks  [menuCount]widget.Clickable
@@ -402,6 +408,8 @@ func (u *UI) drain() {
 	u.newDev, u.newLib, u.newRel = nil, nil, nil
 	backups := u.newBackups
 	u.newBackups = nil
+	notice := u.newNotice
+	u.newNotice = ""
 	path, pathFor := u.newPath, u.pathFor
 	u.newPath, u.pathFor = "", JobNone
 	renamed := u.newName
@@ -439,6 +447,9 @@ func (u *UI) drain() {
 	}
 	if backups != nil {
 		u.st.Backups = *backups
+	}
+	if notice != "" {
+		u.st.Notice, u.st.NoticeAt = notice, u.now()
 	}
 	if rel != nil {
 		u.st.Release = *rel
@@ -691,9 +702,7 @@ func (u *UI) events(gtx C) {
 		if u.primaryBtn.Clicked(gtx) {
 			u.doPrimary()
 		}
-		if u.changeBtn.Clicked(gtx) {
-			u.pick(JobSync)
-		}
+
 		if u.installBtn.Clicked(gtx) {
 			u.startInstall("")
 		}
@@ -708,7 +717,7 @@ func (u *UI) events(gtx C) {
 			u.pick(JobInstall)
 		}
 		if u.browseBtn.Clicked(gtx) {
-			u.pick(JobSync)
+			u.chooseMusicFolder()
 		}
 		if u.flashOpenBtn.Clicked(gtx) {
 			u.pick(JobFlash)
@@ -749,6 +758,10 @@ func (u *UI) events(gtx C) {
 		u.run.Cancel()
 	}
 	u.logEvents(gtx)
+	if u.folderLink.Clicked(gtx) && u.st.Phase() == PhaseReady {
+		u.st.Tab = TabLibrary
+		u.focusSource = true
+	}
 	if u.advancedBtn.Clicked(gtx) {
 		u.st.Advanced = !u.st.Advanced
 		if u.st.Advanced {
@@ -961,7 +974,14 @@ func (u *UI) page(gtx C) D {
 // albums" when the library and the device differ, "Update to v0.2.2" when a
 // newer release is known, Eject when there is nothing left. While a job that
 // can be stopped runs, a Cancel takes the primary's place.
+// NoticeFor is how long a State.Notice holds the header's line 2.
+const NoticeFor = 5 * time.Second
+
 func (u *UI) topBar(gtx C) D {
+	if u.st.Notice != "" && u.now().Sub(u.st.NoticeAt) < NoticeFor {
+		// Ask for the frame that takes the notice down again.
+		gtx.Execute(op.InvalidateCmd{At: u.st.NoticeAt.Add(NoticeFor)})
+	}
 	dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.
 		Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
@@ -1080,6 +1100,9 @@ func (u *UI) statusLine() (string, color.NRGBA) {
 		case j.Failed:
 			return u.st.StatusLine(), u.pal.Accent
 		}
+	}
+	if u.st.Notice != "" && u.now().Sub(u.st.NoticeAt) < NoticeFor {
+		return u.st.Notice, u.pal.MutedD
 	}
 	if u.st.Ejected && d.Found {
 		return "Ejected — safe to unplug", u.pal.MutedD
@@ -1362,22 +1385,16 @@ func (u *UI) footer(gtx C) D {
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 						layout.Rigid(func(gtx C) D {
 							gtx.Constraints.Max.X = half - gtx.Dp(12)
-							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-								layout.Flexed(1, u.line(11, u.pal.Muted, u.footerSource())),
-								layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-								layout.Rigid(func(gtx C) D {
-									if !u.pickerOK {
-										return D{}
-									}
-									return u.changeBtn.Layout(gtx, func(gtx C) D {
-										col := u.pal.Ink
-										if u.st.Busy() {
-											col = u.pal.SelSub
-										}
-										return u.text(11, col, "Change")(gtx)
-									})
-								}),
-							)
+							if u.st.Phase() != PhaseReady {
+								// No Library tab to go to.
+								return u.line(11, u.pal.Muted, u.footerSource())(gtx)
+							}
+							return u.folderLink.Layout(gtx, func(gtx C) D {
+								dims := u.line(11, u.pal.Muted, u.footerSource())(gtx)
+								defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+								pointer.CursorPointer.Add(gtx.Ops)
+								return dims
+							})
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 						layout.Flexed(1, u.logStrip),
@@ -1574,7 +1591,7 @@ func (u *UI) installPane(gtx C) D {
 					bs := []btn{{&u.installBtn, "Install Core", true, !busy}}
 					if f := u.st.InstallFile; f != "" {
 						bs = append(bs,
-							btn{&u.installFileBtn, "Install from " + fileBase(f), false, !busy},
+							btn{&u.installFileBtn, "Install from " + shortName(fileBase(f), 28), false, !busy},
 							btn{&u.installPickBtn, "Choose another file…", false, !busy && u.pickerOK})
 					} else {
 						bs = append(bs, btn{&u.installFileBtn, "Install from a file…", false, !busy && u.pickerOK})
@@ -1584,6 +1601,18 @@ func (u *UI) installPane(gtx C) D {
 			)
 		})
 	})
+}
+
+// shortName cuts a file name to n runes from the middle, keeping its end
+// (the extension and the version usually sit there), so a long download
+// name cannot push the Install row past a 720 dp window.
+func shortName(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n || n < 5 {
+		return s
+	}
+	head := (n - 1) / 2
+	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
 }
 
 // fileBase is the last element of a path written on either OS, for a button

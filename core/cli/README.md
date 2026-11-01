@@ -9,9 +9,12 @@ album-art sidecars, write the index, flash firmware, fetch updates.
   itself — a 2-second poll, so plugging one in is the whole gesture — and
   stops for exactly one thing: an iPod still running Apple's firmware,
   which gets a single screen and an **Install Core** button. Once Core is
-  on it: the album grid, a Library tab that says what is wrong with the
-  music folder and offers to fix it, and a Details tab holding the
-  device facts, Firmware (check / update / flash / backup) and the log.
+  on it: a header with the iPod's name, firmware, free space and one
+  verb-first button; Albums (the grid), Library (the music folder and what
+  is wrong with it) and iPod (five rows and an Advanced disclosure); the
+  log as a strip on every screen; and a "···" menu. Linen and Onyx, the
+  device's palettes, in Nunito. The design is
+  `core/docs/design/app-ux-pass-plan.md`.
   It links the same internal
   packages directly — no server, no IPC. On Windows its embedded manifest asks for Administrator at launch
   (one UAC prompt), so it reads the disk and flashes in-process; if it is
@@ -60,7 +63,7 @@ happen on their own platform:
 ```bash
 # Linux (needs libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev
 #        libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev
-#        libffi-dev libxcursor-dev)
+#        libffi-dev libxcursor-dev, and libasound2-dev for the player)
 go build -tags novulkan -o core-app ./cmd/core-app
 
 # macOS
@@ -71,7 +74,7 @@ CGO_ENABLED=1 go build -o core-app ./cmd/core-app
 `core` binaries, `core-app-windows-amd64.exe`, and whichever `core-app`
 builds the host can make natively — then **prints the ones it skipped**.
 Nobody has three machines, and a release job that silently published
-seven of eleven assets would be worse than one that names the four it
+six of ten assets would be worse than one that names the four it
 could not build. `.github/workflows/release.yml` runs it on
 `ubuntu-latest`, `ubuntu-24.04-arm` and `macos-latest` for that reason.
 
@@ -102,6 +105,20 @@ So the two files that import `gioui.org/app` and `gioui.org/gpu/headless`
 CI runs both, so the tagged build is not a configuration only one laptop
 ever compiles.
 
+#### `-tags noaudio`, and why the tests always pass it
+
+The album sheet plays tracks through `internal/player` (oto v3 for the
+device, mewkiz/flac and go-mp3 for the decoding — all pure Go on Windows;
+on Linux oto is cgo against ALSA, hence `libasound2-dev`; on macOS it
+loads AudioToolbox at run time). Built with `-tags noaudio`, the device
+half is a stub: `player.Available` is false, `Play` returns
+`ErrUnavailable`, and the sheet says "Playback is not available in this
+build" with no transport. **Every test run passes `noaudio`**, so no test
+ever opens an audio device on a developer's machine or a CI runner; the
+player's own tests drive its decoding, resampling, dithering and
+end-of-track logic against a fake device and synthetic FLAC files. Builds
+for people to run never pass it.
+
 ### Rendering the window without a display
 
 ```bash
@@ -110,11 +127,25 @@ go run -tags novulkan ./cmd/core-app --screenshot out.png --state library
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state empty --size 720x520
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state looking
 go run -tags novulkan ./cmd/core-app --screenshot out.png --state notinstalled
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state demo --tab summary --theme onyx
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state advanced     # Summary tab, Advanced open
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state menu         # the ··· menu
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state looking --drawer
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state demo --dialog write   # also holding, remove, about
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state album      # the album sheet, track 3 playing
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state playing    # the same, sheet closed: the footer's Now Playing
+go run -tags novulkan ./cmd/core-app --screenshot out.png --state preview    # the sync preview
 ```
+
+`--theme system|linen|onyx` picks the palette (default: the saved choice,
+System on a first run; a screenshot without it is Linen on Linux),
+`--tab music|fix|summary` the tab (the old albums|library|details still work), `--drawer` opens the log drawer
+and `--dialog` puts a canned confirmation on screen — drawn only; there is
+no job behind it to confirm.
 
 One frame, headless, then exit. `--state demo` is a canned State with
 the bench device, the 928-track library and a sync half-finished, open on
-the album grid; `--state library` is the Library tab with something in
+the album grid; `--state library` is the Fix tab with something in
 every problem row; `--state empty` is the first run; `--state looking` is
 the window with no iPod and the poll running, and `--state notinstalled`
 is a stock iPod on the Install screen. `TestSnapshot`,
@@ -139,15 +170,19 @@ that is the only way to find out why a window did not appear: a
 
 ```bash
 cd core/cli
-go test ./...
+go test -tags noaudio ./...       # noaudio: never open an audio device (see above)
 go vet ./...
 gofmt -l .        # must print nothing; CI enforces this
 
 # and again with the GUI files in (see -tags novulkan above):
 go build -tags novulkan ./...
 go vet   -tags novulkan ./...
-go test  -tags novulkan ./...     # this run includes TestSnapshot
+go test  -tags "novulkan noaudio" ./...     # this run includes TestSnapshot
 ```
+
+On this project's WSL box the app's tests also run under a memory guard,
+since a layout bug once allocated 40 GB in one frame:
+`(ulimit -v 6000000; timeout 900 go test -count=1 -tags "novulkan noaudio" ./internal/app/)`.
 
 ### Parity env vars
 
@@ -223,6 +258,10 @@ internal/
                   injectable clock), the match score --yes acts on, and
                   the image + negative cache under
                   <user cache dir>/core/art. stdlib net/http only
+  player/         the album sheet's preview listen: one oto context per
+                  process (44.1 kHz, stereo, int16), FLAC and MP3 decoded
+                  on their own goroutine, resampled, mono doubled, 24-bit
+                  dithered to 16. -tags noaudio swaps the device for a stub
   version/        build version info, stamped via -ldflags at release time
 ```
 
@@ -238,7 +277,7 @@ internal/
 | `art` | **works** (S3) — `folder.art` (120×120) and `folder.thm` (28×28) CART sidecars, from a FLAC's embedded cover, one album or a whole tree. |
 | `art --fetch` | **works** (L4) — finds cover art for albums that have none: the iTunes Search API first, then MusicBrainz + the Cover Art Archive (mandatory User-Agent, one request a second, the Cover Art Archive hop included). Candidates are printed with a match score — 1.00 artist and album equal, 0.90 equal once `(Deluxe)`/`- Single`/`[Remastered]` are stripped, 0.70 containment, under 0.50 a name mismatch — and the score is taken at the WEAKER of the two fields, so the right album by the wrong artist is never accepted. Nothing is written without `--write`, which asks per album unless `--yes`, and `--yes` accepts only at or above `--min-score` (0.9). An accepted cover is validated (JPEG or PNG, at least 300 px, at most 10 MB), embedded in EVERY FLAC of the album through `flac.WritePicture`, written beside them as `cover.jpg` and baked into the two sidecars. `--dry-run` decides and writes nothing. Images are cached under `<user cache dir>/core/art` (and a "no match" is remembered for a week); they belong to their rights-holders and are never written anywhere but your files and that cache. |
 | `organize` | **works** (L2) — the source tree's names, made to say what the tags say: `Album - Artist/[Disc N/]NN - Artist - Title.flac`, which is the convention the device locator is derived from (`library.ScanTree` reads `NN. Title.flac` off the byte-sorted folder listing, so zero-padded track numbers put `pos` on the track number and `TrackTitle` hands the tag title back). Nothing is guessed: a file missing album, artist, title or a usable track number is listed under "needs attention" and left alone, an album whose artist tags cannot agree is a question, two files claiming one track number are both left, and a name already held by a different file is never overwritten. A difference only a curly apostrophe deep is NOT a rename — the locator hash folds it, so the rename would be a whole-album re-copy for nothing. `folder.art`/`folder.thm`/`cover.*` follow their album when the folder empties; every other file stays. The preview is the default and its last line is the cost in tracks the next sync will copy again. `--apply` fsyncs a full undo journal to `<user config dir>/core/journal/` BEFORE the first rename and stops at the first failure with that journal intact; `--undo <journal>` replays it backwards, refusing any file whose size or mtime changed since; `--list-journals` finds them. |
-| `fix` | **works** (L5) — one command for everything wrong with a library, and the one job that fixes it. The report (the default; it writes nothing and asks no service anything) lists albums whose first track carries no cover, files misnamed inside the right folder, files that belong in another folder, and the files nobody can name from their tags — plus the cost: renamed tracks are re-copied on the next sync because the filename IS the device's locator, and the two byte totals are counted apart (already on the iPod vs never been there). `--art` is the flag that goes to the network: it prints the ranked candidates with the score `--yes` would act on. `--yes` does it — as ONE job with ONE undo journal: the covers go into every track of their album FIRST (embedding rewrites the file, and the journal records each file's size and mtime as it moves it, so a cover written after the rename would make that rename un-undoable), then the moves, then `folder.art` + `folder.thm` + `cover.jpg` in whatever folder the album ended up in. A cover that fails to download is one line in the summary, never a reason to abandon the renames. `--names`/`--organize`/`--art` narrow the job; `--dry-run` decides everything and writes nothing; `--json` is what the app reads; `--undo <journal>` puts the names back and says plainly that it does not remove embedded art. |
+| `fix` | **works** (L5) — one command for everything wrong with a library, and the one job that fixes it. The report (the default; it writes nothing and asks no service anything) lists albums whose first track carries no cover, files misnamed inside the right folder, files that belong in another folder, and the files nobody can name from their tags — plus the cost: renamed tracks are re-copied on the next sync because the filename IS the device's locator, and the two byte totals are counted apart (already on the iPod vs never been there). `--art` is the flag that goes to the network: it prints the ranked candidates with the score `--yes` would act on. `--yes` does it — as ONE job with ONE undo journal: the covers go into every track of their album FIRST (embedding rewrites the file, and the journal records each file's size and mtime as it moves it, so a cover written after the rename would make that rename un-undoable), then the moves, then `folder.art` + `folder.thm` + `cover.jpg` in whatever folder the album ended up in. A cover that fails to download is one line in the summary, never a reason to abandon the renames. `--names`/`--organize`/`--art` narrow the job; `--dry-run` decides everything and writes nothing; `--json` is what the app reads; `--undo <journal>` puts the names back and says plainly that it does not remove embedded art. **Low-res art:** a cover under `--min-art <px>` (600; `0` turns the check off; the app's `min_art_px`) on its shorter side is listed under its own heading and goes through the same flow, with one rule — a candidate is used only when it is LARGER on its shorter side. The album folder's own `cover.jpg`/`folder.jpg` comes first when it is bigger (no lookup; `--dry-run` shows it as "replaced embedded 500×500 → cover.jpg 1400×1400"), and the same file is used, unasked, for an album with no embedded cover; otherwise the network candidates are downloaded to be measured. A replacement writes `<stamp>-fix.json` beside organizer's journals, with the old pictures and sidecars in `<stamp>-fix/`, so `--undo` puts the old cover back. **Duplicates:** two album folders whose tracks match by title, artist (`artfetch.NormKey`) and length (±2 s) — A in B when ≥ 90 % of A's tracks are in B, the same album when both ways, a `Disc N` folder part of its album, one-track folders ignored — are listed with a why-line and never changed by `core fix`; the app's *Keep this one* moves the other folder to `.core-trash/<timestamp>/` beside the music folder (a plain folder, not the Recycle Bin — the only pure-Go route is `SHFileOperationW` via syscall, untestable off Windows and with nothing Undo could restore from), journaled, so Undo brings it back. |
 | `sync` | **works** (S4b) — source tree → device layout, art sidecars, playlists rewritten to device paths, `CORECFG.DAT`/`CORELOG.BIN`/`COREOTG.DAT` and the five `Music/Playlists/On-The-Go N.m3u8` slots created only when absent or invalid, `CORELIB.IDX` written LAST. The On-The-Go files are the device's, not the source tree's: an existing slot playlist is **never** rewritten (it may hold a list saved on the iPod, or a playlist of your own at that name), `--prune` keeps all five whether or not they exist, and a source playlist whose device name would be a slot name is refused with a warning rather than copied over one. Plans first: `--dry-run` prints the whole plan with byte totals and writes nothing. Skips a track whose size matches and whose time is within 2 s (`--verify` hashes instead). Re-renders an album's sidecars when they are missing, invalid OR older than the file the cover is read from, so embedding art with `core fix` reaches the iPod on the next sync with no flag (`--art-refresh` is still the force). Deletes nothing without `--prune --yes`. Refuses a drvfs/9p destination. **Sets the iPod's clock**: the host's time and zone go into `CORECFG.DAT`'s time block for the device to take at its next boot (it cannot be told the time on the cable — that is Apple's disk mode answering). One slot is rewritten and the other copied verbatim, with no truncation, so nothing the device owns is lost. |
 | `eject` | **works** (S4b) — **stamps the clock first** (this is the freshest stamp there is: the device reboots when the cable comes out, and the boot that reads it is seconds later; a target that is not a mount point is skipped with one line, and a failed stamp never fails an eject), then flush, then dismount + eject. Windows: lock/dismount/allow-removal/eject through the volume handle, with Explorer's Shell verb as the fallback. Linux: `udisksctl unmount` + `power-off` (prints the commands when udisksctl is absent). macOS: `diskutil eject`. |
 | `name` | **works** (L5b) — the iPod's name. `core name D:` prints the FAT volume label as it is stored, the disk serial and the friendly name core-app remembers for that serial; `core name D: "Brandon's iPod"` writes both halves — the label becomes `disk.LegalLabel(name)` (upper-cased, ASCII, at most the 11 bytes a FAT volume entry holds, so `Brandon's iPod` is stored as `BRANDON'S I` and the command says so), and the name itself goes into `<user config dir>/core/config.json` under `names`, keyed by the disk serial. The label is read back and compared; an empty name clears both; `--label-only` writes the volume and nothing else. Needs the same rights as any volume operation, and never during a flash — the flasher dismounts the drive letter. |
@@ -249,7 +288,7 @@ internal/
 | `install` | **works** (L1) — one command for an iPod that is still running Apple's firmware: classifies the OSOS row and body (`fwpart.Classify`: a `CORE-FW-VERSION` marker means Core, no marker with entry point 0 and a body under a megabyte means a Core from before v0.1.3, anything else — Apple's `entry 0x736000` / 7.6 MB — means Core is not installed), refuses a device that is already ours with `core update` as the thing to run instead (`--force` overrides), downloads the latest release when no file is given, then runs the `flash` sequence unchanged. The whole-partition backup is named `apple-<serial>-<date>.bin` when what it holds is not Core, because that file is the only copy of that device's Apple firmware in existence — it is never pruned, and the install's last lines name it and the `core flash --from-backup` that puts it back. Afterwards it creates on the music volume what the firmware can overwrite but never create: `CORECFG.DAT`, `CORELOG.BIN`, `COREOTG.DAT`, an empty `Music\` and the five On-The-Go slot playlists inside it, and stamps the clock into the config it has just guaranteed exists, so the first boot after an install is not the one that reads "Not set". On Windows the elevated child is another `install` of the already-downloaded file, never a release tag. The sequence itself is `internal/installer` (L6), so the app's Install button runs the same one; what is left in the command is the flags, the download and the exit code. |
 | `update` | **works** (S8) — compares the version marker in the installed image with the latest GitHub release, prints the release notes, downloads `core-<tag>.ipod` (or `core.ipod`) into `<user cache dir>/core/<tag>/`, verifies its `.ipod` transport checksum, and then runs the `flash` sequence unchanged. `--check` stops after the comparison and downloads nothing; `--tag vX.Y.Z` pins a release and is also how the installed version gets written again. On Windows the elevated child is re-invoked as `flash <cached file> --yes --no-relaunch`, never as `update`, so the process with Administrator rights does no network I/O. There is no signature checking: the checksum is an integrity check. |
 | `doctor` | **works** (S8) — read-only walk printing one OK/WARN/FAIL line per check: device, tested hardware, the image directory, the OSOS checksum, the installed version, then the FAT volume — `Music/`, `CORELIB.IDX` (header, CRC, record count and the song/album/genre caps past which the device silently drops), `CORECFG.DAT`, `CORELOG.BIN` (header AND the block count against the file length, which is `evlog_mount()`'s own test), `COREOTG.DAT` (the On-The-Go live list: the two-slot region, the newest slot's sequence and how many tracks it holds), the **clock** (never stamped / a stamp the device has not booted to take, both WARN / applied, OK) and the playlist folder — including one line per On-The-Go slot, because every way those can be wrong is invisible on the device: missing (Save has one fewer slot), empty, N tracks, a **torn save** the device opens to "Playlist damaged", or a playlist of your own sitting at a slot name — and for the last two it prints the way out, because it is the only thing that ever will: the device never writes to a slot with no header, an interrupted save can leave one looking exactly like a file of yours, and only a person looking at the file can tell them apart, so the line says to delete it and re-sync. Exits 1 if any check FAILs. `--volume PATH` checks a volume with no iPod attached; the device lines become SKIPs. |
-| `core-app` (separate executable, `cmd/core-app`) | **works** (S10, L5b, L6, L7) — native desktop window, Gio v0.8.0, minimum 720×520, with three launch phases and no Refresh button: **Looking** (no iPod — the disk-mode instructions and a poll of `disk.FindIPods` every 2 seconds, paused while a job runs, which also catches the unplug and empties the screen), **Core is not installed** (an iPod whose OSOS row classifies as something else — Apple's firmware — on one screen: what was found, the sentence saying Apple's firmware is copied to `apple-<serial>-<date>.bin` before a byte is written because it is the only copy there is, and **Install Core** / **Install from a file…**, which run `internal/installer` behind the same typed-device-path dialog as a flash), and **Ready**, which since L7 is direction B: a top bar (the iPod's NAME — the friendly name, else the volume label as FAT stores it, else "iPod Video 80 GB", never the "Apple iPod" SCSI string — click it to rename, which writes the volume label and remembers the name under the disk's serial; the installed/available version, the size, the state sentence and ONE primary button whose label is the decision: Install / Sync / Update / Eject), three tabs and a footer. **Albums** is the grid: one tile per album, the cover from the device's own `folder.art` sidecar when there is one and a coloured plate with the album's initial when there is not, a NEW/CHANGED chip from the last dry-run plan, columns reflowed from the window width. **Library** is the Fix screen: five problem rows with counts and tick boxes on the left, the before → after preview (and the cover-art candidates with Take/Skip) on the right, the re-copy cost in the sentence directly above **Fix all**, and **Undo**. **Details** holds what the four cards used to: device facts, **Firmware** (installed vs latest, Check, Update, Flash file…, Backup), the music folder with Browse… and Dry run / Sync + prune / Eject, and the log with Copy. One job at a time: a second click while something runs is refused, and every button but Cancel goes grey. `Sync + prune` is two dialogs with a dry run between them — the second lists the actual orphans and wants the word `prune` typed. The flash and install dialogs show the flasher's own plan text and want the device path typed exactly, like the CLI; on Windows the app's manifest (`cmd/core-app/winres/winres.json`, compiled into `rsrc_windows_*.syso`) requests Administrator at launch, so the window itself reads the raw disk and does the write; only an unelevated window falls back to running `core.exe` elevated through `disk.RelaunchElevatedExe`, and with no `core` beside it the Firmware card prints the command instead. `--screenshot`/`--state`/`--size` render one frame headless; `--no-detect` turns the poll off; `--log FILE` is how a window that never opened explains itself. **The L7 panes scroll vertically, and that is asserted.** `widget.List`'s zero value is a HORIZONTAL list, and the three lists L7 added (`grid`, `libList`, `prevList`) were built without setting `Axis`, so they handed their children `layout.Inf` — 1e6 px — on the X axis. The layout still reported the right window size, so every dimension test passed; a `widget.Border` a million pixels wide only exploded one layer down, in Gio's stroke flattener, where it became tens of millions of segments and gigabytes of allocation. `core-app.exe --screenshot --state library` reached 30 GB and the test binary was OOM-killed at 40 GB. The fix is three lines in `NewUI`; the guards are `TestEveryListScrollsVertically` (reflection over every `widget.List` on the UI struct — a new pane cannot forget it) and `TestFrameAllocationIsBounded` (256 MiB per rendered frame; the Library tab now costs 21 MiB). |
+| `core-app` (separate executable, `cmd/core-app`) | **works** (S10, L5b, L6, L7, app pass A1–A7) — native desktop window, Gio v0.8.0, minimum 720×520, in the device's Linen or Onyx (System follows Windows' AppsUseLightTheme; the choice is `theme` in config.json), Nunito embedded. Three launch phases and no Refresh button: **Looking** (no iPod — the ring-and-dot mark, the disk-mode steps, and a poll of `disk.FindIPods` every 2 seconds, paused while a job runs, which also catches the unplug), **Core is not installed** (a stock iPod: three sentences and **Install Core** / **Install from a file…** — picking a file fills it in, the second click installs), and **Ready**. The header is the mark, the iPod's name (the friendly name remembered under the disk serial, else the volume label, else the detected model) with its model, one status line (firmware · update state · free space read off the volume), and ONE verb-first primary — *Sync 7 albums*, *Update to v0.2.2*, *Install Core*, *Eject* — with Eject and "···" beside it and a Cancel in its place while a job that can stop runs. The release check runs once per launch after the first Refresh that finds an iPod; Flash, Update and Install all end by reading the device back, so the header shows the new version without a replug. **Music** (the tab once called Albums) is the grid (each album's own embedded cover, else its cover.jpg, decoded at the tile's device-pixel size — never the iPod's 120 px `folder.art` — else a palette-derived plate with the initial; NEW/CHANGED chips from the last preview; the iPod's bouncing bars on the playing album). **Fix** (once Library) is the music folder (the one place it is set) and the fix screen: problem rows, the before → after preview, cover candidates with *Use this cover* / *Skip*, **Fix all**, **Undo**, **Rescan**. **Summary** (once iPod) is five rows — Name, Firmware, Storage, Hardware, Backups — and an **Advanced** disclosure with the disk path, OSOS entry, device files, CLI path, *Preview sync* / *Sync and remove…* and the image flash. The log is a drawer on every screen, opened from the "···" menu (Show the log), Ctrl+L, or a failed job's status line in the header; the footer is the music folder and, while a track is loaded, the player — cover, bars, track and time over the seek line, play/pause, next, the volume (a speaker that mutes, a 72 dp slider, the wheel over the player and ctrl+↑/↓; the app's own level, saved as `volume` 0–100 in config.json, through a p² loudness curve) and ✕. Each FLAC plays at its ReplayGain as the firmware applies it (`internal/player/rg.go`, the firmware's parser, Q12 gain and peak cap ported line for line; MP3 at unity, as on the iPod), switchable in the ··· menu and saved as `replaygain`. The "···" menu holds backup, flash an image file, read again, check for updates, show and copy the log, open the music folder, the theme and About. **Gates:** a firmware write shows an identity card (name, model, serial, "Disk 2 (as Disk Management numbers it)", bytes written) and is confirmed by a two-second press-and-hold, which answers the flasher's prompt with the path the window identified — and only after checking the prompt names that path. Hardware Core has not been tested on is refused by the app (`app.ErrUntested`); `core flash`/`core install --untested-hardware` is the one way to write it. *Sync and remove* lists what it would delete, labelled by kind, and counts it on its button. The dialog's Cancel always means no (`UI.cancel`, the `CancelAnswer` sentinel) — it once shared a function with OK that turned an empty answer into "yes". On Windows the manifest (`cmd/core-app/winres/winres.json`, compiled into `rsrc_windows_*.syso` with the window icon as RT_GROUP_ICON #1) requests Administrator at launch, so the window reads the raw disk and writes itself; an unelevated window falls back to running `core.exe` elevated through `disk.RelaunchElevatedExe`. `--screenshot`/`--state`/`--size`/`--tab`/`--theme`/`--drawer`/`--dialog` render one frame headless; `--no-detect` turns the poll off; `--log FILE` is how a window that never opened explains itself. **The L7 panes scroll vertically, and that is asserted.** `widget.List`'s zero value is a HORIZONTAL list, and the three lists L7 added (`grid`, `libList`, `prevList`) were built without setting `Axis`, so they handed their children `layout.Inf` — 1e6 px — on the X axis. The layout still reported the right window size, so every dimension test passed; a `widget.Border` a million pixels wide only exploded one layer down, in Gio's stroke flattener, where it became tens of millions of segments and gigabytes of allocation. `core-app.exe --screenshot --state library` reached 30 GB and the test binary was OOM-killed at 40 GB. The fix is three lines in `NewUI`; the guards are `TestEveryListScrollsVertically` (reflection over every `widget.List` on the UI struct — a new pane cannot forget it) and `TestFrameAllocationIsBounded` (256 MiB per rendered frame; the Fix tab now costs 21 MiB). |
 
 Commands are registered only once they have code behind them, so
 `core --help` never lists something that would return "not yet
@@ -342,11 +381,14 @@ re-runs in place, and the exact line is printed.
   transitive Windows-mode dep) is the whole dependency list today. The
   only addition is `golang.org/x/image` (Lanczos scaling for the art
   sidecars). `golang.org/x/sys` was budgeted for the raw-disk ioctls in
-  S6 and turned out not to be needed: the stdlib `syscall` package has
-  `DeviceIoControl`, `FlushFileBuffers`, `GetTokenInformation` and
+  S6 and turned out not to be needed there: the stdlib `syscall` package
+  has `DeviceIoControl`, `FlushFileBuffers`, `GetTokenInformation` and
   `EscapeArg` on Windows and `SYS_IOCTL` on Linux, and `ShellExecuteExW`
-  comes from a `syscall.NewLazyDLL`. Anything more goes through a code
-  review. No cgo means every target still cross-builds from one machine.
+  comes from a `syscall.NewLazyDLL`. It is a direct dependency since the
+  app pass for two Windows calls only: the dark-mode registry value
+  (`windows/registry`) and the music volume's free space
+  (`GetDiskFreeSpaceEx`). It was already in the build as Gio's. Anything
+  more goes through a code review. No cgo means every target still cross-builds from one machine.
 - **The Python tools stay.** `tools/build_index.py`, `coreart.py`,
   `make_config.py` and `make_log.py` remain as reference implementations
   and parity oracles for the Go code that replaces them in the daily
@@ -357,3 +399,66 @@ re-runs in place, and the exact line is printed.
   artifact before the replacement is complete on disk — `make ipod`
   passes `--force` on every build, and a truncated `core.ipod` still
   parses as a valid header.
+
+## Versions and releases
+
+The app and the `core` CLI are versioned apart from the firmware. Their
+tags are `app-vX.Y.Z` (the first is `app-v0.3.0`); the firmware keeps
+`vX.Y.Z`. `scripts/build-all.sh` and the release workflow stamp the
+binaries from `git describe --tags --always --dirty --match 'app-v[0-9]*'`,
+so a firmware tag on the same commit never becomes the app's version — and
+with no app tag reachable the stamp is the bare short hash. The window's
+About prints the stamp, the commit and the build date, and the CLI's
+`--version` the same.
+
+**Which firmware it writes for.** `app.MinFirmware` (`v0.2.0`) is the
+oldest firmware whose index, config and log formats this app writes. About
+says "writes files for Core v0.2.0 or newer"; when the iPod's firmware is
+older the header and the Summary tab say "this app needs Core v0.2.0 or newer
+on the iPod — update the firmware first", Update is the primary instead of
+Sync, and a real sync refuses (the preview still runs). Raise it when a
+firmware release changes one of those formats.
+
+**Update checks.** The firmware check lists the repo's releases and takes
+the newest published `v…` release that carries `core.ipod`
+(`ghrelease.LatestFirmware`) — never `releases/latest`, which may be an app
+release. Once per launch a second, quiet check (`ghrelease.LatestApp`)
+looks for a newer `app-v…` release than the one running (numeric compare;
+a build stamped with a bare hash is never told) and, if there is one, puts
+a line in About and "Get the newer app…" in the ··· menu. It logs only on
+failure.
+
+**Cutting an app release.**
+
+```bash
+# 1. write the "## app-vX.Y.Z — <date>" section in core/cli/CHANGELOG.md
+tools/.venv/bin/python3 tools/release.py app-vX.Y.Z    # checks it, prints the rest:
+git tag -a app-vX.Y.Z -m "Core app vX.Y.Z"
+git push origin app-vX.Y.Z
+gh release create app-vX.Y.Z --title "Core app vX.Y.Z" --notes-file <printed path>
+# .github/workflows/release.yml builds the ten binaries from the tag and
+# attaches them (no core.ipod — that is a firmware release's). Then:
+tools/.venv/bin/python3 tools/release.py app-vX.Y.Z --check
+```
+
+## Licence
+
+Apache-2.0, like the rest of the repository ([`core/LICENSE`](../LICENSE)).
+Nunito (OFL 1.1) is embedded in `core-app`; its licence is in
+`internal/app/fonts/OFL.txt`.
+
+`core-app` links these for the album sheet's player, each under the licence
+its LICENSE file states:
+
+| Module | Version | Licence |
+|---|---|---|
+| `github.com/ebitengine/oto/v3` | v3.3.3 | Apache License 2.0 |
+| `github.com/ebitengine/purego` (oto's, macOS only) | v0.8.0 | Apache License 2.0 |
+| `github.com/hajimehoshi/go-mp3` | v0.3.4 | Apache License 2.0 |
+| `github.com/mewkiz/flac` | v1.0.12 | The Unlicense (public domain dedication) |
+| `github.com/mewkiz/pkg` (flac's) | 2023-02-26 | The Unlicense (public domain dedication) |
+| `github.com/icza/bitio` (flac's) | v1.1.0 | Apache License 2.0 |
+
+They are the newest releases whose `go.mod` accepts the Go 1.22.10 this
+module is pinned to: oto v3.4+ asks for Go 1.24 and mewkiz/flac v1.0.13+
+for Go 1.23.

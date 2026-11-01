@@ -2,6 +2,8 @@
 
 Each release lists what changed on the device since the previous one. Versions are git tags;
 the boot screen and Settings → About show the one the device runs.
+The desktop app and the `core` CLI have their own changelog at
+[core/cli/CHANGELOG.md](core/cli/CHANGELOG.md) and their own `app-v…` tags.
 
 ## v0.2.1 — 2026-10-31
 

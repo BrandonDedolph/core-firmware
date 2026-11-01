@@ -2,20 +2,20 @@ package app
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"gioui.org/f32"
+	"gioui.org/font"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -37,8 +37,8 @@ import (
 // the only concurrency in the drawing half: a tile asks for a picture, gets
 // a placeholder now and the picture on a later frame, and the decode happens
 // on a worker rather than on the goroutine that has to produce 60 frames a
-// second. And AlbumThumbnail is the decode itself, which is the device's own
-// sidecar when there is one and the embedded cover when there is not.
+// second. And AlbumPicture is the decode itself: the album's own embedded
+// cover (or its cover.jpg), at the size the tile is drawn at.
 
 // Tile geometry. The mockup's grid is eight columns in a 900 px window; the
 // columns are computed from the width so a wider window gets more of them and
@@ -258,91 +258,100 @@ func (c *thumbCache) Loads() int {
 
 // --- decoding an album's cover ------------------------------------------
 
-// ThumbSize is the size covers are decoded down to for the grid. It is the
-// device's own folder.art size, which means the sidecar is used as it is.
-const ThumbSize = coreart.ArtSize
-
 // ErrNoThumb reports that an album folder has no picture anywhere: no
-// sidecar, no FLAC, no embedded cover. It is an ordinary outcome — the tile
+// embedded cover and no cover file. It is an ordinary outcome — the tile
 // falls back to the coloured plate with the album's initial — so it is a
 // sentinel rather than a message.
 var ErrNoThumb = errors.New("app: this album has no cover picture")
 
-// AlbumThumbnail decodes one album folder's cover for the grid.
-//
-// The device's own sidecar comes first: folder.art is already a 120x120
-// bitmap of exactly this picture, it costs a 28 KB read and no JPEG decode,
-// and using it means the grid shows what the iPod shows. Failing that, the
-// album's art source (the first FLAC, which is the file the sidecars and the
-// index read their cover from) is decoded and scaled down.
-func AlbumThumbnail(dir string) (image.Image, error) {
+// coverFiles are the picture files a folder may carry beside its tracks,
+// tried in this order (any case, .jpg, .jpeg or .png) when no track has an
+// embedded cover.
+var coverFiles = []string{"cover", "folder", "front"}
+
+// AlbumPicture decodes one album folder's own cover — the first track's
+// embedded front cover, else cover.jpg / folder.jpg / front.jpg in the
+// folder (or the album folder above a Disc N one) — scaled down to fit px
+// device pixels, the size it is about to be drawn at. Never the device's
+// folder.art sidecar: that is a 120 px RGB565 thumbnail made for the iPod's
+// screen, and scaled up into a tile it is the blurry cover the app used to
+// show. Called off the UI goroutine by the cover cache.
+func AlbumPicture(dir string, px int) (image.Image, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, ErrNoThumb
 	}
-	for _, name := range []string{coreart.ArtName, coreart.ThumbName} {
-		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
-			if img, err := DecodeCART(b); err == nil {
-				return img, nil
+	if first, err := coreart.FirstAudio(dir); err == nil && first != "" {
+		if pic, err := coreart.ReadCover(first); err == nil && pic != nil {
+			if img, err := coreart.FromPicture(pic); err == nil {
+				return Downscale(img, px), nil
 			}
 		}
 	}
-	first, err := coreart.FirstAudio(dir)
-	if err != nil || first == "" {
-		return nil, ErrNoThumb
-	}
-	pic, err := coreart.ReadCover(first)
-	if err != nil {
-		return nil, err
-	}
-	if pic == nil {
-		return nil, ErrNoThumb
-	}
-	img, err := coreart.FromPicture(pic)
-	if err != nil {
-		return nil, err
-	}
-	return Downscale(img, ThumbSize), nil
-}
-
-// DecodeCART reads a CoreArt sidecar (folder.art / folder.thm) back into an
-// image. The container is the one core/ui/artcache.c validates: "CART", a
-// version, the two dimensions, then RGB565 pixels little-endian, row-major.
-//
-// The five-bit channels are expanded by replicating the high bits into the
-// low ones (v<<3 | v>>2), which is what the panel does and what makes a
-// round-trip through the sidecar look like the original rather than like a
-// picture that lost its whites.
-func DecodeCART(b []byte) (image.Image, error) {
-	if len(b) < coreart.HeaderLen || !bytes.Equal(b[:4], coreart.Magic[:]) {
-		return nil, fmt.Errorf("app: not a CoreArt sidecar")
-	}
-	ver := binary.LittleEndian.Uint16(b[4:6])
-	w := int(binary.LittleEndian.Uint16(b[6:8]))
-	h := int(binary.LittleEndian.Uint16(b[8:10]))
-	if ver != coreart.Version || w <= 0 || h <= 0 || w > coreart.MaxDim || h > coreart.MaxDim {
-		return nil, fmt.Errorf("app: CoreArt header says version %d, %dx%d", ver, w, h)
-	}
-	if len(b) < coreart.HeaderLen+2*w*h {
-		return nil, fmt.Errorf("app: CoreArt sidecar is %d bytes, %dx%d needs %d",
-			len(b), w, h, coreart.HeaderLen+2*w*h)
-	}
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	px := b[coreart.HeaderLen:]
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			v := binary.LittleEndian.Uint16(px[2*(y*w+x):])
-			r := uint8((v >> 11) & 0x1F)
-			g := uint8((v >> 5) & 0x3F)
-			bl := uint8(v & 0x1F)
-			img.SetNRGBA(x, y, color.NRGBA{
-				R: r<<3 | r>>2,
-				G: g<<2 | g>>4,
-				B: bl<<3 | bl>>2,
-				A: 0xFF,
-			})
+	for _, d := range []string{dir, albumRoot(dir)} {
+		if img := coverFile(d); img != nil {
+			return Downscale(img, px), nil
+		}
+		if d == albumRoot(dir) {
+			break
 		}
 	}
-	return img, nil
+	return nil, ErrNoThumb
+}
+
+// coverFile is the first of coverFiles in dir that decodes, or nil.
+func coverFile(dir string) image.Image {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, want := range coverFiles {
+		for _, e := range ents {
+			name := strings.ToLower(e.Name())
+			ext := filepath.Ext(name)
+			if e.IsDir() || strings.TrimSuffix(name, ext) != want ||
+				(ext != ".jpg" && ext != ".jpeg" && ext != ".png") {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			if img, _, err := image.Decode(bytes.NewReader(b)); err == nil {
+				return img
+			}
+		}
+	}
+	return nil
+}
+
+// coverPx is the size a cover is decoded at for a box of px device pixels:
+// px rounded up to a multiple of 32, so a window being resized asks for a
+// handful of sizes rather than one per pixel of width — each a fresh decode
+// of a 1500 px JPEG — and the drawn picture is only ever scaled down.
+func coverPx(px int) int {
+	if px < 32 {
+		px = 32
+	}
+	return (px + 31) / 32 * 32
+}
+
+// coverKey is the cover cache's key: the folder and the decode size.
+func coverKey(dir string, px int) string { return dir + "\x00" + strconv.Itoa(px) }
+
+// splitCoverKey undoes coverKey.
+func splitCoverKey(key string) (string, int) {
+	i := strings.LastIndex(key, "\x00")
+	if i < 0 {
+		return key, 0
+	}
+	n, _ := strconv.Atoi(key[i+1:])
+	return key[:i], n
+}
+
+// cover is the album's picture for a box of box device pixels, from the
+// cover cache: (op, true) once decoded, and a decode started otherwise.
+func (u *UI) cover(a Album, box int) (paint.ImageOp, bool) {
+	return u.thumbs.get(coverKey(a.Dir, coverPx(box)), a.Mod)
 }
 
 // Downscale fits img inside a size x size box, keeping its aspect ratio. A
@@ -499,7 +508,7 @@ func (u *UI) tileArt(gtx C, a Album) D {
 	defer clip.UniformRRect(image.Rectangle{Max: sz}, r).Push(gtx.Ops).Pop()
 
 	drawn := false
-	if img, ok := u.thumbs.get(a.Dir, a.Mod); ok {
+	if img, ok := u.cover(a, sz.X); ok {
 		if b := img.Size(); b.X > 0 && b.Y > 0 {
 			// Cover the square: scale by the larger ratio and let the
 			// clip take the overhang, the way a CSS background-size:
@@ -526,6 +535,7 @@ func (u *UI) tileArt(gtx C, a Album) D {
 			clip.Rect{Max: sz}.Op())
 	}
 	u.badge(gtx, a, sz)
+	u.playingBadge(gtx, a, sz)
 	return D{Size: sz}
 }
 
@@ -542,7 +552,8 @@ func veil(c color.NRGBA) color.NRGBA {
 // states draw, so the grid has something to be reviewed against with no files
 // on the machine at all.
 func (u *UI) plainTile(gtx C, a Album, sz image.Point) {
-	paint.FillShape(gtx.Ops, tileColor(a.Title+a.Dir), clip.Rect{Max: sz}.Op())
+	bg := tileColor(u.pal, a.Title+a.Dir)
+	paint.FillShape(gtx.Ops, bg, clip.Rect{Max: sz}.Op())
 	letter := initial(tileTitle(a))
 	if letter == "" {
 		return
@@ -550,7 +561,7 @@ func (u *UI) plainTile(gtx C, a Album, sz image.Point) {
 	gtx.Constraints = layout.Exact(sz)
 	layout.Center.Layout(gtx, func(gtx C) D {
 		l := material.Label(u.th, unit.Sp(float32(sz.Y)/gtx.Metric.PxPerSp/2.6), letter)
-		l.Color = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x9A}
+		l.Color = letterColor(u.pal, bg)
 		l.MaxLines = 1
 		return l.Layout(gtx)
 	})
@@ -566,45 +577,56 @@ func initial(s string) string {
 	return ""
 }
 
-// tileColor is a deterministic muted colour per album: the same album is the
-// same colour on every run, and nothing is ever the accent, which belongs to
-// the one primary button and the progress bar.
-func tileColor(seed string) color.NRGBA {
+// tileColor is a deterministic colour per album out of the palette's own
+// muted family: Muted, MutedD and Muted2, each blended toward Surface at
+// three strengths. The same album is the same tile on every run, a screen of
+// tiles reads as the device's greys rather than as a paint chart, and
+// nothing is ever the accent, which is for warnings. On a dark palette the
+// muted tokens are the LIGHT end, so the blends are weaker: Onyx gets dark
+// tiles, not Linen's pastels turned up.
+func tileColor(pal Palette, seed string) color.NRGBA {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(seed))
 	v := h.Sum32()
-	// Six dusty hues from the Linen family, each with three values, so a
-	// screen of tiles reads as one palette rather than as a paint chart.
-	hues := [][3]uint8{
-		{0x8A, 0x6A, 0x5A}, {0x5C, 0x6B, 0x7A}, {0xB8, 0xA6, 0x8A},
-		{0x4D, 0x5A, 0x4A}, {0x9A, 0x8B, 0x9C}, {0xC9, 0xA4, 0x7A},
-		{0x6B, 0x7C, 0x8A}, {0x8C, 0x6F, 0x66}, {0x7D, 0x8A, 0x6A},
-		{0xA5, 0x80, 0x60}, {0x6E, 0x6A, 0x80}, {0x58, 0x6B, 0x6E},
+	bases := []color.NRGBA{pal.Muted, pal.MutedD, pal.Muted2}
+	strengths := []float32{0.45, 0.62, 0.80}
+	if luma(pal.Surface) < 0x80 {
+		strengths = []float32{0.25, 0.37, 0.50}
 	}
-	base := hues[v%uint32(len(hues))]
-	shade := int(v/uint32(len(hues))%3) - 1 // -1, 0, +1
-	adj := func(c uint8) uint8 {
-		n := int(c) + shade*14
-		if n < 0 {
-			n = 0
-		}
-		if n > 255 {
-			n = 255
-		}
-		return uint8(n)
-	}
-	return color.NRGBA{R: adj(base[0]), G: adj(base[1]), B: adj(base[2]), A: 0xFF}
+	base := bases[v%uint32(len(bases))]
+	t := strengths[v/uint32(len(bases))%uint32(len(strengths))]
+	return mix(pal.Surface, base, t)
 }
 
-// badge is the NEW / CHANGED chip in the tile's top right corner.
+// letterColor is the initial on a plain tile: whichever end of the palette
+// (Ink or Surface) stands further from the tile, at two-thirds strength.
+func letterColor(pal Palette, bg color.NRGBA) color.NRGBA {
+	c := pal.Surface
+	if d, e := luma(pal.Ink)-luma(bg), luma(pal.Surface)-luma(bg); abs(d) > abs(e) {
+		c = pal.Ink
+	}
+	return withAlpha(c, 0xB0)
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// badge is the NEW / CHANGED chip in the tile's top right corner: NEW is an
+// Ink chip with Surface text (the selected row again), CHANGED is the same
+// chip outlined — Surface with an Ink hairline and Ink text — so the two
+// read apart without a second colour.
 func (u *UI) badge(gtx C, a Album, sz image.Point) {
 	text := a.State.Badge()
 	if text == "" {
 		return
 	}
-	bg, fg := u.pal.Accent, u.pal.Surface
+	bg, fg := u.pal.Ink, u.pal.Surface
 	if a.State == TileChanged {
-		bg, fg = u.pal.Ink, u.pal.Surface
+		bg, fg = u.pal.Surface, u.pal.Ink
 	}
 	gtx.Constraints = layout.Exact(sz)
 	layout.NE.Layout(gtx, func(gtx C) D {
@@ -612,14 +634,18 @@ func (u *UI) badge(gtx C, a Album, sz image.Point) {
 			return layout.Stack{}.Layout(gtx,
 				layout.Expanded(func(gtx C) D {
 					r := gtx.Dp(3)
+					box := image.Rectangle{Max: gtx.Constraints.Min}
+					paint.FillShape(gtx.Ops, u.pal.Ink, clip.UniformRRect(box, r).Op(gtx.Ops))
+					w := gtx.Dp(1)
 					paint.FillShape(gtx.Ops, bg,
-						clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, r).Op(gtx.Ops))
+						clip.UniformRRect(box.Inset(w), r-w).Op(gtx.Ops))
 					return D{Size: gtx.Constraints.Min}
 				}),
 				layout.Stacked(func(gtx C) D {
 					return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1),
 						Left: unit.Dp(4), Right: unit.Dp(4)}.Layout(gtx, func(gtx C) D {
-						l := material.Label(u.th, unit.Sp(9), text)
+						l := material.Label(u.th, unit.Sp(10), text)
+						l.Font.Weight = font.Bold
 						l.Color = fg
 						l.MaxLines = 1
 						return l.Layout(gtx)
@@ -656,7 +682,7 @@ func (u *UI) gridEmpty(gtx C) D {
 				layout.Rigid(func(gtx C) D {
 					return u.buttonRow(gtx,
 						btn{&u.browseBtn, "Choose the music folder…", true, !u.st.Busy() && u.pickerOK},
-						btn{&u.rescanBtn, "Scan again", false, !u.st.Busy() && u.st.Source != ""},
+						btn{&u.rescanBtn, "Rescan", false, !u.st.Busy() && u.st.Source != ""},
 					)
 				}),
 			)

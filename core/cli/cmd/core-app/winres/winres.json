@@ -1,8 +1,24 @@
 {
+  "RT_GROUP_ICON": {
+    "#1": {
+      "0000": [
+        "icon/mark-256.png",
+        "icon/mark-128.png",
+        "icon/mark-64.png",
+        "icon/mark-48.png",
+        "icon/mark-32.png",
+        "icon/mark-24.png",
+        "icon/mark-16.png"
+      ]
+    }
+  },
   "RT_MANIFEST": {
     "#1": {
       "0409": {
-        "identity": { "name": "core-app", "version": "0.0.0.0" },
+        "identity": {
+          "name": "core-app",
+          "version": "0.0.0.0"
+        },
         "description": "Core — the host app for the iPod Video firmware",
         "minimum-os": "win7",
         "execution-level": "requireAdministrator",

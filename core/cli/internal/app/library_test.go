@@ -13,7 +13,7 @@ import (
 // The top bar carries exactly one primary button and its label is the
 // decision. This is that decision table.
 func TestThePrimaryButtonSaysWhatItWillDo(t *testing.T) {
-	core := fwpart.Installed{Kind: fwpart.Core, Version: "v0.1.3"}
+	core := fwpart.Installed{Kind: fwpart.Core, Version: "v0.2.2"}
 	apple := fwpart.Installed{Kind: fwpart.Other}
 	pending := []Album{{Device: "A - B", Tracks: 2, Copy: 2, State: TileNew}}
 	done := []Album{{Device: "A - B", Tracks: 2, State: TileOnDevice}}
@@ -34,24 +34,24 @@ func TestThePrimaryButtonSaysWhatItWillDo(t *testing.T) {
 			Device: Device{Found: true, Installed: core}, Albums: done, LibraryChanged: true,
 		}, ActionSync},
 		{"sync wins over an available release", State{
-			Device:  Device{Found: true, Installed: core, Firmware: "v0.1.2 (build x)"},
+			Device:  Device{Found: true, Installed: core, Firmware: "v0.2.1 (build x)"},
 			Albums:  pending,
-			Release: Release{Checked: true, Tag: "v0.1.3"},
+			Release: Release{Checked: true, Tag: "v0.2.2"},
 		}, ActionSync},
 		{"nothing to copy and a newer release", State{
-			Device:  Device{Found: true, Installed: core, Firmware: "v0.1.2 (build x)"},
+			Device:  Device{Found: true, Installed: core, Firmware: "v0.2.1 (build x)"},
 			Albums:  done,
-			Release: Release{Checked: true, Tag: "v0.1.3"},
+			Release: Release{Checked: true, Tag: "v0.2.2"},
 		}, ActionUpdate},
 		{"the same release is not an update", State{
-			Device:  Device{Found: true, Installed: core, Firmware: "v0.1.3 (build x)"},
+			Device:  Device{Found: true, Installed: core, Firmware: "v0.2.2 (build x)"},
 			Albums:  done,
-			Release: Release{Checked: true, Tag: "v0.1.3"},
+			Release: Release{Checked: true, Tag: "v0.2.2"},
 		}, ActionEject},
 		{"a failed check is not an update", State{
-			Device:  Device{Found: true, Installed: core, Firmware: "v0.1.2 (build x)"},
+			Device:  Device{Found: true, Installed: core, Firmware: "v0.2.1 (build x)"},
 			Albums:  done,
-			Release: Release{Checked: true, Tag: "v0.1.3", Err: "no network"},
+			Release: Release{Checked: true, Tag: "v0.2.2", Err: "no network"},
 		}, ActionEject},
 		{"nothing left to do", State{
 			Device: Device{Found: true, Installed: core}, Albums: done,

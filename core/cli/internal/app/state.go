@@ -57,6 +57,11 @@ const (
 	JobArt
 	JobFix
 	JobUndoFix
+	// JobKeepAlbum is "Keep this one" on a duplicate pair: the other
+	// album's folder goes to the trash.
+	JobKeepAlbum
+	// JobApplyCover is "Use this cover": one album's cover written now.
+	JobApplyCover
 )
 
 // String is the label shown in the status line and written into the
@@ -66,15 +71,15 @@ func (k JobKind) String() string {
 	case JobRefresh:
 		return "refresh"
 	case JobDryRun:
-		return "dry run"
+		return "preview"
 	case JobSync:
 		return "sync"
 	case JobSyncPrune:
-		return "sync + prune"
+		return "sync and remove"
 	case JobCheck:
-		return "check for updates"
+		return "update check"
 	case JobUpdate:
-		return "update firmware"
+		return "firmware update"
 	case JobFlash:
 		return "flash"
 	case JobBackup:
@@ -86,13 +91,17 @@ func (k JobKind) String() string {
 	case JobInstall:
 		return "install"
 	case JobInspect:
-		return "scan the library"
+		return "library scan"
 	case JobArt:
-		return "look for cover art"
+		return "cover art lookup"
 	case JobFix:
-		return "fix the library"
+		return "library fix"
 	case JobUndoFix:
 		return "undo"
+	case JobKeepAlbum:
+		return "removing a duplicate album"
+	case JobApplyCover:
+		return "writing a cover"
 	default:
 		return "idle"
 	}
@@ -167,9 +176,15 @@ type Device struct {
 	// turns on — Other means Apple's firmware is still on this iPod and
 	// there is nothing else to offer but an install — and it is the zero
 	// Installed until something has actually classified the device.
-	Installed             fwpart.Installed
-	Tested                bool
-	Volume                string
+	Installed fwpart.Installed
+	Tested    bool
+	Volume    string
+	// Free and Capacity are the music volume's free and total bytes, as
+	// its file system reports them (disk.VolumeSpace) — read off the
+	// volume, not derived from the disk's size, which also counts the
+	// firmware partition and the FAT. Both zero when nothing has read
+	// them.
+	Free, Capacity        int64
 	Firmware              string
 	OSOSOK                bool
 	OSOSNote              string
@@ -178,22 +193,26 @@ type Device struct {
 	ElevationAdviceNeeded bool
 }
 
-// DefaultDeviceName is what an iPod with no name at all is called.
-// Not "Apple iPod": that is the SCSI model string, it is the same on
-// every iPod ever made, and it reads like the app failed to find out
-// anything. It belongs on the details line with the path and the
-// serial, not where a name goes.
-const DefaultDeviceName = "iPod Video 80 GB"
+// DefaultDeviceName is what an iPod is called when nothing better is
+// known: no friendly name, no volume label and no detected model. It used
+// to be "iPod Video 80 GB", which was this project's bench iPod and a lie
+// about anyone else's. (Device.Model is disk.IPod's human description —
+// "iPod Video 5.5G 80 GB" — never the SCSI "Apple iPod" string.)
+const DefaultDeviceName = "iPod"
 
 // DisplayName is the name resolution, in one place: the friendly name
 // the user gave this serial, else the volume label as it is stored
-// (upper-case — what Explorer shows), else DefaultDeviceName.
+// (upper-case — what Explorer shows), else the detected model, else
+// DefaultDeviceName.
 func (d Device) DisplayName() string {
 	if n := strings.TrimSpace(d.Name); n != "" {
 		return n
 	}
 	if l := strings.TrimSpace(d.Label); l != "" {
 		return l
+	}
+	if m := strings.TrimSpace(d.Model); m != "" {
+		return m
 	}
 	return DefaultDeviceName
 }
@@ -268,6 +287,17 @@ type Release struct {
 	Notes   string
 	Asset   string
 	Err     string
+	// Published is the release date, for the iPod tab's firmware row.
+	Published time.Time
+}
+
+// Backups is what the backup folder holds for the attached iPod: the date
+// Apple's firmware was saved (zero: none here), the number of
+// whole-partition backups, and the folder.
+type Backups struct {
+	Apple time.Time
+	Count int
+	Dir   string
 }
 
 // JobStatus is the running (or last-finished) job.
@@ -300,8 +330,38 @@ type State struct {
 	// --no-detect run leaves it false and the screen says nothing it
 	// cannot deliver.
 	Detecting bool
-	Job       *JobStatus
-	Log       []string
+	// Ejected records a finished Eject: the header says the iPod is
+	// safe to unplug until the poll loses it (or a Refresh reads it
+	// again).
+	Ejected bool
+	// Notice is a one-off result the header's line 2 shows for a few
+	// seconds (NoticeFor) after NoticeAt — "Backed up to …" — or until
+	// the next job starts.
+	Notice   string
+	NoticeAt time.Time
+	// MenuOpen is the "···" menu. It is a view field, like Tab, so a
+	// canned state can be shot with the menu on screen.
+	MenuOpen bool
+	// InstallFile is the image "Install from a file…" picked. Picking
+	// is not installing: the button then reads "Install from <name>"
+	// and pressing THAT runs the install, through the usual gate.
+	InstallFile string
+	// Backups is the backup folder's answer, read with each Refresh.
+	Backups Backups
+	// Advanced is the iPod tab's disclosure. A view field, like Tab: it
+	// is not remembered between runs.
+	Advanced bool
+	// LogOpen is the log drawer. A view field: never saved.
+	LogOpen bool
+	// CheckedAt is when the last update check answered, for the iPod
+	// tab's note ("checked for updates 3 min ago"); zero is never.
+	CheckedAt time.Time
+	// NewerApp and NewerAppURL are a desktop-app release newer than this
+	// build (ghrelease.AppNewer), found by the launch check; empty when
+	// there is none or this is a developer build.
+	NewerApp, NewerAppURL string
+	Job                   *JobStatus
+	Log                   []string
 
 	// Tab is which of the three screens the body shows.
 	Tab Tab
@@ -343,7 +403,63 @@ type State struct {
 	// the last sync, which is what makes Sync the primary button even
 	// when the grid's plan is stale.
 	LibraryChanged bool
+
+	// NowPlaying is the preview listen (nowplaying.go): the album and
+	// track loaded in the player, nil when nothing is. Kept in step with
+	// the player every frame.
+	NowPlaying *NowPlaying
+	// FixLowRes is the low-resolution row's tick: with it on, the covers
+	// chosen for those albums are part of Fix all. It starts ON, like
+	// the Names row: a larger cover is a repair.
+	FixLowRes bool
+	// DupArmed is the album whose "Keep this one" has been pressed once
+	// and now reads "Delete <other> anyway": keeping it would delete
+	// songs the other album has and it does not. A view field.
+	DupArmed librarian.AlbumKey
+	// CoverNote is what the last "Use this cover" did — "Cover replaced ·
+	// 500×500 → 1200×1200 — The Royal Scam" — shown at the top of the
+	// pane for CoverNoteFor after CoverNoteAt; CoverWarn makes it a
+	// failure, which stays until the next click.
+	CoverNote   string
+	CoverNoteAt time.Time
+	CoverWarn   bool
+	// CoversApplied counts the covers written by a click since the last
+	// scan, so an emptied row says "All covers chosen" and not that
+	// every album always had one; CoverTracks are their tracks, which
+	// the next sync copies again.
+	CoversApplied, CoverTracks int
 }
+
+// CoverNoteFor is how long a written cover's line stays in the pane.
+const CoverNoteFor = 6 * time.Second
+
+// NowPlaying is what the player has loaded.
+type NowPlaying struct {
+	// AlbumIndex is the album's place in State.Albums (-1 when a new plan
+	// no longer has it); TrackIndex is the track's in Album.TrackList.
+	AlbumIndex, TrackIndex int
+	// Playing is false while paused (and once the album has ended).
+	Playing bool
+	// Pos and Total are where the track is and its length (0: unknown).
+	Pos, Total time.Duration
+	// Album is the album playing, its TrackList the tracks in play order:
+	// the footer, the sheet and the next track all read it.
+	Album Album
+	// Ended is set when the last track has played; the footer says
+	// "ended" until EndedAt + EndedFor, and then Now Playing clears.
+	Ended   bool
+	EndedAt time.Time
+	// The bars' own clock. They move only while music is actually
+	// playing (the owner's rule; the iPod's keep bouncing when paused):
+	// BarsPausedAt is when the current pause began (zero while playing)
+	// and BarsHold is every pause so far added up, so the bars freeze
+	// mid-bounce and carry on from there when the music does.
+	BarsPausedAt time.Time
+	BarsHold     time.Duration
+}
+
+// EndedFor is how long an album that has played out stays in the footer.
+const EndedFor = 3 * time.Second
 
 // Tab is one of the three screens in the body.
 type Tab int
@@ -351,11 +467,11 @@ type Tab int
 // The tabs. Playlists is phase 3 and is deliberately not here: a tab
 // that opens an empty pane teaches people the app is unfinished.
 const (
-	// TabAlbums is the grid.
+	// TabAlbums is the grid, drawn as "Music".
 	TabAlbums Tab = iota
-	// TabLibrary is the "things to fix" list.
+	// TabLibrary is the "things to fix" list, drawn as "Fix".
 	TabLibrary
-	// TabDetails is the device facts, the firmware and the log.
+	// TabDetails is the device facts and the firmware, drawn as "Summary".
 	TabDetails
 )
 
@@ -363,11 +479,11 @@ const (
 func (t Tab) String() string {
 	switch t {
 	case TabLibrary:
-		return "Library"
+		return "Fix"
 	case TabDetails:
-		return "Details"
+		return "Summary"
 	default:
-		return "Albums"
+		return "Music"
 	}
 }
 
@@ -417,6 +533,25 @@ type Album struct {
 	// is the second half of the thumbnail cache key: a cover embedded
 	// by a Fix has to reach the grid without restarting the app.
 	Mod time.Time
+	// TrackList is the album sheet's tracklist when it is already known —
+	// a canned state's, which has no files to read. Empty, the sheet
+	// reads the folder (ReadTracks). (Not "Tracks": that is the count.)
+	TrackList []Track
+}
+
+// Track is one row of the album sheet's tracklist.
+type Track struct {
+	// Path is the file; empty in a canned state, where nothing plays.
+	Path string
+	// Disc is 1 unless the album is in Disc N folders or its tags say
+	// otherwise; Number is the track number (the tag, else the
+	// filename's leading digits; 0 when neither has one).
+	Disc, Number int
+	// Title is the tag's, else the filename's.
+	Title string
+	// Length is 0 when it could not be read.
+	Length time.Duration
+	Size   int64
 }
 
 // Category is one row of the Library tab's problem list.
@@ -438,6 +573,12 @@ const (
 	CatDiscs
 	// CatAttention is "Needs attention" — never fixed automatically.
 	CatAttention
+	// CatLowRes is "Low-resolution cover art": a cover under the
+	// report's MinArtPx, replaced only by a larger one.
+	CatLowRes
+	// CatDuplicates is "Duplicate albums" — the same songs in two
+	// folders. Never fixed by Fix all; one is kept by hand.
+	CatDuplicates
 )
 
 // Title and Sub are the two lines of the problem row.
@@ -451,6 +592,10 @@ func (c Category) Title() string {
 		return "Multi-disc albums"
 	case CatAttention:
 		return "Needs attention"
+	case CatLowRes:
+		return "Low-resolution cover art"
+	case CatDuplicates:
+		return "Duplicate albums"
 	default:
 		return "Missing cover art"
 	}
@@ -467,13 +612,22 @@ func (c Category) Sub() string {
 		return "into Disc N folders — off unless you tick it"
 	case CatAttention:
 		return "tags too thin to name a file from"
+	case CatLowRes:
+		return lowResSub(librarian.DefaultMinArtPx)
+	case CatDuplicates:
+		return "the same songs in two folders"
 	default:
 		return "looked up by artist and album"
 	}
 }
 
 // Categories is the list, in order.
-var Categories = []Category{CatArt, CatNames, CatFolders, CatDiscs, CatAttention}
+var Categories = []Category{CatArt, CatLowRes, CatNames, CatFolders, CatDiscs, CatDuplicates, CatAttention}
+
+// lowResSub is the low-resolution row's sub line at the report's own line.
+func lowResSub(px int) string {
+	return fmt.Sprintf("below %d px — a larger cover file in the folder is used first, else iTunes at 1200", px)
+}
 
 // Count is how many things this category holds in r, and 0 for a report
 // that has not been made yet.
@@ -498,6 +652,10 @@ func (c Category) Count(r *librarian.Report) int {
 		return len(DiscMoves(r))
 	case CatAttention:
 		return len(r.NeedsAttention)
+	case CatLowRes:
+		return len(r.LowResArt)
+	case CatDuplicates:
+		return len(r.Duplicates)
 	default:
 		return len(r.MissingArt)
 	}
@@ -572,6 +730,23 @@ func (a Action) Label() string {
 	}
 }
 
+// PrimaryLabel is the top bar's button as it is drawn: the action, with
+// the count or the version that says what pressing it will do — "Sync 7
+// albums", "Update to v0.2.2".
+func (s *State) PrimaryLabel() string {
+	a := s.Primary()
+	switch a {
+	case ActionSync:
+		if n := s.PendingAlbums(); n > 0 {
+			return fmt.Sprintf("Sync %d album%s", n, plural(n))
+		}
+		return "Sync changes"
+	case ActionUpdate:
+		return "Update to " + s.Release.Tag
+	}
+	return a.Label()
+}
+
 // Primary is the whole decision table for the top bar's button.
 //
 // Order matters and it is the mockup's: an iPod without Core can do
@@ -587,6 +762,13 @@ func (s *State) Primary() Action {
 		return ActionNone
 	case s.Phase() == PhaseNotInstalled:
 		return ActionInstall
+	case s.FirmwareTooOld():
+		// Sync would write index/config/log files the firmware on the
+		// iPod cannot read; the firmware has to move first.
+		if s.Release.Checked && s.Release.Tag != "" && s.Release.Err == "" {
+			return ActionUpdate
+		}
+		return ActionEject
 	case s.PendingTracks() > 0 || s.LibraryChanged:
 		return ActionSync
 	case s.UpdateAvailable():
@@ -594,6 +776,64 @@ func (s *State) Primary() Action {
 	default:
 		return ActionEject
 	}
+}
+
+// MinFirmware is the oldest firmware whose index, config and log formats
+// this app writes. A sync onto anything older would leave files the iPod
+// cannot read, so the app offers the firmware update first.
+const MinFirmware = "v0.2.0"
+
+// FirmwareTooOld reports whether the iPod's Core is older than MinFirmware.
+// An unknown version (no marker, or Apple's firmware) is not "too old":
+// there is nothing to compare, and the Install screen covers Apple's.
+func (s *State) FirmwareTooOld() bool {
+	tag := installedTag(s.Device.Firmware)
+	if tag == "" || s.Phase() != PhaseReady {
+		return false
+	}
+	return versionLess(tag, MinFirmware)
+}
+
+// TooOldText is what the header and the iPod tab say when it is.
+const TooOldText = "this app needs Core " + MinFirmware + " or newer on the iPod — update the firmware first"
+
+// versionLess compares two vX.Y.Z tags numerically; a tag that does not
+// parse is never less.
+func versionLess(a, b string) bool {
+	pa, oka := parseVersion(a)
+	pb, okb := parseVersion(b)
+	if !oka || !okb {
+		return false
+	}
+	for i := range pa {
+		if pa[i] != pb[i] {
+			return pa[i] < pb[i]
+		}
+	}
+	return false
+}
+
+func parseVersion(t string) ([3]int, bool) {
+	var v [3]int
+	t = strings.TrimPrefix(t, "v")
+	parts := strings.SplitN(t, ".", 3)
+	if len(parts) != 3 {
+		return v, false
+	}
+	for i, p := range parts {
+		n := 0
+		if p == "" {
+			return v, false
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		v[i] = n
+	}
+	return v, true
 }
 
 // PendingAlbums and PendingTracks are what the last plan says is not on

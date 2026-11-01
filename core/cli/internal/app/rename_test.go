@@ -20,7 +20,8 @@ func TestDeviceDisplayName(t *testing.T) {
 		{"then the fallback", Device{}, DefaultDeviceName},
 		{"a blank name does not count", Device{Name: "   ", Label: "IPOD"}, "IPOD"},
 		{"a blank label does not count", Device{Label: "   "}, DefaultDeviceName},
-		{"the model is not a name", Device{Model: "iPod Video 5.5G 80 GB"}, DefaultDeviceName},
+		{"then the detected model", Device{Model: "iPod Video 5.5G 80 GB"}, "iPod Video 5.5G 80 GB"},
+		{"the label beats the model", Device{Label: "IPOD", Model: "iPod Video 5.5G 80 GB"}, "IPOD"},
 	}
 	for _, c := range cases {
 		if got := c.dev.DisplayName(); got != c.want {
@@ -123,8 +124,9 @@ func TestRenameToNothingClearsBothHalves(t *testing.T) {
 	if u.st.Device.Name != "" || u.st.Device.Label != "" {
 		t.Errorf("after clearing: name=%q label=%q", u.st.Device.Name, u.st.Device.Label)
 	}
-	if got := u.st.Device.DisplayName(); got != DefaultDeviceName {
-		t.Errorf("DisplayName = %q, want the fallback", got)
+	// With the name and the label gone, the detected model is what is left.
+	if got, want := u.st.Device.DisplayName(), u.st.Device.Model; got != want || want == "" {
+		t.Errorf("DisplayName = %q, want the model %q", got, want)
 	}
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
@@ -164,7 +166,7 @@ func TestRenameWithoutAVolumeRefuses(t *testing.T) {
 	if len(f.renameCalls) != 0 {
 		t.Fatalf("Rename was called with no volume: %+v", f.renameCalls)
 	}
-	if !strings.Contains(strings.Join(u.st.Log, "\n"), "Refresh") {
+	if !strings.Contains(strings.Join(u.st.Log, "\n"), "plug the iPod in") {
 		t.Errorf("the log does not say what to do:\n%s", strings.Join(u.st.Log, "\n"))
 	}
 }

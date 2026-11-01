@@ -10,7 +10,7 @@ import (
 )
 
 // Config is what the app remembers between runs. It is deliberately
-// two fields: everything else on screen is read from the device or from
+// small: everything else on screen is read from the device or from
 // GitHub, and a settings file that caches facts about hardware is a
 // settings file that will one day disagree with the hardware.
 type Config struct {
@@ -28,6 +28,18 @@ type Config struct {
 	// there to replace. `core name` writes the same map, through the
 	// same file.
 	Names map[string]string `json:"names,omitempty"`
+	// Theme is the palette choice: "" (System — Onyx when Windows is
+	// set to dark apps, Linen otherwise), "linen" or "onyx".
+	Theme Theme `json:"theme,omitempty"`
+	// MinArtPx is the Fix tab's low-resolution line: a cover smaller
+	// than this on its shorter side is listed for replacing. 0 means
+	// librarian.DefaultMinArtPx (600); a negative value turns it off.
+	MinArtPx int `json:"min_art_px,omitempty"`
+	// Volume is the app's playback level, 0–100; absent is 100. It is the
+	// app's own output, not the system's volume, and a mute is not saved.
+	Volume *int `json:"volume,omitempty"`
+	// ReplayGain is the ··· menu's "Use ReplayGain"; absent is on.
+	ReplayGain *bool `json:"replaygain,omitempty"`
 }
 
 // NameFor is the friendly name remembered for one iPod, or "".

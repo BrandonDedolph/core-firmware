@@ -64,14 +64,31 @@ func runWindow(o Options) error {
 	}()
 
 	var ops op.Ops
+	title := "Core"
+	focused := false
 	for {
 		switch e := w.Event().(type) {
 		case gio.DestroyEvent:
+			// The preview listen ends with the window, its stream closed
+			// rather than cut off by the process exiting under it.
+			u.StopAudio()
 			return e.Err
+		case gio.ConfigEvent:
+			if e.Config.Focused && !focused {
+				u.FocusGained()
+			}
+			focused = e.Config.Focused
 		case gio.FrameEvent:
 			gtx := gio.NewContext(&ops, e)
 			u.Layout(gtx)
 			e.Frame(gtx.Ops)
+			// The title follows the iPod: "Brandon's iPod · Core" while
+			// one is connected, "Core" otherwise. Set only on a change —
+			// an Option per frame is a window message per frame.
+			if t := u.Title(); t != title {
+				title = t
+				w.Option(gio.Title(t))
+			}
 		}
 	}
 }

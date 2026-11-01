@@ -17,8 +17,11 @@
 //	core-app --source DIR             open it with the music folder preset
 //	core-app --log FILE               append startup diagnostics to FILE
 //	core-app --no-detect              do not poll for the iPod
-//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled]
-//	              [--size 900x600]    render one frame headless and exit
+//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced|album|playing|preview|lowres|lowres-after|duplicates|tidy]
+//	              [--size 900x600] [--tab music|fix|summary]
+//	              [--theme system|linen|onyx] [--drawer]
+//	              [--dialog write|holding|remove|about|album|preview]
+//	                                  render one frame headless and exit
 //
 // --screenshot is the review channel: a `-H windowsgui` process cannot
 // show anyone anything from a shell, and this writes the exact frame
@@ -26,10 +29,11 @@
 // Windows: cmd/core-app/rsrc_windows_*.syso carries the application manifest
 // (cmd/core-app/winres/winres.json): requireAdministrator, so the window asks
 // for elevation at launch through UAC and then reads the disk and flashes
-// in-process — no second process, no console. Regenerate after editing the
-// JSON (pure Go, no mingw):
+// in-process — no second process, no console. The same file carries the
+// window icon (RT_GROUP_ICON #1, the id Gio loads; PNGs from
+// tools/app_icon.py). Regenerate after editing the JSON (pure Go, no mingw):
 //
-//go:generate go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --out rsrc
+//go:generate go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --out rsrc --arch amd64,386
 package main
 
 import (
@@ -47,12 +51,20 @@ func main() {
 	var (
 		screenshot = flag.String("screenshot", "", "Render one frame to this PNG and exit (no window)")
 		stateName  = flag.String("state", "demo",
-			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled")
+			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled, menu, advanced, "+
+				"album (the album sheet, a track playing), playing (the same, sheet closed: the footer's bar), "+
+				"preview (the sync preview), lowres (the Fix tab on its small covers), lowres-after (the same after Use this cover), "+
+				"duplicates (the duplicate-album chooser), tidy (the Fix tab with nothing to fix)")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
+		tabName  = flag.String("tab", "", "Which tab --screenshot shows: music, fix, summary (also albums, library, details; default: the state's own)")
 		source   = flag.String("source", "", "Preset the music source folder")
 		logFile  = flag.String("log", "", "Append startup diagnostics to this file")
 		noDetect = flag.Bool("no-detect", false,
 			"Do not poll for the iPod every 2 seconds; the window stays on whatever it last read")
+		drawer    = flag.Bool("drawer", false, "--screenshot with the log drawer open")
+		dialog    = flag.String("dialog", "", "--screenshot with a dialog open: write, holding, remove, about, album, preview")
+		themeName = flag.String("theme", "",
+			"Palette for this run: system (Onyx when Windows is set to dark apps), linen or onyx; default: the saved choice")
 		showVersion = flag.Bool("version", false, "Print the version and exit")
 	)
 	flag.Parse()
@@ -60,6 +72,11 @@ func main() {
 	if *showVersion {
 		fmt.Println("core-app", version.Full())
 		return
+	}
+
+	theme, err := app.ParseTheme(*themeName)
+	if err != nil {
+		fail(*logFile, fmt.Errorf("--theme: %w", err))
 	}
 
 	if *screenshot != "" {
@@ -71,7 +88,28 @@ func main() {
 		if err != nil {
 			fail(*logFile, err)
 		}
-		if err := app.Snapshot(st, w, h, *screenshot); err != nil {
+		st.LogOpen = *drawer
+		switch *tabName {
+		case "":
+		case "albums", "music":
+			st.Tab = app.TabAlbums
+		case "library", "fix":
+			st.Tab = app.TabLibrary
+		case "details", "summary":
+			st.Tab = app.TabDetails
+		default:
+			fail(*logFile, fmt.Errorf("--tab %q: want music, fix or summary (or albums, library, details)", *tabName))
+		}
+		// The two sheets are the demo with one open.
+		if s := strings.ToLower(*stateName); *dialog == "" && (s == "album" || s == "preview") {
+			*dialog = s
+		}
+		if *dialog != "" {
+			err = app.SnapshotDialog(st, theme, *dialog, w, h, *screenshot)
+		} else {
+			err = app.SnapshotTheme(st, theme, w, h, *screenshot)
+		}
+		if err != nil {
 			fail(*logFile, err)
 		}
 		fmt.Printf("wrote %s (%dx%d, state %s)\n", *screenshot, w, h, *stateName)
@@ -87,13 +125,18 @@ func main() {
 		cfg, cfgErr = app.LoadConfig(cfgPath)
 	}
 
+	be := app.NewRealBackend(cfg.BackupDir)
+	be.MinArtPx = cfg.MinArtPx
 	o := app.Options{
-		Backend:    app.NewRealBackend(cfg.BackupDir),
+		Backend:    be,
 		Config:     cfg,
 		ConfigPath: cfgPath,
 		Source:     *source,
 		LogFile:    *logFile,
 		NoDetect:   *noDetect,
+	}
+	if *themeName != "" {
+		o.Theme = &theme
 	}
 	if cfgErr != nil {
 		writeLog(*logFile, "config: %v", cfgErr)
@@ -116,9 +159,26 @@ func cannedState(name string) (app.State, error) {
 		return app.NotInstalledState(), nil
 	case "library", "fix":
 		return app.LibraryState(), nil
+	case "menu":
+		return app.MenuState(), nil
+	case "advanced":
+		return app.AdvancedState(), nil
+	case "album", "preview":
+		return app.DemoState(), nil
+	case "playing":
+		return app.PlayingState(), nil
+	case "lowres":
+		return app.LowResState(), nil
+	case "lowres-after":
+		return app.LowResAppliedState(), nil
+	case "tidy":
+		return app.TidyState(), nil
+	case "duplicates":
+		return app.DuplicatesState(), nil
 	default:
 		return app.State{}, fmt.Errorf(
-			"--state %q: expected demo, library, empty, looking or notinstalled", name)
+			"--state %q: expected demo, library, empty, looking, notinstalled, menu, advanced, album, playing, preview, "+
+				"lowres, lowres-after, duplicates or tidy", name)
 	}
 }
 

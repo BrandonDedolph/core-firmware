@@ -34,16 +34,20 @@ func DemoState() State {
 		Device: Device{
 			Found:      true,
 			Path:       `\\.\PhysicalDrive2`,
+			Name:       "Brandon's iPod",
 			Model:      "iPod Video 5.5G 80 GB",
 			Serial:     "000A2700168F1E3C",
 			Size:       80_026_361_856,
 			SectorSize: 2048,
 			Tested:     true,
 			Volume:     `D:\`,
-			Firmware:   "v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
+			// The bench volume: 74.5 GB as Explorer counts it, 51.2 free.
+			Free:     54_975_581_388,
+			Capacity: 79_993_765_888,
+			Firmware: "v0.2.1 (build 2026-09-14T22:41:07Z g928727d)",
 			Installed: fwpart.Installed{
-				Kind: fwpart.Core, Version: "v0.1.2", BuildID: "2026-09-14T22:41:07Z g928727d",
-				Description: "Core v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
+				Kind: fwpart.Core, Version: "v0.2.1", BuildID: "2026-09-14T22:41:07Z g928727d",
+				Description: "Core v0.2.1 (build 2026-09-14T22:41:07Z g928727d)",
 			},
 			OSOSOK:   true,
 			OSOSNote: "237,640 bytes of 7,618,560 capacity, checksum 0x01589d64 verifies",
@@ -60,7 +64,7 @@ func DemoState() State {
 		},
 		Release: Release{
 			Checked: true,
-			Tag:     "v0.1.3",
+			Tag:     "v0.2.2",
 			Asset:   "core.ipod",
 			Notes:   "Hold banner, About in ink, version marker in the image.",
 		},
@@ -69,6 +73,13 @@ func DemoState() State {
 		CLIPath:   `C:\Users\brandon-home\ipod-bringup\core.exe`,
 		FixNames:  true,
 		Organize:  true,
+	}
+	st.CheckedAt = time.Now().Add(-3 * time.Minute)
+	st.Release.Published = time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	st.Backups = Backups{
+		Apple: time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC),
+		Count: 3,
+		Dir:   `C:\Users\brandon-home\AppData\Roaming\core\backups`,
 	}
 	st.Albums = demoAlbums()
 	for _, line := range strings.Split(strings.TrimSpace(demoLog), "\n") {
@@ -135,7 +146,62 @@ func demoAlbums() []Album {
 		default:
 			a.State = TileChanged
 		}
+		if s.name == demoSheetAlbum {
+			a.TrackList = remainInLight()
+		}
 		out = append(out, a)
+	}
+	return out
+}
+
+// PlayingState is the demo with Remain in Light's third track playing at
+// 1:23 and the album sheet closed: the footer's Now Playing bar and the
+// tile's ▶.
+func PlayingState() State {
+	st := DemoState()
+	setDemoPlaying(&st)
+	return st
+}
+
+// setDemoPlaying puts the canned album's third track in Now Playing.
+func setDemoPlaying(st *State) {
+	for i, a := range st.Albums {
+		if a.Device != demoSheetAlbum {
+			continue
+		}
+		st.NowPlaying = &NowPlaying{
+			AlbumIndex: i, TrackIndex: 2, Playing: true,
+			Pos: 83 * time.Second, Total: a.TrackList[2].Length,
+			Album: a,
+		}
+		return
+	}
+}
+
+// demoSheetAlbum is the album `--state album` opens.
+const demoSheetAlbum = "Talking Heads - Remain in Light"
+
+// remainInLight is the canned sheet's tracklist: the record's own titles
+// and running times, each file the size the grid's numbers assume.
+func remainInLight() []Track {
+	type t struct {
+		title string
+		m, s  int
+	}
+	ts := []t{
+		{"Born Under Punches (The Heat Goes On)", 5, 46},
+		{"Crosseyed and Painless", 4, 45},
+		{"The Great Curve", 6, 26},
+		{"Once in a Lifetime", 4, 19},
+		{"Houses in Motion", 4, 30},
+		{"Seen and Not Seen", 3, 20},
+		{"Listening Wind", 4, 42},
+		{"The Overload", 6, 0},
+	}
+	out := make([]Track, len(ts))
+	for i, x := range ts {
+		out[i] = Track{Disc: 1, Number: i + 1, Title: x.title, Size: 31_500_000,
+			Length: time.Duration(x.m*60+x.s) * time.Second}
 	}
 	return out
 }
@@ -234,6 +300,106 @@ func LibraryState() State {
 	}
 	st.Logf("--- scan the library ---")
 	st.Logf("14:06:12  101 album(s), 928 track(s): 3 need art, 4 misnamed, 5 to re-folder, 2 need attention")
+	addLowResAndDuplicates(&st)
+	return st
+}
+
+// addLowResAndDuplicates puts the two later rows into the canned report: two
+// small covers with a 1200 px match each (the Steely Dan one is the real
+// library's 500 px cover), and the duplicate the owner found — SWAG, whose 21
+// tracks were also Disc 2 of SWAG II.
+func addLowResAndDuplicates(st *State) {
+	rep := st.Report
+	root := rep.Root
+	st.FixLowRes = true
+	rep.MinArtPx = librarian.DefaultMinArtPx
+	rep.DuplicatesChecked = true
+	for _, a := range []struct {
+		folder, artist, album string
+		px, tracks            int
+	}{
+		{"The Royal Scam (Remastered) - Steely Dan", "Steely Dan", "The Royal Scam (Remastered)", 500, 9},
+		{"Believe - Justin Bieber", "Justin Bieber", "Believe", 300, 13},
+	} {
+		dir := filepath.Join(root, a.folder)
+		first := filepath.Join(dir, "01.flac")
+		rep.LowResArt = append(rep.LowResArt, librarian.ArtRef{
+			AlbumRef: librarian.AlbumRef{Key: librarian.AlbumKey(a.folder), Dir: dir, Artist: a.artist,
+				Album: a.album, FirstFLAC: first, Tracks: a.tracks},
+			Width: a.px, Height: a.px, Source: first,
+		})
+		c := artfetch.Candidate{Provider: "itunes", Artist: a.artist, Album: a.album, Score: 1.0,
+			ThumbURL: "https://example.invalid/" + a.album + "-100.jpg", Width: 1200, Height: 1200}
+		st.ArtCands[librarian.AlbumKey(a.folder)] = []artfetch.Candidate{c}
+		st.ArtChoices[librarian.AlbumKey(a.folder)] = librarian.Accept(c)
+	}
+	swag := filepath.Join(root, "SWAG - Justin Bieber")
+	two := filepath.Join(root, "SWAG II - Justin Bieber")
+	rep.Duplicates = []librarian.DuplicateGroup{{
+		A: librarian.DupAlbum{AlbumRef: librarian.AlbumRef{Key: "SWAG - Justin Bieber", Dir: swag,
+			Artist: "Justin Bieber", Album: "SWAG", FirstFLAC: filepath.Join(swag, "01.flac"), Tracks: 21},
+			Bytes: 322_000_000},
+		B: librarian.DupAlbum{AlbumRef: librarian.AlbumRef{Key: "SWAG II - Justin Bieber", Dir: two,
+			Artist: "Justin Bieber", Album: "SWAG II", FirstFLAC: filepath.Join(two, "Disc 1", "01.flac"), Tracks: 44},
+			Bytes: 676_000_000, Extra: 23, Disc: "Disc 2"},
+		Matching: 21,
+		Why:      "SWAG's 21 tracks are all in SWAG II (as Disc 2)",
+	}}
+	st.Logf("14:06:12  2 with small art, 1 duplicate album: SWAG's 21 tracks are all in SWAG II (as Disc 2)")
+}
+
+// LowResState is the Fix tab on its low-resolution row: each small cover
+// beside the 1200 px one found for it.
+func LowResState() State {
+	st := LibraryState()
+	st.Category = CatLowRes
+	return st
+}
+
+// LowResAppliedState is LowResState a moment after "Use this cover" on The
+// Royal Scam: the album has left the row, the count and the cost line have
+// followed, and the line at the top says what was written.
+func LowResAppliedState() State {
+	st := LowResState()
+	const key = "The Royal Scam (Remastered) - Steely Dan"
+	if a, ok := st.Report.Album(key); ok {
+		st.CoverTracks += a.Tracks
+	}
+	st.Report = withoutAlbum(st.Report, key)
+	delete(st.ArtCands, key)
+	delete(st.ArtChoices, key)
+	st.CoversApplied = 1
+	st.CoverNote = "Cover replaced · 500×500 → 1200×1200 — The Royal Scam (Remastered)"
+	st.CoverNoteAt = time.Now()
+	st.Journal = "journal/20261101-101500-fix.json"
+	st.LibraryChanged = true
+	st.Logf("10:15:00  The Royal Scam (Remastered): cover replaced · 500×500 → 1200×1200")
+	return st
+}
+
+// DuplicatesState is the duplicate chooser with SWAG's Keep pressed once:
+// keeping the smaller album would delete SWAG II's other 23 songs, so the
+// button asks again.
+func DuplicatesState() State {
+	st := LibraryState()
+	st.Category = CatDuplicates
+	st.DupArmed = "SWAG - Justin Bieber"
+	return st
+}
+
+// AdvancedState is the demo on the iPod tab with Advanced open.
+func AdvancedState() State {
+	st := DemoState()
+	st.Tab = TabDetails
+	st.Advanced = true
+	return st
+}
+
+// MenuState is the demo with the "···" menu open, for reviewing the menu
+// from a shell.
+func MenuState() State {
+	st := DemoState()
+	st.MenuOpen = true
 	return st
 }
 
@@ -247,7 +413,7 @@ func EmptyState() State {
 	}
 	st.Logf("core-app (devel)")
 	st.Logf("core CLI: not found beside this app — Flash and Update will print the command instead")
-	st.Logf("press Refresh once the iPod is in disk mode (Select + Play) and plugged in")
+	st.Logf("plug the iPod in (disk mode: Select + Play) — this window finds it on its own")
 	return st
 }
 
@@ -259,7 +425,7 @@ func LookingState() State {
 		Device:    Device{Err: "disk: no iPod found", Elevated: true},
 		CLIPath:   `C:\Users\brandon-home\ipod-bringup\core.exe`,
 	}
-	st.Logf("core-app v0.1.3")
+	st.Logf("core-app v0.2.2")
 	st.Logf("core CLI: %s", st.CLIPath)
 	st.Logf("watching for an iPod every 2 seconds")
 	st.Logf("14:01:58  no iPod found: disk: no iPod found")
@@ -279,6 +445,8 @@ func NotInstalledState() State {
 			Serial:     "000A2700168F1E3C",
 			Label:      "IPOD",
 			Size:       80_026_361_856,
+			Free:       79_960_000_000,
+			Capacity:   79_993_765_888,
 			SectorSize: 2048,
 			Tested:     true,
 			Volume:     `D:\`,
@@ -299,7 +467,7 @@ func NotInstalledState() State {
 }
 
 const notInstalledLog = `
-core-app v0.1.3
+core-app v0.2.2
 core CLI: C:\Users\brandon-home\ipod-bringup\core.exe
 watching for an iPod every 2 seconds
 --- refresh ---
@@ -310,16 +478,16 @@ watching for an iPod every 2 seconds
 `
 
 const demoLog = `
-core-app v0.1.2
+core-app v0.2.1
 core CLI: C:\Users\brandon-home\ipod-bringup\core.exe
 --- refresh ---
 14:02:03  device: \\.\PhysicalDrive2 — Apple iPod, 80.0 GB (74.5 GiB)
 14:02:03  sector 2048 bytes (reported by the OS, confirmed: the Apple preamble is at sector 63)
-14:02:03  firmware: v0.1.2 (build 2026-09-14T22:41:07Z g928727d)
+14:02:03  firmware: v0.2.1 (build 2026-09-14T22:41:07Z g928727d)
 14:02:03  OSOS 237,640 bytes, checksum 0x01589d64 verifies
 14:02:04  library: 928 songs, 101 albums, index 237,584 B, CORECFG.DAT and CORELOG.BIN valid
 --- check for updates ---
-14:02:19  latest release: v0.1.3 (core.ipod)
+14:02:19  latest release: v0.2.2 (core.ipod)
 --- sync ---
 14:03:41  scanned 101 albums, 928 tracks
 14:03:41  plan: 101 albums, 63 to copy, 865 already there, 0 to rename, 0 orphan(s)

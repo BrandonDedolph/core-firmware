@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"io"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"gioui.org/io/clipboard"
+	"gioui.org/font"
+	"gioui.org/gesture"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -24,9 +27,9 @@ import (
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/artfetch"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
-	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/fwpart"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/librarian"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/organizer"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/player"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/version"
 )
@@ -71,6 +74,13 @@ type Options struct {
 	// open fails in complete silence; this is the only way to see why
 	// from a shell.
 	LogFile string
+	// Audio is the album sheet's player; nil is internal/player's, which
+	// opens nothing until the first track is played.
+	Audio audio
+	// Theme overrides Config.Theme for this run (the --theme flag)
+	// without saving it. nil is "use the config", which is itself empty
+	// — System — on a first run.
+	Theme *Theme
 }
 
 // logf appends one line to Options.LogFile, if there is one.
@@ -103,10 +113,31 @@ type dialogRequest struct {
 	want string
 	// okLabel is the confirming button's text.
 	okLabel string
+	// info marks a dialog that only says something (About): the body is
+	// set in the text face rather than the plan's monospace, and there
+	// is one button. prose is the text face with Cancel kept.
+	info, prose bool
+	// card is the write dialog's identity card; items and total are the
+	// removal list; note is the Muted sentence under them; plan is the
+	// flasher's plan behind "Show the plan".
+	card, items []cardRow
+	total       string
+	note, plan  string
+	// only marks a dialog with one button, which closes it: it says
+	// something and asks nothing ("Everything is on the iPod"). Such a
+	// dialog has no Cancel, and Esc or a click on the scrim closes it.
+	only bool
+	// hold makes the confirming button a press-and-hold (HoldDuration)
+	// that answers holdAnswer when it completes.
+	hold       bool
+	holdAnswer string
 	// reply carries the typed answer, or "" for a cancel. Buffered, so
 	// a job that has already given up cannot wedge the UI goroutine.
 	reply chan string
 }
+
+// solo reports whether the dialog has one button and nothing to cancel.
+func (d *dialogRequest) solo() bool { return d.info || d.only }
 
 // renameResult is what a finished rename job leaves for the next frame:
 // the friendly name that was asked for, the label the volume actually
@@ -118,9 +149,12 @@ type renameResult struct{ friendly, label, serial string }
 type UI struct {
 	th  *material.Theme
 	pal Palette
-	st  State
-	run *Runner
-	be  Backend
+	// theme is the choice (System, Linen, Onyx); pal is what it
+	// resolved to. applyTheme changes both.
+	theme Theme
+	st    State
+	run   *Runner
+	be    Backend
 
 	cfg        Config
 	cfgPath    string
@@ -144,11 +178,37 @@ type UI struct {
 	newReport  *librarian.Report
 	newCands   map[librarian.AlbumKey][]artfetch.Candidate
 	newFix     *librarian.Result
+	newCover   *coverResult
 	newUndo    *organizer.UndoReport
 	newPlan    *syncer.Plan
 	planSynced bool
 
 	dlg *dialogRequest // the dialog on screen; UI goroutine only
+	// sheet is the album sheet (album.go), nil when closed; audio is the
+	// player. newTracks,
+	// trackDone and trackErr are the sheet's results from other
+	// goroutines (ReadTracks, the player's OnEnd and OnError), under mu.
+	sheet     *albumSheet
+	audio     audio
+	newTracks *tracksResult
+	trackDone bool
+	trackErr  error
+	// npLive says State.NowPlaying is the player's (a canned state's is
+	// a picture with no player behind it); npWarn is "could not play",
+	// up for warnFor after npWarnAt. The footer bar's buttons follow.
+	npLive                                      bool
+	npWarn                                      string
+	npWarnAt                                    time.Time
+	npPlayBtn, npNextBtn, npStopBtn, npTitleBtn widget.Clickable
+	npCoverBtn                                  widget.Clickable
+	// vol is the volume control (volume.go): the level, its slider, the
+	// speaker glyph's mute, and the tag the wheel over the player goes to.
+	vol        volState
+	volSlider  widget.Float
+	volMuteBtn widget.Clickable
+	volWheel   int
+	npSeek     gesture.Click
+	npBarW     int
 
 	// pending is the one-job-at-a-time queue: things to start on a
 	// frame where nothing is running (see later()). UI goroutine only.
@@ -184,20 +244,28 @@ type UI struct {
 	editingName bool
 
 	browseBtn                                   widget.Clickable
-	dryRunBtn, syncBtn, pruneBtn, cancelBtn     widget.Clickable
+	dryRunBtn, pruneBtn                         widget.Clickable
 	checkBtn, updateBtn, flashBtn, flashOpenBtn widget.Clickable
 	backupBtn, ejectBtn, copyBtn                widget.Clickable
 	nameClick, nameSaveBtn, nameCancelBtn       widget.Clickable
-	installBtn, installFileBtn                  widget.Clickable
+	installBtn, installFileBtn, installPickBtn  widget.Clickable
 	dlgOK, dlgCancel                            widget.Clickable
+	// dlgScrim is the click outside a dialog; dlgBlock stops a click on
+	// the plate from being one. itemList scrolls a dialog's list.
+	dlgScrim, dlgBlock widget.Clickable
+	itemList           widget.List
 
 	// The top bar's one primary button, the tabs, and the footer's
 	// "Change" for the music folder.
-	primaryBtn   widget.Clickable
-	tabClicks    [3]widget.Clickable
-	changeBtn    widget.Clickable
+	primaryBtn widget.Clickable
+	tabClicks  [3]widget.Clickable
+	// folderLink is the footer's music folder: it goes to the Library
+	// tab and focuses the field there (focusSource asks the field to take
+	// focus on the frame it is next drawn).
+	folderLink   widget.Clickable
+	focusSource  bool
 	tileClicks   []*widget.Clickable
-	catClicks    [5]widget.Clickable
+	catClicks    [7]widget.Clickable
 	artTake      []*widget.Clickable
 	artSkip      []*widget.Clickable
 	fixAllBtn    widget.Clickable
@@ -208,21 +276,87 @@ type UI struct {
 	organizeTick widget.Bool
 	discTick     widget.Bool
 
+	// The header's own Cancel (the Details card keeps its own: one
+	// Clickable drawn twice in a frame is a button that only works in
+	// one of the two places), the "···" button and its menu.
+	headCancelBtn widget.Clickable
+	// The write dialog's hold button, its clock, and the plan toggle.
+	// now is time.Now except in a test.
+	dlgHold, planToggle widget.Clickable
+	holdStart           time.Time
+	holdFrac            float32
+	planOpen            bool
+	measureOps          op.Ops
+	// holdFrozen pins the hold fill for a canned screenshot, which has
+	// no pointer to hold it with. Zero everywhere else.
+	holdFrozen float32
+	// systemNow is what System resolves to, read once when the menu
+	// opens (it is a registry read on Windows; not one per frame).
+	systemNow Theme
+	now       func() time.Time
+	// The iPod tab's own: Show folder, and the Advanced disclosure.
+	backupDirBtn widget.Clickable
+	advancedBtn  widget.Clickable
+	// The log strip and drawer (logstrip.go). footH is the footer's
+	// height in the last frame — the drawer sits on it. logFrames counts
+	// the drawer's layouts, for the test that it is not on the iPod tab.
+	logCloseBtn, clearLogBtn, drawerBlock widget.Clickable
+	// statusBtn is the header's status line while a job has failed: the
+	// one place a failure is announced, so it is also the way into the log.
+	statusBtn widget.Clickable
+	footH     int
+	logFrames int
+	// newBackups is a job's read of the backup folder, for drain;
+	// newNotice is a result for the header's line 2 (State.Notice).
+	newBackups *Backups
+	newNotice  string
+	// newApp is the launch check's newer app release: tag, page URL.
+	newApp      *[2]string
+	menuBtn     widget.Clickable
+	menuScrim   widget.Clickable
+	menuClicks  [menuCount]widget.Clickable
+	themeClicks [3]widget.Clickable
+	// The Fix tab's low-resolution row: its tick, and one Use/Skip
+	// pair per album; the duplicate chooser's Keep pair per group.
+	lowResTick       widget.Bool
+	lowTake, lowSkip []*widget.Clickable
+	dupKeep          [][2]*widget.Clickable
+	// lowCovers is each low-resolution album's current cover, read from
+	// its art source (not the sidecar, which is the iPod's 120 px copy).
+	lowCovers *thumbCache
+	// drawnRows is how many problem rows the Fix tab drew last frame.
+	drawnRows int
+	// topH is the top bar's height in the last frame: where the menu
+	// hangs from.
+	topH int
+	// autoChecked records that this launch has asked GitHub once by
+	// itself; the menu's Check for updates asks again.
+	autoChecked bool
+
 	pickerOK bool
 }
 
 // NewUI builds the window's state.
 func NewUI(o Options) *UI {
-	th, pal := newTheme()
+	// config.json is hand-editable: "dark" or "Light" are read the way the
+	// flag reads them, and anything unknown is System, so a radio in the
+	// menu is always on.
+	choice, _ := ParseTheme(string(o.Config.Theme))
+	if o.Theme != nil {
+		choice = *o.Theme
+	}
+	th, pal := newTheme(choice)
 	u := &UI{
 		th:         th,
 		pal:        pal,
+		theme:      choice,
 		run:        NewRunner(),
 		be:         o.Backend,
 		cfg:        o.Config,
 		cfgPath:    o.ConfigPath,
 		invalidate: o.Invalidate,
 		pickerOK:   PickerAvailable(),
+		now:        time.Now,
 	}
 	if u.invalidate == nil {
 		u.invalidate = func() {}
@@ -233,6 +367,7 @@ func NewUI(o Options) *UI {
 	u.prevList.Axis = layout.Vertical
 	u.dlgBody.Axis = layout.Vertical
 	u.logList.Axis = layout.Vertical
+	u.itemList.Axis = layout.Vertical
 	// The log is a transcript: the interesting end is the bottom, and a
 	// pane that stays at the top while a sync scrolls past is a pane
 	// nobody reads.
@@ -242,12 +377,31 @@ func NewUI(o Options) *UI {
 	// sidecars off the UI goroutine; the candidate row fetches 200 px
 	// thumbnails through the Backend, so a test sees a fake and no
 	// network.
-	u.thumbs = newThumbCache(func(dir string) (image.Image, error) {
+	u.thumbs = newThumbCache(func(key string) (image.Image, error) {
 		if u.be == nil {
 			return nil, ErrNoThumb
 		}
-		return u.be.Thumbnail(dir)
+		dir, px := splitCoverKey(key)
+		return u.be.Thumbnail(dir, px)
 	}, u.invalidate)
+	u.audio = o.Audio
+	if u.audio == nil {
+		u.audio = player.New()
+	}
+	u.initVolume()
+	u.audio.SetReplayGain(u.replayGainOn())
+	u.audio.OnEnd(func() {
+		u.mu.Lock()
+		u.trackDone = true
+		u.mu.Unlock()
+		u.invalidate()
+	})
+	u.audio.OnError(func(err error) {
+		u.mu.Lock()
+		u.trackErr = err
+		u.mu.Unlock()
+		u.invalidate()
+	})
 	u.artThumbs = newThumbCache(func(url string) (image.Image, error) {
 		if u.be == nil {
 			return nil, ErrNoThumb
@@ -262,6 +416,8 @@ func NewUI(o Options) *UI {
 	// changes the shape of an album rather than repairing it.
 	u.st.FixNames, u.st.Organize = true, true
 	u.namesTick.Value, u.organizeTick.Value = true, true
+	u.st.FixLowRes, u.lowResTick.Value = true, true
+	u.lowCovers = newThumbCache(embeddedCover, u.invalidate)
 
 	u.sourceEd.SingleLine, u.sourceEd.Submit = true, true
 	u.flashEd.SingleLine, u.flashEd.Submit = true, true
@@ -318,6 +474,10 @@ func (u *UI) SetState(st State) {
 	u.namesTick.Value = st.FixNames
 	u.organizeTick.Value = st.Organize
 	u.discTick.Value = st.DiscFolders
+	u.lowResTick.Value = st.FixLowRes
+	if st.Advanced {
+		u.revealAdvanced()
+	}
 }
 
 // --- the per-frame work ------------------------------------------------
@@ -331,6 +491,12 @@ func (u *UI) drain() {
 	u.inbox = nil
 	dev, lib, rel := u.newDev, u.newLib, u.newRel
 	u.newDev, u.newLib, u.newRel = nil, nil, nil
+	backups := u.newBackups
+	u.newBackups = nil
+	notice := u.newNotice
+	u.newNotice = ""
+	newApp := u.newApp
+	u.newApp = nil
 	path, pathFor := u.newPath, u.pathFor
 	u.newPath, u.pathFor = "", JobNone
 	renamed := u.newName
@@ -341,18 +507,29 @@ func (u *UI) drain() {
 	u.newReport, u.newCands = nil, nil
 	fixed, undone := u.newFix, u.newUndo
 	u.newFix, u.newUndo = nil, nil
+	applied := u.newCover
+	u.newCover = nil
 	plan, planSynced := u.newPlan, u.planSynced
 	u.newPlan, u.planSynced = nil, false
 	ask := u.askQueue
 	u.askQueue = nil
+	tracks, ended, playErr := u.newTracks, u.trackDone, u.trackErr
+	u.newTracks, u.trackDone, u.trackErr = nil, false, nil
 	u.mu.Unlock()
 
-	for _, e := range events {
-		u.st.Apply(e)
-		u.afterJob(e)
+	if tracks != nil {
+		u.applyTracks(tracks)
 	}
+	if playErr != nil {
+		u.trackFailed(playErr)
+	}
+	if ended {
+		u.trackEnded()
+	}
+
 	if dev != nil {
 		u.st.Device = *dev
+		u.st.Ejected = false
 		// The label came off the volume; the friendly name is ours,
 		// and this is the only place the two are joined.
 		u.st.Device.Name = u.cfg.NameFor(dev.Serial)
@@ -369,25 +546,50 @@ func (u *UI) drain() {
 	if lib != nil {
 		u.st.Library = *lib
 	}
+	if backups != nil {
+		u.st.Backups = *backups
+	}
+	if newApp != nil {
+		u.st.NewerApp, u.st.NewerAppURL = newApp[0], newApp[1]
+	}
+	if notice != "" {
+		u.st.Notice, u.st.NoticeAt = notice, u.now()
+	}
 	if rel != nil {
 		u.st.Release = *rel
+		u.st.CheckedAt = time.Now()
+	}
+	// The events go after the results they announce: a job publishes its
+	// result and THEN returns, so a Done and the device it read arrive in
+	// the same drain, and afterJob has to see the new device — not the
+	// one the job replaced — to decide what follows.
+	for _, e := range events {
+		u.st.Apply(e)
+		u.afterJob(e)
 	}
 	switch {
 	case path != "" && pathFor == JobSync:
 		u.setSource(path)
 	case path != "" && pathFor == JobFlash:
+		// The menu's "Flash an image file…" fills the path and shows it
+		// where the Flash button is. Picking a file is not consent to
+		// write it.
 		u.st.FlashFile = path
 		u.flashEd.SetText(path)
+		u.st.Tab = TabDetails
+		u.st.Advanced = true
+		u.revealAdvanced()
 	case path != "" && pathFor == JobInstall:
-		// "Install from a file…" is one gesture: the file dialog IS the
-		// decision, and a second click on a button that appeared where
-		// the first one was is a click nobody expects to need.
-		u.st.FlashFile = path
-		u.flashEd.SetText(path)
-		u.startInstall(path)
+		// Picking a file is choosing it, not installing it: the button
+		// becomes "Install from <name>" and that click runs the install
+		// through the same gate as Install Core.
+		u.st.InstallFile = path
+		u.st.Logf("install image: %s", path)
 	}
 	if report != nil {
 		u.st.Report, u.st.Scanned = report, time.Now()
+		u.st.CoversApplied, u.st.CoverTracks = 0, 0
+		u.logReport(report)
 		// A rescan of the same tree (Rescan, or ticking the multi-disc
 		// row) keeps the lookup and the Take/Skip decisions for every
 		// album that is still coverless: the keys are the album folders,
@@ -396,9 +598,8 @@ func (u *UI) drain() {
 		// a punishment. A key that is gone (a cover arrived, the album
 		// moved) is dropped with its decision.
 		u.st.ArtCands, u.st.ArtChoices = keepArt(report, u.st.ArtCands, u.st.ArtChoices)
-		if u.st.Category.Count(report) == 0 {
-			u.st.Category = firstCategory(report)
-		}
+		u.takeLocalCovers(report)
+		u.keepSelectionVisible()
 	}
 	if cands != nil {
 		u.st.ArtCands = cands
@@ -415,12 +616,25 @@ func (u *UI) drain() {
 			}
 			u.setChoice(key, dec)
 		}
+		for _, key := range sortedKeys(cands) {
+			if cs := cands[key]; len(cs) > 0 {
+				u.st.Logf("cover art: %s — %.2f %s %s — %s", key, cs[0].Score, cs[0].Provider,
+					cs[0].Artist, cs[0].Album)
+			}
+		}
 		u.st.Logf("cover art: %d album(s) matched, %d accepted at %.2f or better",
 			len(cands), len(u.st.ArtChoices), librarian.DefaultMinScore)
 	}
+	if applied != nil {
+		u.coverApplied(applied)
+	}
 	if fixed != nil {
-		u.st.Journal = fixed.Journal
-		if fixed.Renamed+fixed.Moved+fixed.ArtWritten > 0 {
+		// A Fix that wrote nothing has no journal of its own; the one
+		// before it is still the one Undo takes back.
+		if fixed.Journal != "" {
+			u.st.Journal = fixed.Journal
+		}
+		if fixed.Renamed+fixed.Moved+fixed.ArtWritten+fixed.Trashed > 0 {
 			u.st.LibraryChanged = true
 		}
 		// The report describes a tree that no longer exists: scan
@@ -431,6 +645,7 @@ func (u *UI) drain() {
 	}
 	if undone != nil {
 		u.st.Journal = ""
+		u.st.CoverNote, u.st.CoverWarn = "", false
 		u.st.LibraryChanged = false
 		src := u.st.Source
 		u.later(func() { u.startInspect(src) })
@@ -441,6 +656,7 @@ func (u *UI) drain() {
 		if planSynced {
 			markSynced(u.st.Albums)
 		}
+		u.reindexNowPlaying()
 	}
 	if detected != nil {
 		u.applyDetect(detected)
@@ -460,16 +676,31 @@ func (u *UI) afterJob(e Event) {
 		return
 	}
 	switch e.Job {
+	case JobEject:
+		u.st.Ejected = true
+	case JobSync, JobSyncPrune:
+		// The counts in the footer and the header's free space are the
+		// volume's; a sync just changed both.
+		u.later(u.startRefresh)
 	case JobRefresh:
-		if u.st.Source == "" {
-			return
+		// The two read-only passes over the music folder first: they fill
+		// the grid and the Library tab, and the Runner takes one job at
+		// a time, so a check queued ahead of them would hold the grid
+		// empty for as long as GitHub takes to answer (30 s, black-holed).
+		if src := u.st.Source; src != "" {
+			if u.st.Report == nil {
+				u.later(func() { u.startInspect(src) })
+			}
+			if len(u.st.Albums) == 0 && u.st.Device.Volume != "" {
+				u.later(func() { u.startSync(JobDryRun) })
+			}
 		}
-		if u.st.Report == nil {
-			src := u.st.Source
-			u.later(func() { u.startInspect(src) })
-		}
-		if len(u.st.Albums) == 0 && u.st.Device.Volume != "" {
-			u.later(func() { u.startSync(JobDryRun) })
+		// Then, once per launch, the first time an iPod is there: ask
+		// GitHub whether there is something newer, so Update appears
+		// without anybody pressing Check.
+		if !u.autoChecked && u.st.Device.Found {
+			u.autoChecked = true
+			u.later(u.startLaunchCheck)
 		}
 	}
 }
@@ -485,17 +716,6 @@ func (u *UI) runPending() {
 	f := u.pending[0]
 	u.pending = u.pending[1:]
 	f()
-}
-
-// firstCategory is the row the Library tab opens on: the first one with
-// anything in it, so a report lands on something to look at.
-func firstCategory(r *librarian.Report) Category {
-	for _, c := range Categories {
-		if c.Count(r) > 0 {
-			return c
-		}
-	}
-	return CatArt
 }
 
 // markSynced turns a plan that has just run into the grid it leaves
@@ -523,30 +743,67 @@ func (u *UI) saveConfig() {
 // jobs through the Runner.
 func (u *UI) Layout(gtx C) D {
 	u.drain()
-	if u.dlg != nil {
+	u.syncNowPlaying(gtx)
+	u.playKeys(gtx)
+	u.saveVolumeLater(gtx)
+	if u.st.NowPlaying != nil && u.dlg == nil {
+		u.nowPlayingEvents(gtx)
+	}
+	switch {
+	case u.dlg != nil:
+		// A dialog replaces the menu that opened it, and sits over the
+		// album sheet when a job asks while one is open.
+		u.st.MenuOpen = false
 		u.dialogEvents(gtx)
-	} else {
+	case u.sheet != nil:
+		u.st.MenuOpen = false
+		u.sheetEvents(gtx)
+	default:
 		u.events(gtx)
 	}
 
+	if !u.st.MenuOpen {
+		// The menu's "System — Onyx now" is read once per opening.
+		u.systemNow = ""
+	}
 	paint.Fill(gtx.Ops, u.pal.Surface)
 	return layout.Stack{}.Layout(gtx,
 		layout.Stacked(func(gtx C) D {
 			g := gtx
-			if u.dlg != nil {
+			if u.dlg != nil || u.sheet != nil {
 				// A modal that does not actually block the buttons
 				// behind it is a modal that lets somebody start a sync
 				// while a flash confirmation is on screen.
 				g = gtx.Disabled()
 			}
 			g.Constraints.Min = gtx.Constraints.Max
-			return u.page(g)
+			return u.pageWithDrawer(g)
 		}),
 		layout.Expanded(func(gtx C) D {
-			if u.dlg == nil {
+			if u.sheet != nil {
+				u.sheetLayer(gtx)
+			}
+			if u.dlg != nil {
+				return u.dialog(gtx)
+			}
+			if u.st.MenuOpen {
+				return u.menuLayer(gtx)
+			}
+			return D{Size: gtx.Constraints.Min}
+		}),
+	)
+}
+
+// pageWithDrawer is the page, and the log drawer over it when it is open:
+// above the body, below the dialogs and the menu.
+func (u *UI) pageWithDrawer(gtx C) D {
+	return layout.Stack{}.Layout(gtx,
+		layout.Stacked(u.page),
+		layout.Expanded(func(gtx C) D {
+			if !u.st.LogOpen {
 				return D{}
 			}
-			return u.dialog(gtx)
+			return u.drawerLayer(gtx)
 		}),
 	)
 }
@@ -569,26 +826,29 @@ func (u *UI) events(gtx C) {
 		if u.primaryBtn.Clicked(gtx) {
 			u.doPrimary()
 		}
-		if u.changeBtn.Clicked(gtx) {
-			u.pick(JobSync)
-		}
+
 		if u.installBtn.Clicked(gtx) {
 			u.startInstall("")
 		}
 		if u.installFileBtn.Clicked(gtx) {
+			if f := u.st.InstallFile; f != "" {
+				u.startInstall(f)
+			} else {
+				u.pick(JobInstall)
+			}
+		}
+		if u.installPickBtn.Clicked(gtx) {
 			u.pick(JobInstall)
 		}
 		if u.browseBtn.Clicked(gtx) {
-			u.pick(JobSync)
+			u.chooseMusicFolder()
 		}
 		if u.flashOpenBtn.Clicked(gtx) {
 			u.pick(JobFlash)
 		}
 		if u.dryRunBtn.Clicked(gtx) {
-			u.startSync(JobDryRun)
-		}
-		if u.syncBtn.Clicked(gtx) {
-			u.startSync(JobSync)
+			// The plan, then the preview sheet — whose button syncs.
+			u.startSyncPreview()
 		}
 		if u.pruneBtn.Clicked(gtx) {
 			u.startSync(JobSyncPrune)
@@ -601,6 +861,9 @@ func (u *UI) events(gtx C) {
 		}
 		if u.flashBtn.Clicked(gtx) {
 			u.startFlash(strings.TrimSpace(u.flashEd.Text()))
+		}
+		if u.backupDirBtn.Clicked(gtx) {
+			u.openBackupFolder()
 		}
 		if u.backupBtn.Clicked(gtx) {
 			u.startBackup()
@@ -615,15 +878,25 @@ func (u *UI) events(gtx C) {
 		}
 	}
 	u.nameEvents(gtx, busy)
-	if u.st.CanCancel() && u.cancelBtn.Clicked(gtx) {
+	if u.headCancelBtn.Clicked(gtx) && u.st.CanCancel() {
 		u.st.Logf("cancel requested")
 		u.run.Cancel()
 	}
-	if u.copyBtn.Clicked(gtx) {
-		text := strings.Join(u.st.Log, "\n") + "\n"
-		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(text))})
-		u.st.Logf("copied %d log lines to the clipboard", len(u.st.Log))
+	u.logEvents(gtx)
+	if u.folderLink.Clicked(gtx) && u.st.Phase() == PhaseReady {
+		u.st.Tab = TabLibrary
+		u.focusSource = true
 	}
+	if u.advancedBtn.Clicked(gtx) {
+		u.st.Advanced = !u.st.Advanced
+		if u.st.Advanced {
+			u.revealAdvanced()
+		}
+	}
+	if u.menuBtn.Clicked(gtx) {
+		u.st.MenuOpen = !u.st.MenuOpen
+	}
+	u.menuEvents(gtx)
 
 	// The source field is saved as it is edited, not on some Save
 	// button nobody would press.
@@ -700,7 +973,7 @@ func (u *UI) nameEvents(gtx C, busy bool) {
 func (u *UI) startRename(name string) {
 	vol, serial := u.st.Device.Volume, u.st.Device.Serial
 	if vol == "" {
-		u.st.Logf("rename: no iPod volume yet — press Refresh")
+		u.st.Logf("rename: no iPod volume yet — plug the iPod in (disk mode: Select+Play)")
 		return
 	}
 	u.start(JobRename, func(ctx context.Context, emit func(Event)) error {
@@ -729,23 +1002,89 @@ func (u *UI) dialogEvents(gtx C) {
 		}
 	}
 	if u.dlgCancel.Clicked(gtx) {
-		u.answer("")
+		u.cancel()
+		return
+	}
+	u.dlgBlock.Clicked(gtx) // a click on the plate is not a click outside it
+	if u.dlg.solo() {
+		// One button and nothing to cancel: Esc and a click outside close
+		// it. Both reply CancelAnswer — closing is never a yes.
+		if u.dlgScrim.Clicked(gtx) {
+			u.cancel()
+			return
+		}
+		for {
+			ev, ok := gtx.Event(key.Filter{Name: key.NameEscape})
+			if !ok {
+				break
+			}
+			if ke, ok := ev.(key.Event); ok && ke.State == key.Press {
+				u.cancel()
+				return
+			}
+		}
+	} else {
+		u.dlgScrim.Clicked(gtx)
+	}
+	if u.planToggle.Clicked(gtx) {
+		u.planOpen = !u.planOpen
+	}
+	if u.dlg.hold {
+		// Drain the button's clicks: a click (or Enter on a focused
+		// button) is not a hold and must not confirm anything.
+		for {
+			if _, ok := u.dlgHold.Update(gtx); !ok {
+				break
+			}
+		}
+		if u.holdFrozen > 0 {
+			u.holdFrac = u.holdFrozen
+			return
+		}
+		pressed := u.dlgHold.Pressed()
+		f, done := u.holdTick(pressed, u.now())
+		u.holdFrac = f
+		if done {
+			u.reply(u.dlg.holdAnswer)
+			return
+		}
+		if pressed {
+			gtx.Execute(op.InvalidateCmd{})
+		}
 		return
 	}
 	if u.dlgOK.Clicked(gtx) {
-		u.answer(strings.TrimSpace(u.confirmEd.Text()))
+		u.ok()
 	}
 }
 
-func (u *UI) answer(text string) {
+// CancelAnswer is the reply a dialog's Cancel sends — and the only one that
+// means "no". Every job that asks reads "" as cancel.
+const CancelAnswer = ""
+
+// cancel is the Cancel button: always CancelAnswer, whatever the dialog.
+// (It used to share one function with OK, which turned an empty answer
+// into "yes" for a dialog with nothing to type — so Cancel on a dialog with
+// nothing to type said yes.)
+func (u *UI) cancel() { u.reply(CancelAnswer) }
+
+// ok is the confirming button. A dialog with a typed field answers what was
+// typed; a plain one answers "yes".
+func (u *UI) ok() {
 	if u.dlg == nil {
 		return
 	}
-	if u.dlg.want == "" && text == "" {
-		// A plain Yes/Cancel dialog: OK means yes, and the flasher's
-		// Confirm contract is "return the typed device path", so the
-		// literal answer is what the caller asked for.
-		text = "yes"
+	if u.dlg.want != "" {
+		u.reply(strings.TrimSpace(u.confirmEd.Text()))
+		return
+	}
+	u.reply("yes")
+}
+
+// reply sends one answer and closes the dialog.
+func (u *UI) reply(text string) {
+	if u.dlg == nil {
+		return
 	}
 	select {
 	case u.dlg.reply <- text:
@@ -753,6 +1092,7 @@ func (u *UI) answer(text string) {
 	}
 	u.dlg = nil
 	u.confirmEd.SetText("")
+	u.holdStart, u.holdFrac, u.planOpen = time.Time{}, 0, false
 }
 
 // ask puts a modal question on screen and blocks the calling (job)
@@ -789,138 +1129,295 @@ func (u *UI) page(gtx C) D {
 	)
 }
 
-// topBar is the mockup's one-line-each frame: who this iPod is, what the
-// window is about to do, and the ONE primary button that does it.
+// topBar is the window's one header: the brand, who this iPod is and what
+// it is doing, and the actions — the ONE primary button, Eject beside it,
+// and the "···" menu.
 //
-// The button's label is the decision (State.Primary): Install Core on a stock
-// iPod, Sync when the library and the device differ, Update when a newer
-// release is known, Eject when there is nothing left. Eject is also offered
-// beside Sync, because "sync, then unplug" is one session and the second half
-// should not need another screen.
+// The button's label is the decision (State.Primary), spelled as what it
+// will do (State.PrimaryLabel): "Install Core" on a stock iPod, "Sync 7
+// albums" when the library and the device differ, "Update to v0.2.2" when a
+// newer release is known, Eject when there is nothing left. While a job that
+// can be stopped runs, a Cancel takes the primary's place.
+// NoticeFor is how long a State.Notice holds the header's line 2.
+const NoticeFor = 5 * time.Second
+
 func (u *UI) topBar(gtx C) D {
-	head, sub := u.topStatus()
-	act := u.st.Primary()
-	busy := u.st.Busy()
-	return layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.
+	if u.st.Notice != "" && u.now().Sub(u.st.NoticeAt) < NoticeFor {
+		// Ask for the frame that takes the notice down again.
+		gtx.Execute(op.InvalidateCmd{At: u.st.NoticeAt.Add(NoticeFor)})
+	}
+	dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.
 		Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx C) D {
-					gtx.Constraints.Max.X = gtx.Constraints.Max.X / 3
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(u.line(16, u.pal.Ink, u.deviceHead())),
-						layout.Rigid(u.line(11, u.pal.Muted, u.deviceSub())),
-					)
-				}),
-				layout.Flexed(1, func(gtx C) D {
-					return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx C) D {
-						gtx.Constraints.Min.X = gtx.Constraints.Max.X
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(u.line(13, u.pal.Ink, head)),
-							layout.Rigid(u.line(11, u.pal.Muted, sub)),
-						)
-					})
-				}),
-				layout.Rigid(func(gtx C) D {
-					if act == ActionNone {
-						return D{}
-					}
-					return u.button(gtx, btn{&u.primaryBtn, act.Label(), true, !busy})
-				}),
-				layout.Rigid(func(gtx C) D {
-					// The secondary Eject, only where the primary is
-					// something else and there is a volume to let go of.
-					if act == ActionEject || act == ActionNone || u.st.Device.Volume == "" {
-						return D{}
-					}
-					return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx C) D {
-						return u.button(gtx, btn{&u.ejectBtn, "Eject", false, !busy})
-					})
-				}),
+				layout.Rigid(u.brand),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(20)}.Layout),
+				layout.Flexed(1, u.deviceBlock),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(u.actions),
 			)
 		})
+	u.topH = dims.Size.Y
+	return dims
 }
 
-// deviceHead is the iPod's name, or what the window is looking for.
-func (u *UI) deviceHead() string {
+// brand is the lockup at the left of the top bar: the boot screen's mark and
+// the word.
+func (u *UI) brand(gtx C) D {
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx C) D { return drawMark(gtx, unit.Dp(22), u.pal.Ink, u.pal.Surface) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx C) D {
+			l := material.Label(u.th, unit.Sp(16), "Core")
+			l.Font.Weight = font.Bold
+			l.Color = u.pal.Ink
+			l.MaxLines = 1
+			return l.Layout(gtx)
+		}),
+	)
+}
+
+// deviceBlock is the two lines in the middle of the bar: the iPod's name
+// (and its model, when the name is one the user gave it), and one status
+// line.
+func (u *UI) deviceBlock(gtx C) D {
+	name, model := u.headName()
+	nameCol, weight := u.pal.Ink, font.Bold
 	if !u.st.Device.Found {
-		return "No iPod"
+		nameCol, weight = u.pal.Muted, font.SemiBold
 	}
-	return u.st.Device.DisplayName()
+	status, statusCol := u.statusLine()
+	// 1 dp above and below: the bar keeps its height, and the two lines
+	// sit on the buttons' middle.
+	lines := func(gtx C) D {
+		return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
+			return u.deviceLines(gtx, name, model, nameCol, weight, status, statusCol)
+		})
+	}
+	if j := u.st.Job; j != nil && j.Failed && j.Kind != JobCheck {
+		// A failure is announced here and explained in the log: the
+		// status line is the way in.
+		return u.statusBtn.Layout(gtx, func(gtx C) D {
+			dims := lines(gtx)
+			defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+			pointer.CursorPointer.Add(gtx.Ops)
+			return dims
+		})
+	}
+	return lines(gtx)
 }
 
-// deviceSub is the firmware and the size, one line: the mockup's
-// "Core v0.1.3 · up to date · 20.3 GB of 74.5 GB".
-func (u *UI) deviceSub() string {
+// deviceLines is the device block's two lines.
+func (u *UI) deviceLines(gtx C, name, model string, nameCol color.NRGBA, weight font.Weight,
+	status string, statusCol color.NRGBA) D {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					l := material.Label(u.th, unit.Sp(14), name)
+					l.Font.Weight = weight
+					l.Color = nameCol
+					l.MaxLines = 1
+					l.Truncator = " "
+					return l.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx C) D {
+					if model == "" {
+						return D{}
+					}
+					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				layout.Flexed(1, func(gtx C) D {
+					if model == "" {
+						return D{}
+					}
+					l := material.Label(u.th, unit.Sp(12.5), model)
+					l.Color = u.pal.Muted
+					l.MaxLines = 1
+					l.Truncator = " "
+					return l.Layout(gtx)
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+		// Not u.line: its 2 dp under the line would hang below the block
+		// and lift both lines off the buttons' middle.
+		layout.Rigid(func(gtx C) D {
+			l := material.Label(u.th, unit.Sp(11.5), status)
+			l.Color = statusCol
+			l.MaxLines = 1
+			l.Truncator = " "
+			return l.Layout(gtx)
+		}),
+	)
+}
+
+// headName is line 1 of the device block: what to call this iPod, and the
+// model beside it when the first half is a name the user chose. A name is
+// remembered in config.json against the disk's serial; without one the
+// model IS the name, and saying it twice would be noise.
+func (u *UI) headName() (name, model string) {
 	d := u.st.Device
 	if !d.Found {
-		if u.st.Detecting {
-			return "watching every two seconds"
-		}
-		return "not connected"
+		return "No iPod yet", ""
 	}
-	var parts []string
-	switch {
-	case d.Installed.Kind == fwpart.Other:
-		parts = append(parts, "Apple firmware")
-	case installedTag(d.Firmware) != "":
-		parts = append(parts, "Core "+installedTag(d.Firmware))
-	default:
-		parts = append(parts, "Core")
+	m := strings.TrimSpace(d.Model)
+	if m == "" {
+		m = DefaultDeviceName
 	}
-	switch {
-	case u.st.UpdateAvailable():
-		parts = append(parts, u.st.Release.Tag+" available")
-	case u.st.Release.Checked && u.st.Release.Err == "":
-		parts = append(parts, "up to date")
+	if u.st.Phase() == PhaseNotInstalled {
+		return m, "Apple firmware"
 	}
-	if sz := u.sizeLine(); sz != "" {
-		parts = append(parts, sz)
+	if n := strings.TrimSpace(d.Name); n != "" {
+		return n, m
 	}
-	return strings.Join(parts, "  ·  ")
+	return m, ""
 }
 
-// topStatus is the middle of the bar: the sentence that says what the one
-// button is for. A running job owns it — a status line that still says "7
-// albums to sync" while the sync runs is a line nobody reads twice.
-func (u *UI) topStatus() (head, sub string) {
-	if u.st.Busy() || (u.st.Job != nil && u.st.Job.Failed) {
-		return u.st.StatusLine(), u.jobSub()
+// statusLine is line 2 of the device block, and its colour.
+//
+// A running job owns it ("sync: copying … · 42%"), except the update check,
+// which is the "checking…" in the ordinary line — it runs by itself at
+// launch, and a header that flickers to "check for updates: asking GitHub"
+// every time the app opens is a header shouting about nothing. A job that
+// failed is the one warning, in the accent; the check never fails here (its
+// errors go to the log).
+func (u *UI) statusLine() (string, color.NRGBA) {
+	d, j := u.st.Device, u.st.Job
+	if j != nil && j.Kind != JobCheck {
+		switch {
+		case j.Running():
+			s := u.st.StatusLine()
+			if j.Pct > 0 && j.Pct < 1 {
+				s += fmt.Sprintf("  ·  %.0f%%", j.Pct*100)
+			}
+			return s, u.pal.MutedD
+		case j.Failed:
+			return u.st.StatusLine() + "  ·  see the log", u.pal.Accent
+		}
+	}
+	if u.st.Notice != "" && u.now().Sub(u.st.NoticeAt) < NoticeFor {
+		return u.st.Notice, u.pal.MutedD
+	}
+	if u.st.FirmwareTooOld() {
+		return TooOldText, u.pal.Accent
+	}
+	if u.st.Ejected && d.Found {
+		return "Ejected — safe to unplug", u.pal.MutedD
 	}
 	switch u.st.Phase() {
 	case PhaseLooking:
-		return "Looking for an iPod…", "hold Select + Menu, then Select + Play at the Apple logo"
+		if u.st.Detecting {
+			return "looking every two seconds", u.pal.Muted
+		}
+		return "not connected", u.pal.Muted
 	case PhaseNotInstalled:
-		return "Core is not installed on this iPod",
-			"Apple's firmware is backed up to a file first"
+		// The size, not the free space: nothing of ours is on it yet,
+		// and "74.5 GB free of 74.5" reads as a riddle.
+		n := d.Capacity
+		if n <= 0 {
+			n = d.Size
+		}
+		if n <= 0 {
+			return "", u.pal.Muted
+		}
+		v, unit := humanBinary(n)
+		return v + " " + unit, u.pal.Muted
 	}
-	if n := u.st.PendingAlbums(); n > 0 {
-		return fmt.Sprintf("%d album%s to sync", n, plural(n)),
-			fmt.Sprintf("%d tracks · %s · from %s", u.st.PendingTracks(),
-				disk.HumanSize(u.st.PendingBytes()), sourceName(u.st.Source))
+	var parts []string
+	if tag := installedTag(d.Firmware); tag != "" {
+		parts = append(parts, "Core "+tag)
+	} else {
+		parts = append(parts, "Core")
 	}
-	if u.st.LibraryChanged {
-		return "The library changed", "renamed files are copied again on the next sync"
+	switch {
+	case j.Running() && j.Kind == JobCheck:
+		parts = append(parts, "checking…")
+	case u.st.UpdateAvailable():
+		parts = append(parts, u.st.Release.Tag+" available")
+	case u.st.Release.Checked && u.st.Release.Err == "" && u.st.Release.Tag != "":
+		parts = append(parts, "up to date")
 	}
-	if u.st.UpdateAvailable() {
-		return "A newer Core is available", u.st.Release.Tag + " · " + u.st.Release.Asset
+	if sp := u.spaceText(); sp != "" {
+		parts = append(parts, sp)
 	}
-	if len(u.st.Albums) > 0 {
-		return "Everything is on the iPod", "eject before pulling the cable"
-	}
-	return "Ready", "choose a music folder to see your albums"
+	return strings.Join(parts, "  ·  "), u.pal.Muted
 }
 
-// jobSub is the second line while a job runs: its own progress text, which
-// the status line above has already had the job name prefixed to.
-func (u *UI) jobSub() string {
-	if u.st.Job == nil {
-		return ""
+// spaceText is "51.2 GB free of 74.5": the music volume's free space and
+// size as its file system reports them, in the binary units Explorer calls
+// GB. The total's unit is left off when it is the same as the free figure's.
+// Before the volume has been read it is the disk's size, and with neither it
+// is nothing.
+func (u *UI) spaceText() string {
+	d := u.st.Device
+	if d.Capacity > 0 {
+		fv, fu := humanBinary(d.Free)
+		tv, tu := humanBinary(d.Capacity)
+		if fu == tu {
+			return fv + " " + fu + " free of " + tv
+		}
+		return fv + " " + fu + " free of " + tv + " " + tu
 	}
-	if u.st.Job.Pct > 0 && u.st.Job.Pct < 1 {
-		return fmt.Sprintf("%.0f%%", u.st.Job.Pct*100)
+	if d.Size > 0 {
+		v, unit := humanBinary(d.Size)
+		return v + " " + unit
 	}
 	return ""
+}
+
+// humanBinary is a byte count in 1024-based units with the names Windows
+// gives them (GB, MB, KB), one decimal for GB.
+func humanBinary(n int64) (string, string) {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f", float64(n)/(1<<30)), "GB"
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f", float64(n)/(1<<20)), "MB"
+	default:
+		return fmt.Sprintf("%.0f", float64(n)/(1<<10)), "KB"
+	}
+}
+
+// actions is the right of the bar: primary (or Cancel), Eject, "···".
+func (u *UI) actions(gtx C) D {
+	act := u.st.Primary()
+	busy := u.st.Busy()
+	if u.st.Ejected && act == ActionEject {
+		act = ActionNone
+	}
+	var children []layout.FlexChild
+	add := func(w layout.Widget) {
+		if len(children) > 0 {
+			children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout))
+		}
+		children = append(children, layout.Rigid(w))
+	}
+	switch {
+	case u.st.CanCancel():
+		add(func(gtx C) D { return u.button(gtx, btn{&u.headCancelBtn, "Cancel", false, true}) })
+	case act != ActionNone:
+		add(func(gtx C) D {
+			return u.button(gtx, btn{&u.primaryBtn, u.st.PrimaryLabel(), true, !busy})
+		})
+	}
+	// Eject beside the primary, wherever the primary is something else
+	// and there is a volume to let go of: "sync, then unplug" is one
+	// session.
+	if act != ActionEject && act != ActionNone && u.st.Device.Volume != "" {
+		add(func(gtx C) D { return u.button(gtx, btn{&u.ejectBtn, "Eject", false, !busy}) })
+	}
+	add(func(gtx C) D { return u.button(gtx, btn{&u.menuBtn, "···", false, true}) })
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// Title is the window's title: the iPod's name while one is connected.
+func (u *UI) Title() string {
+	if !u.st.Device.Found {
+		return "Core"
+	}
+	name, _ := u.headName()
+	return name + " · Core"
 }
 
 // sourceName is the last element of the music folder, for a line that has
@@ -980,7 +1477,7 @@ func (u *UI) tabItem(gtx C, t Tab, idx int) D {
 	label := t.String()
 	if t == TabLibrary {
 		if n := u.fixCount(); n > 0 {
-			label += "  " + itoa(n)
+			label += " · " + itoa(n)
 		}
 	}
 	return u.tabClicks[idx].Layout(gtx, func(gtx C) D {
@@ -1036,7 +1533,10 @@ func (u *UI) tabNote() string {
 		}
 		return ""
 	default:
-		return u.st.CLIPath
+		if u.st.CheckedAt.IsZero() {
+			return "checked for updates: never"
+		}
+		return "checked for updates " + ago(time.Since(u.st.CheckedAt))
 	}
 }
 
@@ -1070,51 +1570,82 @@ func (u *UI) hairline(gtx C) D {
 	return D{Size: sz}
 }
 
-// footer is the bottom strip: what is on the iPod, and the music folder with
-// the one link that changes it.
+// footer is the bottom strip: the music folder with the one link that
+// changes it on the left, and the log strip on the right.
 func (u *UI) footer(gtx C) D {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(u.hairline),
 		layout.Rigid(func(gtx C) D {
-			return layout.Inset{Top: unit.Dp(9), Bottom: unit.Dp(9), Left: unit.Dp(14), Right: unit.Dp(14)}.
+			pad := unit.Dp(9)
+			if u.st.NowPlaying != nil {
+				// The bar's 28 dp buttons: less air, nearly the same footer.
+				pad = 5
+			}
+			return layout.Inset{Top: pad, Bottom: pad, Left: unit.Dp(14), Right: unit.Dp(14)}.
 				Layout(gtx, func(gtx C) D {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					third := gtx.Constraints.Max.X / 3
+					// The footer is the music folder and, while a track is
+					// loaded, the player: the player takes the left half and
+					// the folder moves to the right. The log is not here any
+					// more — it is behind "···" (Show the log, Ctrl+L) and a
+					// failed job's status line in the header.
+					folder := func(gtx C) D {
+						if u.st.Phase() != PhaseReady {
+							// No Fix tab to go to.
+							return u.line(11, u.pal.Muted, u.footerSource())(gtx)
+						}
+						return u.folderLink.Layout(gtx, func(gtx C) D {
+							dims := u.line(11, u.pal.Muted, u.footerSource())(gtx)
+							defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+							pointer.CursorPointer.Add(gtx.Ops)
+							return dims
+						})
+					}
+					np := u.st.NowPlaying
+					playing := np != nil && np.TrackIndex < len(np.Album.TrackList)
+					if !playing {
+						return folder(gtx)
+					}
+					// The player takes what the folder leaves; the folder
+					// keeps at most a third.
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(u.text(11, u.pal.MutedD, u.footerLine())),
 						layout.Flexed(1, func(gtx C) D {
-							return layout.E.Layout(gtx, u.line(11, u.pal.Muted, u.footerSource()))
+							gtx.Constraints.Min.X = gtx.Constraints.Max.X
+							// The wheel anywhere over the player is the
+							// volume (wheelArea, over the bar, passing
+							// clicks through to the buttons).
+							d := u.nowPlayingBar(gtx)
+							u.wheelArea(gtx, d.Size)
+							return d
 						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 						layout.Rigid(func(gtx C) D {
-							if !u.pickerOK {
-								return D{}
-							}
-							return u.changeBtn.Layout(gtx, func(gtx C) D {
-								col := u.pal.Accent
-								if u.st.Busy() {
-									col = u.pal.SelSub
-								}
-								return u.text(11, col, "Change")(gtx)
-							})
+							gtx.Constraints.Max.X = third
+							return folder(gtx)
 						}),
 					)
 				})
 		}),
 	)
+	u.footH = dims.Size.Y
+	return dims
 }
 
-// progress is the one place Accent is allowed to move. An indeterminate
+// progress is the job's bar, in Ink like everything else that moves —
+// except a failed job, which keeps its full bar in Accent: that is a
+// warning, the one thing terracotta is for. An indeterminate
 // job draws the full track in the muted colour rather than a fake
 // fraction: a bar that claims 40 % when nothing knows the total is a bar
 // that teaches people to distrust it.
 func (u *UI) progress(gtx C) D {
 	pct := float32(0)
-	col := u.pal.Accent
+	col := u.pal.Ink
 	switch {
 	case u.st.Job == nil:
 		col = u.pal.Trk
 	case u.st.Job.Failed:
-		pct, col = 1, u.pal.Muted2
+		pct, col = 1, u.pal.Accent
 	case u.st.Job.Pct < 0:
 		pct, col = 1, u.pal.Muted2
 	default:
@@ -1144,7 +1675,7 @@ func (u *UI) body(gtx C) D {
 	case TabLibrary:
 		return u.libraryPane(gtx)
 	case TabDetails:
-		return u.detailsPane(gtx)
+		return u.ipodPane(gtx)
 	default:
 		return u.albumsPane(gtx)
 	}
@@ -1158,45 +1689,96 @@ func (u *UI) body(gtx C) D {
 // does not notice things by itself.
 func (u *UI) lookingPane(gtx C) D {
 	d := u.st.Device
-	return u.topPlate(gtx, func(gtx C) D {
-		return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			var rows []layout.FlexChild
-			add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
+	// Direction centres within Min, so the pane claims the whole body.
+	gtx.Constraints.Min = gtx.Constraints.Max
+	return layout.Center.Layout(gtx, func(gtx C) D {
+		if w := gtx.Dp(480); gtx.Constraints.Max.X > w {
+			gtx.Constraints.Max.X = w
+		}
+		gtx.Constraints.Min = image.Point{}
+		var rows []layout.FlexChild
+		add := func(w layout.Widget) { rows = append(rows, layout.Rigid(w)) }
+		gap := func(h unit.Dp) { rows = append(rows, layout.Rigid(layout.Spacer{Height: h}.Layout)) }
+		centred := func(size unit.Sp, col color.NRGBA, txt string, weight font.Weight) layout.Widget {
+			return func(gtx C) D {
+				l := material.Label(u.th, size, txt)
+				l.Color = col
+				l.Font.Weight = weight
+				l.Alignment = text.Middle
+				l.MaxLines = 3
+				return l.Layout(gtx)
+			}
+		}
 
-			add(u.text(18, u.pal.Ink, u.lookingHead()))
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
-			add(u.wrap(12, u.pal.Muted, "Plug the iPod into a port that carries data, then put it in disk mode:"))
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
-			add(u.line(13, u.pal.Ink, "1.  Hold  Select + Menu  until it resets"))
-			add(u.line(13, u.pal.Ink, "2.  At the Apple logo, hold  Select + Play"))
-			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
-			add(u.wrap(11, u.pal.Muted2, u.lookingNote()))
-			if d.Err != "" {
-				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
-				add(u.line(11, u.pal.Muted2, "last look:  "+d.Err))
-			}
-			if d.ElevationAdviceNeeded {
-				add(u.wrap(11, u.pal.Accent, "Reading a raw disk needs Administrator: close this and start it with Run as administrator."))
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+		add(func(gtx C) D { return drawMark(gtx, unit.Dp(48), u.pal.Ink, u.pal.Surface) })
+		gap(16)
+		add(centred(18, u.pal.Ink, u.lookingHead(), font.Bold))
+		gap(8)
+		add(centred(12.5, u.pal.Muted, "Use a cable that carries data, then put the iPod in disk mode. "+
+			"This window will notice on its own.", font.Normal))
+		gap(16)
+		add(func(gtx C) D {
+			return u.step(gtx, "1.", []string{"Hold", "Select", "+", "Menu", "until it resets"})
 		})
+		gap(8)
+		add(func(gtx C) D {
+			return u.step(gtx, "2.", []string{"At the Apple logo, hold", "Select", "+", "Play"})
+		})
+		if !u.st.Detecting {
+			gap(14)
+			add(centred(11, u.pal.Muted2, "Auto-detect is off in this window (--no-detect).", font.Normal))
+		}
+		if d.Err != "" && d.Err != "the iPod was unplugged" {
+			gap(14)
+			add(centred(11, u.pal.Muted2, "last look:  "+d.Err, font.Normal))
+		}
+		if d.ElevationAdviceNeeded {
+			gap(8)
+			add(centred(11.5, u.pal.Accent, "Reading a raw disk needs Administrator: close this and "+
+				"start it with Run as administrator.", font.Normal))
+		}
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, rows...)
 	})
+}
+
+// keyCaps names the words in a step that are the iPod's buttons.
+var keyCaps = map[string]bool{"Select": true, "Menu": true, "Play": true}
+
+// step is one line of instructions with the button names drawn as caps.
+func (u *UI) step(gtx C, n string, words []string) D {
+	children := []layout.FlexChild{layout.Rigid(u.text(13, u.pal.Muted, n))}
+	for _, w := range words {
+		w := w
+		children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout))
+		if keyCaps[w] {
+			children = append(children, layout.Rigid(func(gtx C) D { return u.keyCap(gtx, w) }))
+			continue
+		}
+		children = append(children, layout.Rigid(u.text(13, u.pal.Ink, w)))
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// keyCap is a button name in a small bordered cap, the way a manual draws
+// a key.
+func (u *UI) keyCap(gtx C, label string) D {
+	return widget.Border{Color: u.pal.Muted2, CornerRadius: unit.Dp(4), Width: unit.Dp(1)}.Layout(gtx,
+		func(gtx C) D {
+			return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(7), Right: unit.Dp(7)}.
+				Layout(gtx, func(gtx C) D {
+					l := material.Label(u.th, unit.Sp(11.5), label)
+					l.Font.Weight = font.SemiBold
+					l.Color = u.pal.Ink
+					return l.Layout(gtx)
+				})
+		})
 }
 
 func (u *UI) lookingHead() string {
 	if u.st.Device.Err == "the iPod was unplugged" {
 		return "The iPod was unplugged"
 	}
-	return "Looking for an iPod…"
-}
-
-func (u *UI) lookingNote() string {
-	if u.st.Detecting {
-		return "This window checks every two seconds. It will find the iPod on its own — " +
-			"there is nothing to press."
-	}
-	return "Auto-detect is off in this window (--no-detect)."
+	return "Plug in your iPod"
 }
 
 // installPane is the one screen a stock iPod gets: what was found, what
@@ -1210,34 +1792,63 @@ func (u *UI) lookingNote() string {
 func (u *UI) installPane(gtx C) D {
 	d := u.st.Device
 	busy := u.st.Busy()
+	model := strings.TrimSpace(d.Model)
+	if model == "" {
+		model = DefaultDeviceName
+	}
 	return u.topPlate(gtx, func(gtx C) D {
 		return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return drawMark(gtx, unit.Dp(32), u.pal.Ink, u.pal.Plate) }),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 				layout.Rigid(u.line(18, u.pal.Ink, "Core is not installed on this iPod")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-				layout.Rigid(u.line(13, u.pal.Ink, "found      "+d.DisplayName()+"  ·  "+disk.HumanSize(d.Size))),
-				layout.Rigid(u.line(12, u.pal.Muted, "           "+d.Path+"  ·  "+installedText(d))),
+				layout.Rigid(u.line(13, u.pal.Ink, "found  "+model+"  ·  "+disk.HumanSize(d.Size))),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 				layout.Rigid(u.wrap(12, u.pal.MutedD, u.appleBackupPromise())),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(u.wrap(11, u.pal.Muted, "Then the image is written and read back, and CORECFG.DAT, "+
-					"CORELOG.BIN and Music\\ are created on the music volume — the firmware can "+
-					"overwrite those files but cannot create them.")),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(u.wrap(11, u.pal.Muted2, "The write asks for the device path typed out first, and cannot be "+
-					"stopped once it starts. If anything goes wrong: hold Select+Menu, then Select+Play at the "+
-					"Apple logo. That is disk mode and it is in ROM.")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(u.wrap(12, u.pal.MutedD, "Then Core is written and read back. Your music is untouched.")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(u.wrap(11, u.pal.Muted, "If anything goes wrong, hold Select+Menu, then Select+Play "+
+					"at the Apple logo: that is disk mode, it is in ROM, and this window will find the iPod again.")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 				layout.Rigid(func(gtx C) D {
-					return u.buttonRow(gtx,
-						btn{&u.installBtn, "Install Core", true, !busy},
-						btn{&u.installFileBtn, "Install from a file…", false, !busy && u.pickerOK},
-					)
+					bs := []btn{{&u.installBtn, "Install Core", true, !busy}}
+					if f := u.st.InstallFile; f != "" {
+						bs = append(bs,
+							btn{&u.installFileBtn, "Install from " + shortName(fileBase(f), 28), false, !busy},
+							btn{&u.installPickBtn, "Choose another file…", false, !busy && u.pickerOK})
+					} else {
+						bs = append(bs, btn{&u.installFileBtn, "Install from a file…", false, !busy && u.pickerOK})
+					}
+					return u.buttonRow(gtx, bs...)
 				}),
 			)
 		})
 	})
+}
+
+// shortName cuts a file name to n runes from the middle, keeping its end
+// (the extension and the version usually sit there), so a long download
+// name cannot push the Install row past a 720 dp window.
+func shortName(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n || n < 5 {
+		return s
+	}
+	head := (n - 1) / 2
+	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
+}
+
+// fileBase is the last element of a path written on either OS, for a button
+// that has room for a file name and not for where it lives.
+func fileBase(p string) string {
+	p = strings.TrimRight(p, `\/`)
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // topPlate is a plate that hugs its content at the top of the space it
@@ -1253,24 +1864,19 @@ func (u *UI) topPlate(gtx C, w layout.Widget) D {
 	)
 }
 
-// installedText is the classification, in the words fwpart chose, with
-// a fallback for a device nobody managed to classify.
-func installedText(d Device) string {
-	if s := strings.TrimSpace(d.Installed.Description); s != "" {
-		return s
-	}
-	return "firmware not recognised"
+// appleBackupPromise is the Install screen's first sentence: what happens
+// to Apple's firmware, in words. The file's name (it carries today's date)
+// is in the log, where somebody looking for the file will look.
+func (u *UI) appleBackupPromise() string {
+	return "Apple's firmware on this iPod is saved to a file first — it is the only copy there is, " +
+		"and it is never deleted."
 }
 
-// appleBackupPromise names the file Apple's firmware is about to be
-// copied into. It calls the clock, which a layout function should not
-// do lightly — but the name carries today's date and a promise about a
-// file with a different name in it is not a promise.
-func (u *UI) appleBackupPromise() string {
-	name := flasher.AppleBackupFileName(u.st.Device.Serial, time.Now())
-	return "Apple's firmware on this iPod is copied to " + name +
-		" before a single byte is written. Apple does not distribute it and it cannot be " +
-		"taken from another iPod, so that file is the only copy there is — it is never deleted."
+// appleBackupName is the file that promise is about: the name the flasher
+// will give Apple's firmware for this serial today. The log carries it (see
+// startRefresh); the screen says it in words.
+func appleBackupName(serial string) string {
+	return flasher.AppleBackupFileName(serial, time.Now())
 }
 
 // --- the iPod's name and the firmware note ------------------------------
@@ -1280,52 +1886,6 @@ func (u *UI) appleBackupPromise() string {
 // at 340 px, and a pane that changes height because the string in it got
 // longer is a pane that pushes its button row off the bottom of the
 // window on the machine where it matters.
-
-// nameRow is the iPod's name: a label until it is clicked, then a field
-// with Save and Cancel.
-//
-// It shows DisplayName — the friendly name, else the volume label as FAT
-// stores it, else "iPod Video 80 GB". "Apple iPod" (the SCSI model string
-// every iPod ever made reports) is never a name; the hardware line below
-// carries what this device actually is.
-func (u *UI) nameRow(gtx C) D {
-	d := u.st.Device
-	if u.editingName {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx C) D {
-						return u.field(gtx, &u.nameEd, "Brandon's iPod")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return u.button(gtx, btn{&u.nameSaveBtn, "Save", true, !u.st.Busy()})
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return u.button(gtx, btn{&u.nameCancelBtn, "Cancel", false, true})
-					}),
-				)
-			}),
-			layout.Rigid(u.line(11, u.pal.Muted2, u.namePreview())),
-		)
-	}
-	head := d.DisplayName()
-	if d.Size > 0 {
-		head += "  ·  " + disk.HumanSize(d.Size)
-	}
-	hint := "click to rename"
-	if u.st.Busy() {
-		hint = ""
-	}
-	return u.nameClick.Layout(gtx, func(gtx C) D {
-		return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-			layout.Flexed(1, u.line(14, u.pal.Ink, head)),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(u.text(10, u.pal.Muted2, hint)),
-		)
-	})
-}
 
 // namePreview is the sentence under the field while it is being typed
 // in. A FAT label is eleven upper-case ASCII bytes, so most names come
@@ -1344,18 +1904,6 @@ func (u *UI) namePreview() string {
 	default:
 		return "Windows will show it as " + label + " — a FAT label is 11 upper-case ASCII bytes."
 	}
-}
-
-// cancelLabel says out loud that the two write jobs cannot be stopped
-// between the body write and the directory write. A Cancel that would
-// leave a partition with a new body and an old directory row is a
-// Cancel that bricks the device, so it is not offered — the button says
-// why instead of pretending.
-func (u *UI) cancelLabel() string {
-	if u.st.Job != nil && u.st.Job.Kind.Writes() && u.st.Busy() {
-		return "Cannot cancel once writing"
-	}
-	return "Cancel"
 }
 
 // flashNote is the sentence that decides whether a user can flash at
@@ -1383,111 +1931,7 @@ func (u *UI) flashNote() string {
 	return "Needs root — the sudo line goes to the log. The whole partition is backed up first and the write is read back."
 }
 
-// --- the log pane -------------------------------------------------------
-
-func (u *UI) logPane(gtx C) D {
-	return u.plate(gtx, func(gtx C) D {
-		return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx C) D {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx C) D {
-					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(u.text(11, u.pal.Muted2, fmt.Sprintf("LOG · %d lines", len(u.st.Log)))),
-						layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
-						layout.Rigid(func(gtx C) D {
-							return u.button(gtx, btn{&u.copyBtn, "Copy", false, len(u.st.Log) > 0})
-						}),
-					)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-				layout.Flexed(1, func(gtx C) D {
-					list := material.List(u.th, &u.logList)
-					list.Indicator.Color = u.pal.SelSub
-					return list.Layout(gtx, len(u.st.Log), func(gtx C, i int) D {
-						l := material.Label(u.th, unit.Sp(11), u.st.Log[i])
-						l.Font = Mono
-						l.Color = u.pal.SelTrk
-						l.MaxLines = 1
-						return l.Layout(gtx)
-					})
-				}),
-			)
-		})
-	})
-}
-
 // --- the modal ----------------------------------------------------------
-
-func (u *UI) dialog(gtx C) D {
-	// The scrim. It is drawn over the whole window, dims what is behind
-	// it, and is the visual half of the input block set up in Layout.
-	paint.FillShape(gtx.Ops, color.NRGBA{R: 0x19, G: 0x14, B: 0x10, A: 0x99},
-		clip.Rect{Max: gtx.Constraints.Min}.Op())
-
-	return layout.Center.Layout(gtx, func(gtx C) D {
-		if w := gtx.Constraints.Max.X - gtx.Dp(64); w < gtx.Constraints.Max.X {
-			gtx.Constraints.Max.X = w
-		}
-		gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		if h := gtx.Constraints.Max.Y - gtx.Dp(48); h > 0 {
-			gtx.Constraints.Max.Y = h
-		}
-		gtx.Constraints.Min.Y = 0
-		return u.plate(gtx, func(gtx C) D {
-			return layout.UniformInset(unit.Dp(14)).Layout(gtx, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(u.text(16, u.pal.Ink, u.dlg.title)),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						lines := strings.Split(u.dlg.body, "\n")
-						// A Gio list fills its main axis, so a short
-						// plan in a tall window would leave the two
-						// buttons stranded at the bottom of an empty
-						// box. Cap the height at what the text actually
-						// needs and the dialog shrinks to its content;
-						// a long plan still scrolls.
-						if want := len(lines) * gtx.Sp(unit.Sp(16)); want < gtx.Constraints.Max.Y {
-							gtx.Constraints.Max.Y = want
-						}
-						gtx.Constraints.Min.Y = 0
-						list := material.List(u.th, &u.dlgBody)
-						list.Indicator.Color = u.pal.SelSub
-						return list.Layout(gtx, len(lines), func(gtx C, i int) D {
-							l := material.Label(u.th, unit.Sp(11), lines[i])
-							l.Font = Mono
-							l.Color = u.pal.MutedD
-							l.MaxLines = 1
-							l.Truncator = " "
-							return l.Layout(gtx)
-						})
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(u.text(13, u.pal.Ink, u.dlg.prompt)),
-					layout.Rigid(func(gtx C) D {
-						if u.dlg.want == "" {
-							return D{}
-						}
-						return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx C) D {
-							return u.field(gtx, &u.confirmEd, u.dlg.want)
-						})
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-					layout.Rigid(func(gtx C) D {
-						ok := u.dlg.want == "" || strings.TrimSpace(u.confirmEd.Text()) == u.dlg.want
-						return layout.Flex{}.Layout(gtx,
-							layout.Rigid(func(gtx C) D {
-								return u.button(gtx, btn{&u.dlgCancel, "Cancel", false, true})
-							}),
-							layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
-							layout.Rigid(func(gtx C) D {
-								return u.button(gtx, btn{&u.dlgOK, u.dlg.okLabel, true, ok})
-							}),
-						)
-					}),
-				)
-			})
-		})
-	})
-}
 
 // --- small drawing helpers ---------------------------------------------
 
@@ -1534,12 +1978,15 @@ func (u *UI) text(size unit.Sp, col color.NRGBA, txt string) layout.Widget {
 // is the only elevation this design has. No shadows — the device has
 // none and a drop shadow under a rectangle is the thing that makes a
 // flat palette look like a mistake.
-func (u *UI) plate(gtx C, w layout.Widget) D {
-	return widget.Border{Color: u.pal.Border, CornerRadius: unit.Dp(8), Width: unit.Dp(1)}.Layout(gtx,
+func (u *UI) plate(gtx C, w layout.Widget) D { return u.plateR(gtx, 8, w) }
+
+// plateR is plate with a chosen corner radius.
+func (u *UI) plateR(gtx C, radius unit.Dp, w layout.Widget) D {
+	return widget.Border{Color: u.pal.Border, CornerRadius: radius, Width: unit.Dp(1)}.Layout(gtx,
 		func(gtx C) D {
 			return layout.Stack{}.Layout(gtx,
 				layout.Expanded(func(gtx C) D {
-					r := gtx.Dp(8)
+					r := gtx.Dp(radius)
 					defer clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, r).Push(gtx.Ops).Pop()
 					paint.ColorOp{Color: u.pal.Plate}.Add(gtx.Ops)
 					paint.PaintOp{}.Add(gtx.Ops)
@@ -1558,7 +2005,7 @@ func (u *UI) card(gtx C, title string, body layout.Widget) D {
 		return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx C) D {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {
-					l := material.Label(u.th, unit.Sp(9), title)
+					l := material.Label(u.th, unit.Sp(10), title)
 					l.Color = u.pal.Muted2
 					l.MaxLines = 1
 					return l.Layout(gtx)
@@ -1623,21 +2070,57 @@ func (u *UI) buttonRow(gtx C, bs ...btn) D {
 // button draws one. A disabled button keeps its shape and loses its
 // contrast rather than disappearing: a row whose buttons come and go
 // while a job runs is a row that moves under the pointer.
+//
+// The three looks are the device's. Primary is the iPod's selected row:
+// an Ink bar with Surface text. Secondary is a Surface button with a
+// hairline Border, Ink text. Disabled is the iPod's greyed row: the
+// secondary shape with Muted text — a button that is off, not a slab of
+// fill (PillOff vanishes into Onyx's plates). None of them is terracotta — that
+// is kept for warnings.
 func (u *UI) button(gtx C, b btn) D {
-	s := material.Button(u.th, b.click, b.label)
-	s.CornerRadius = unit.Dp(5)
-	s.TextSize = unit.Sp(12)
-	s.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(10), Right: unit.Dp(10)}
+	bg, fg, edge := u.pal.Surface, u.pal.Ink, u.pal.Border
 	switch {
 	case !b.enabled:
-		s.Background, s.Color = u.pal.PillOff, u.pal.Surface
+		bg, fg, edge = u.pal.Surface, u.pal.Muted, u.pal.Border
 		gtx = gtx.Disabled()
 	case b.primary:
-		s.Background, s.Color = u.pal.Accent, u.pal.Surface
-	default:
-		s.Background, s.Color = u.pal.Trk, u.pal.Ink
+		bg, fg, edge = u.pal.Ink, u.pal.Surface, u.pal.Ink
 	}
-	return s.Layout(gtx)
+	return b.click.Layout(gtx, func(gtx C) D {
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Expanded(func(gtx C) D {
+				sz := gtx.Constraints.Min
+				if b.enabled {
+					defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+					pointer.CursorPointer.Add(gtx.Ops)
+				}
+				r := gtx.Dp(5)
+				paint.FillShape(gtx.Ops, edge,
+					clip.UniformRRect(image.Rectangle{Max: sz}, r).Op(gtx.Ops))
+				w := gtx.Dp(1)
+				inner := image.Rectangle{Min: image.Pt(w, w), Max: sz.Sub(image.Pt(w, w))}
+				paint.FillShape(gtx.Ops, bg, clip.UniformRRect(inner, r-w).Op(gtx.Ops))
+				if b.click.Hovered() && b.enabled {
+					// The hover is the fill moved a step toward the
+					// text colour, the same for all three looks.
+					paint.FillShape(gtx.Ops, withAlpha(fg, 0x18),
+						clip.UniformRRect(inner, r-w).Op(gtx.Ops))
+				}
+				return D{Size: sz}
+			}),
+			layout.Stacked(func(gtx C) D {
+				return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(11), Right: unit.Dp(11)}.
+					Layout(gtx, func(gtx C) D {
+						l := material.Label(u.th, unit.Sp(12), b.label)
+						l.Font.Weight = font.Bold
+						l.Color = fg
+						l.MaxLines = 1
+						l.Alignment = text.Middle
+						return l.Layout(gtx)
+					})
+			}),
+		)
+	})
 }
 
 // --- formatting ---------------------------------------------------------
@@ -1690,6 +2173,9 @@ func keepArt(rep *librarian.Report, cands map[librarian.AlbumKey][]artfetch.Cand
 	}
 	live := map[librarian.AlbumKey]bool{}
 	for _, a := range rep.MissingArt {
+		live[a.Key] = true
+	}
+	for _, a := range rep.LowResArt {
 		live[a.Key] = true
 	}
 	var kc map[librarian.AlbumKey][]artfetch.Candidate

@@ -63,8 +63,10 @@ def _git_describe(args, fallback):
 
 # Mirrors core/meson.build: CORE_BUILD_ID (full stamp, boot screen + Boot
 # Details header) and CORE_VERSION (nearest tag alone, the About chip).
-BUILD_ID = _git_describe(["--tags", "--always", "--dirty", "--abbrev=7"], "unknown")
-VERSION = _git_describe(["--tags", "--abbrev=0"], "v0.0.0")
+# The same --match 'v[0-9]*' as meson: an `app-v…` tag (the desktop app's,
+# versioned apart) never stamps the firmware's stills.
+BUILD_ID = _git_describe(["--tags", "--match", "v[0-9]*", "--always", "--dirty", "--abbrev=7"], "unknown")
+VERSION = _git_describe(["--tags", "--match", "v[0-9]*", "--abbrev=0"], "v0.0.0")
 
 # Release override. For the gallery that ships with a tagged commit the stills
 # have to show the tag the commit is about to get, which `git describe` cannot

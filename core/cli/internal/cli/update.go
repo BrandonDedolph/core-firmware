@@ -186,9 +186,11 @@ func fetchRelease(ctx context.Context, o updateOptions) (ghrelease.Release, erro
 		}
 		return rel, nil
 	}
-	rel, err := c.Latest(ctx, o.Repo)
+	// LatestFirmware, not Latest: the desktop app is released apart under
+	// `app-v…` tags, and "the latest release" may be one of those.
+	rel, err := c.LatestFirmware(ctx, o.Repo)
 	if err != nil {
-		return ghrelease.Release{}, fmt.Errorf("looking up the latest release in %s: %w", o.Repo, err)
+		return ghrelease.Release{}, fmt.Errorf("looking up the latest firmware release in %s: %w", o.Repo, err)
 	}
 	return rel, nil
 }

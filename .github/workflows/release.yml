@@ -1,43 +1,47 @@
-# Attach the host-CLI binaries to a release.
+# Attach the desktop app's and the CLI's binaries to an app release.
 #
-# THE SPLIT THIS FILE EXISTS TO HONOUR. A release has eleven assets: core.ipod,
-# five `core` CLI binaries and five `core-app` GUI binaries. They come from
-# three different places on purpose.
+# THE SPLIT THIS FILE EXISTS TO HONOUR. The firmware and the desktop app are
+# versioned apart, and so are their releases:
 #
-#   core.ipod  built and flashed LOCALLY, by the human running
-#              tools/release.py's "next" block. CI's pinned gcc 14 and the
-#              local gcc 16 do not produce the same firmware binary, and the
-#              image on a release has to be the exact one that was verified
-#              on real hardware. CI must never overwrite it.
+#   v…         a FIRMWARE release. One asset, core.ipod, built and flashed
+#              LOCALLY by the human running tools/release.py vX.Y.Z. CI's
+#              pinned gcc 14 and the local gcc 16 do not produce the same
+#              firmware binary, and the image on a release has to be the
+#              exact one that was verified on real hardware. A `v…` tag runs
+#              no job here at all.
 #
-#   the five   built HERE, from the tag, with the same script CI runs on
-#   CLI        every push (core/cli/scripts/build-all.sh). Nobody has five
-#   binaries   machines; cross-compiling them by hand is how you end up
-#              shipping four. Pure Go, so one Linux runner makes all five.
+#   app-v…     an APP release: ten binaries, built HERE from the tag, and no
+#              core.ipod. Five `core` CLI binaries (pure Go, one Linux
+#              runner makes all five, with the same script CI runs on every
+#              push — core/cli/scripts/build-all.sh) and five `core-app` GUI
+#              binaries. core-app is a Gio window: its WINDOWS backend is
+#              pure Go and cross-builds on the same Linux runner (with
+#              -H windowsgui, so no console flashes on launch); its X11 and
+#              Cocoa backends are cgo and can only be built on their own
+#              platform. Hence three jobs, each gated on the tag's prefix:
+#              ubuntu-latest (CLI + core-app-windows + the linux/amd64 GUI),
+#              ubuntu-24.04-arm (the linux/arm64 GUI) and macos-latest (both
+#              darwin GUIs, cross-compiled between arm64 and amd64 with the
+#              SDK Xcode already has). The binaries are stamped with
+#              `git describe --match 'app-v[0-9]*'`, so a firmware tag on
+#              the same commit never becomes the app's version.
 #
-#   the five   core-app is a Gio window. Its WINDOWS backend is pure Go and
-#   core-app   cross-builds on the same Linux runner (with -H windowsgui, so
-#   binaries   no console flashes on launch); its X11 and Cocoa backends are
-#              cgo and can only be built on their own platform. Hence three
-#              jobs: ubuntu-latest (CLI + core-app-windows + the linux/amd64
-#              GUI), ubuntu-24.04-arm (the linux/arm64 GUI) and macos-latest
-#              (both darwin GUIs, cross-compiled between arm64 and amd64 with
-#              the SDK Xcode already has).
-#
-# So this workflow never creates the real release if it can help it: it waits
-# up to ten minutes for the human's `gh release create` to land (tag push and
-# release creation are separate steps, and the push usually goes first), then
-# uploads onto it with --clobber. Only if the release never appears does it
-# make a DRAFT, which is visible to nobody and says in its notes that the
-# firmware image and the real notes are still missing — a draft the human
-# finishes is a much better failure than a published release that claims to
-# be complete while core.ipod is absent.
+# This workflow never creates the real release if it can help it: it waits
+# up to ten minutes for the human's `gh release create app-v…` (from
+# tools/release.py app-vX.Y.Z) to land — tag push and release creation are
+# separate steps, and the push usually goes first — then uploads onto it with
+# --clobber. Only if the release never appears does it make a DRAFT, visible
+# to nobody, whose notes say the real notes are still missing.
 name: Release
 
 on:
   push:
     tags:
-      - "v*"
+      # Both prefixes trigger the workflow; only app-v… runs a job (see the
+      # `if:` on each). A firmware tag is listed so a run shows up for it and
+      # says, by skipping, that there is nothing for CI to build.
+      - "v[0-9]*"
+      - "app-v[0-9]*"
 
 # gh release upload/create writes to the repo's releases.
 permissions:
@@ -46,6 +50,7 @@ permissions:
 jobs:
   cli-binaries:
     name: core CLI + Windows/Linux GUI
+    if: startsWith(github.ref_name, 'app-v')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,8 +58,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Tags, so build-all.sh's `git describe` stamps the binaries with
-          # the tag being released rather than a bare SHA.
+          # Tags, so build-all.sh's `git describe --match 'app-v[0-9]*'`
+          # stamps the binaries with the app tag being released rather
+          # than a bare SHA.
           fetch-depth: 0
 
       - uses: actions/setup-go@v5
@@ -74,7 +80,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev pkg-config
+            libffi-dev libxcursor-dev libvulkan-dev libasound2-dev pkg-config
 
       - name: Build the CLI binaries, the Windows GUI and the linux/amd64 GUI
         run: bash scripts/build-all.sh dist
@@ -109,8 +115,8 @@ jobs:
 
           # 10 minutes: 40 polls, 15s apart. The human flow is
           # `git push origin main $TAG` and then `gh release create $TAG
-          # core/build-hw/core.ipod ...`, which is a `make ipod` and an upload
-          # of a few megabytes apart — minutes, not seconds.
+          # --title ... --notes-file ...` (tools/release.py prints it) —
+          # minutes, not seconds.
           found=""
           for i in $(seq 1 40); do
             if gh release view "$TAG" >/dev/null 2>&1; then
@@ -125,8 +131,8 @@ jobs:
           if [ -z "$found" ]; then
             echo "release $TAG never appeared; creating a draft with the binaries only"
             gh release create "$TAG" --draft \
-              --title "Core $TAG" \
-              --notes "binaries only — core.ipod and notes pending"
+              --title "Core app ${TAG#app-}" \
+              --notes "binaries pending notes"
           fi
 
           gh release upload "$TAG" $files --clobber
@@ -140,12 +146,13 @@ jobs:
   #
   # continue-on-error because the arm64 runner label is not available on
   # every plan. A release that is missing one GUI binary and says so
-  # (tools/release.py --check lists the eleven slots and names the empty
-  # ones) is better than a tag push that fails outright and leaves the
-  # other ten unattached.
+  # (tools/release.py app-vX.Y.Z --check lists the ten slots and names
+  # the empty ones) is better than a tag push that fails outright and
+  # leaves the other nine unattached.
   # -------------------------------------------------------------------
   linux-arm-gui:
     name: core-app (linux/arm64)
+    if: startsWith(github.ref_name, 'app-v')
     runs-on: ubuntu-24.04-arm
     continue-on-error: true
     needs: cli-binaries
@@ -168,7 +175,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev pkg-config
+            libffi-dev libxcursor-dev libvulkan-dev libasound2-dev pkg-config
 
       # build-all.sh builds what the host can: on this runner that is
       # the five CLI binaries again (harmless, and it keeps the -ldflags
@@ -193,6 +200,7 @@ jobs:
   # -------------------------------------------------------------------
   macos-gui:
     name: core-app (darwin/amd64, darwin/arm64)
+    if: startsWith(github.ref_name, 'app-v')
     runs-on: macos-latest
     needs: cli-binaries
     defaults:
@@ -215,7 +223,7 @@ jobs:
         run: |
           set -euo pipefail
           MODULE="$(go list -m)"
-          VERSION="$(git describe --tags --always --dirty)"
+          VERSION="$(git describe --tags --always --dirty --match 'app-v[0-9]*')"
           COMMIT="$(git rev-parse HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           LDFLAGS="-s -w"

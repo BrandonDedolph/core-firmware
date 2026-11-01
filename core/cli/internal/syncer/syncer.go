@@ -636,7 +636,7 @@ func planPrune(musicDir string, keep *pathSet) ([]string, int64) {
 
 	add := func(p string) {
 		out = append(out, p)
-		bytes += treeSize(p)
+		bytes += TreeSize(p)
 	}
 
 	ents, err := os.ReadDir(musicDir)
@@ -685,8 +685,9 @@ func planPrune(musicDir string, keep *pathSet) ([]string, int64) {
 	return out, bytes
 }
 
-// treeSize is how many bytes removing p would free.
-func treeSize(p string) int64 {
+// TreeSize is how many bytes removing p would free: a file's size, or the
+// files under a directory. core-app's removal list sizes its rows with it.
+func TreeSize(p string) int64 {
 	var n int64
 	_ = filepath.Walk(p, func(_ string, fi os.FileInfo, err error) error {
 		if err == nil && fi != nil && !fi.IsDir() {

@@ -3,14 +3,16 @@ package app
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/fwpart"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/ghrelease"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/installer"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/library"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/version"
 )
 
 // This file is what the buttons do: one function per job, each handed
@@ -31,6 +33,7 @@ func (u *UI) start(kind JobKind, fn func(ctx context.Context, emit func(Event)) 
 		return
 	}
 	u.st.Job = &JobStatus{Kind: kind, Pct: -1}
+	u.st.Notice = ""
 	u.st.Logf("--- %s ---", kind)
 }
 
@@ -45,8 +48,20 @@ func (u *UI) startRefresh() {
 		u.newDev, u.newLib = &dev, &lib
 		u.mu.Unlock()
 		if dev.Found {
+			u.readBackups(ctx, dev.Serial)
 			emit(Event{Kind: EventLog, Text: fmt.Sprintf("device: %s — %s, %s",
 				dev.Path, dev.Model, disk.HumanSize(dev.Size))})
+			if dev.Installed.Description != "" {
+				emit(Event{Kind: EventLog, Text: "firmware: " + dev.Installed.Description})
+			}
+			if dev.Installed.Kind == fwpart.Other {
+				// The Install screen says this in plain words; the
+				// file names and the paths are the log's.
+				emit(Event{Kind: EventLog, Text: "install: Apple's firmware is saved first, as " +
+					appleBackupName(dev.Serial) + "; then the image is written and read back, and " +
+					"CORECFG.DAT, CORELOG.BIN and Music\\ are created on " + dev.Volume +
+					" (the firmware can overwrite those files but cannot create them)"})
+			}
 		} else {
 			emit(Event{Kind: EventLog, Text: "no iPod found: " + dev.Err})
 		}
@@ -64,12 +79,16 @@ func (u *UI) startRefresh() {
 func (u *UI) startSync(kind JobKind) {
 	src := strings.TrimSpace(u.sourceEd.Text())
 	dst := u.st.Device.Volume
+	tooOld := u.st.FirmwareTooOld()
 	u.start(kind, func(ctx context.Context, emit func(Event)) error {
 		if src == "" {
-			return fmt.Errorf("no music folder: type one in the Music card, or press Browse")
+			return fmt.Errorf("no music folder: choose it on the Fix tab")
 		}
 		if dst == "" {
-			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) and press Refresh")
+			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
+		}
+		if tooOld && kind != JobDryRun {
+			return fmt.Errorf("%s", TooOldText)
 		}
 		o := syncer.Options{Src: src, Dst: dst, GenreMap: library.GenreMapEmbedded}
 		switch kind {
@@ -86,16 +105,18 @@ func (u *UI) startSync(kind JobKind) {
 
 		// JobSyncPrune.
 		answer, err := u.ask(ctx, &dialogRequest{
-			title:   "Sync + prune deletes music",
-			body:    "Prune removes everything under Music/ on the iPod that this source folder does\nnot produce — tracks, albums and their art sidecars.\n\nsource  " + src + "\niPod    " + dst + "\n\nA dry run comes next and will list exactly what would go.",
-			prompt:  "Continue to the list?",
+			title: "Sync and remove deletes music",
+			body: "Sync and remove deletes every album on the iPod that your music folder " +
+				"(" + sourceName(src) + ") does not have, with its covers. A preview comes next " +
+				"and lists exactly what would go.",
+			prose:   true,
 			okLabel: "Show me the list",
 		})
 		if err != nil {
 			return err
 		}
 		if answer == "" {
-			return fmt.Errorf("cancelled before the dry run")
+			return fmt.Errorf("cancelled before the preview")
 		}
 
 		dry := o
@@ -105,23 +126,19 @@ func (u *UI) startSync(kind JobKind) {
 			return err
 		}
 		if len(plan.Prune) == 0 {
-			emit(Event{Kind: EventLog, Text: "nothing to prune; running a plain sync instead"})
+			emit(Event{Kind: EventLog, Text: "nothing to remove; running a plain sync instead"})
 			_, err := u.be.Sync(ctx, o, emit)
 			return err
 		}
-		answer, err = u.ask(ctx, &dialogRequest{
-			title: fmt.Sprintf("Delete %d item(s) from the iPod?", len(plan.Prune)),
-			body: fmt.Sprintf("%s would be deleted from %s:\n\n%s",
-				disk.HumanSize(plan.PruneBytes), dst, strings.Join(plan.Prune, "\n")),
-			prompt:  "Type  prune  to confirm:",
-			want:    "prune",
-			okLabel: "Delete and sync",
-		})
+		for _, p := range plan.Prune {
+			emit(Event{Kind: EventLog, Text: "would remove " + p})
+		}
+		answer, err = u.ask(ctx, removalDialog(plan, pathInfo))
 		if err != nil {
 			return err
 		}
-		if answer != "prune" {
-			return fmt.Errorf("aborted: the confirmation did not match")
+		if answer == "" {
+			return fmt.Errorf("cancelled: nothing was deleted")
 		}
 		o.Prune, o.Yes = true, true
 		plan, err = u.be.Sync(ctx, o, emit)
@@ -130,15 +147,84 @@ func (u *UI) startSync(kind JobKind) {
 	})
 }
 
-func (u *UI) startCheck() {
+// startSyncPreview is the sync a person starts: the header's "Sync N
+// albums" and the iPod tab's "Preview sync". It plans first (a dry run,
+// which also refreshes the grid), shows what the plan would copy
+// (previewDialog), and copies only when that sheet's button is pressed.
+// Cancel — or Close on "Everything is on the iPod" — ends the job with
+// nothing written. The plan's lines go to the log as well.
+func (u *UI) startSyncPreview() {
+	src := strings.TrimSpace(u.sourceEd.Text())
+	dst := u.st.Device.Volume
+	tooOld := u.st.FirmwareTooOld()
+	u.start(JobSync, func(ctx context.Context, emit func(Event)) error {
+		if src == "" {
+			return fmt.Errorf("no music folder: choose it on the Fix tab")
+		}
+		if dst == "" {
+			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
+		}
+		o := syncer.Options{Src: src, Dst: dst, GenreMap: library.GenreMapEmbedded}
+		dry := o
+		dry.DryRun = true
+		emit(Event{Kind: EventProgress, Text: "working out what to copy", Pct: -1})
+		plan, err := u.be.Sync(ctx, dry, emit)
+		u.publishPlan(plan, false)
+		if err != nil {
+			return err
+		}
+		albums := AlbumsFromPlan(plan)
+		for _, a := range albums {
+			if a.Copy > 0 {
+				emit(Event{Kind: EventLog, Text: fmt.Sprintf("would copy %s — %d of %d tracks, %s",
+					a.Title, a.Copy, a.Tracks, disk.HumanSize(a.Bytes))})
+			}
+		}
+		req := previewDialog(albums, src, tooOld)
+		answer, err := u.ask(ctx, req)
+		if err != nil {
+			return err
+		}
+		if req.only || answer == CancelAnswer {
+			emit(Event{Kind: EventLog, Text: "preview only: nothing was copied"})
+			return nil
+		}
+		plan, err = u.be.Sync(ctx, o, emit)
+		u.publishPlan(plan, err == nil)
+		return err
+	})
+}
+
+// startCheck asks GitHub for the latest release. It runs once by itself
+// after the first Refresh that finds an iPod (see afterJob) and again from
+// the menu. A failure is a line in the log and nothing else: the header is
+// not the place to say that a network request the user did not make went
+// wrong, so the job itself ends cleanly and the header simply shows no
+// update state.
+func (u *UI) startCheck() { u.check(false) }
+
+// startLaunchCheck is startCheck plus the quiet second question, asked once
+// per launch: is there a newer desktop app? It says nothing unless there is
+// (About and the ··· menu then offer it) or the question fails (a log line).
+func (u *UI) startLaunchCheck() { u.check(true) }
+
+func (u *UI) check(withApp bool) {
+	running := version.Version
 	u.start(JobCheck, func(ctx context.Context, emit func(Event)) error {
+		if withApp {
+			defer u.checkApp(ctx, running, emit)
+		}
 		emit(Event{Kind: EventProgress, Text: "asking GitHub", Pct: -1})
 		rel, err := u.be.Release(ctx)
+		if err != nil {
+			rel.Checked, rel.Err = true, err.Error()
+		}
 		u.mu.Lock()
 		u.newRel = &rel
 		u.mu.Unlock()
 		if err != nil {
-			return err
+			emit(Event{Kind: EventLog, Text: "could not check for updates: " + firstLine(err.Error())})
+			return nil
 		}
 		emit(Event{Kind: EventLog, Text: "latest release: " + rel.Tag + " (" + rel.Asset + ")"})
 		if rel.Notes != "" {
@@ -151,10 +237,13 @@ func (u *UI) startCheck() {
 func (u *UI) startUpdate() {
 	rel := u.st.Release
 	installed := installedTag(u.st.Device.Firmware)
-	cli := u.st.CLIPath
+	g := u.gate("Update this iPod to Core " + rel.Tag + "?")
 	u.start(JobUpdate, func(ctx context.Context, emit func(Event)) error {
+		if !g.dev.Tested {
+			return ErrUntested
+		}
 		if !rel.Checked || rel.Tag == "" {
-			return fmt.Errorf("press Check first, so there is a release to install")
+			return fmt.Errorf("no release known yet: use ··· → Check for updates first")
 		}
 		if installed != "" && installed == rel.Tag {
 			// Not a refusal — `core update --tag` re-flashes on purpose
@@ -166,8 +255,27 @@ func (u *UI) startUpdate() {
 		if err != nil {
 			return err
 		}
-		return u.flashFile(ctx, file, cli, emit)
+		g.image = file
+		if err := u.flashFile(ctx, file, g, emit); err != nil {
+			return err
+		}
+		return u.readBack(ctx, emit)
 	})
+}
+
+// checkApp is the app half of the launch check. Job goroutine.
+func (u *UI) checkApp(ctx context.Context, running string, emit func(Event)) {
+	tag, url, err := u.be.AppRelease(ctx)
+	if err != nil {
+		emit(Event{Kind: EventLog, Text: "could not check for a newer app: " + firstLine(err.Error())})
+		return
+	}
+	if !ghrelease.AppNewer(tag, running) {
+		return
+	}
+	u.mu.Lock()
+	u.newApp = &[2]string{tag, url}
+	u.mu.Unlock()
 }
 
 // installedTag is the "v0.1.2" out of fwpart.VersionText's
@@ -181,31 +289,57 @@ func installedTag(firmware string) string {
 }
 
 func (u *UI) startFlash(file string) {
-	cli := u.st.CLIPath
+	g := u.gate("Write " + fileBase(file) + " to this iPod?")
+	g.image = file
 	u.start(JobFlash, func(ctx context.Context, emit func(Event)) error {
 		if file == "" {
-			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or press Flash file…")
+			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or use ··· → Flash an image file…")
 		}
-		return u.flashFile(ctx, file, cli, emit)
+		if !g.dev.Tested {
+			return ErrUntested
+		}
+		if err := u.flashFile(ctx, file, g, emit); err != nil {
+			return err
+		}
+		return u.readBack(ctx, emit)
 	})
 }
 
-// flashFile is the shared tail of Flash and Update.
+// readBack is the one tail every write shares — Flash, Update and Install:
+// read the device again and hand the result to the window, so the header
+// says what is on the iPod NOW. Before it, a flash returned straight after
+// the write and the window kept the old version until a replug (the detect
+// poll keys on path and serial, which a flash does not change).
 //
-// The confirmation dialog shows the flasher's OWN plan text — captured
-// from Deps.Out as it is printed, which is everything written before
-// Confirm is called — and requires the device path typed exactly, the
-// same gate the CLI has. A GUI "Are you sure? [Yes]" over a raw disk
-// write would be a downgrade from the terminal.
-//
-// cliPath is read from the model on the UI goroutine by the caller and
-// passed in: this function runs on the job goroutine, where u.st is
-// off limits.
-func (u *UI) flashFile(ctx context.Context, file, cliPath string, emit func(Event)) error {
+// It runs on the job goroutine and publishes under the mutex like every
+// other job result.
+func (u *UI) readBack(ctx context.Context, emit func(Event)) error {
+	dev, lib, err := u.be.Refresh(ctx)
+	if err != nil {
+		return err
+	}
+	u.mu.Lock()
+	u.newDev, u.newLib = &dev, &lib
+	u.mu.Unlock()
+	if dev.Found {
+		u.readBackups(ctx, dev.Serial)
+	}
+	now := dev.Installed.Description
+	if now == "" {
+		now = dev.Firmware
+	}
+	if now != "" {
+		emit(Event{Kind: EventLog, Text: "firmware now: " + now})
+	}
+	return nil
+}
+
+// flashFile is the shared tail of Flash and Update: the write, behind the
+// gate (confirmWrite), with the flasher's own plan going to the log and to
+// the dialog's "Show the plan".
+func (u *UI) flashFile(ctx context.Context, file string, g writeGate, emit func(Event)) error {
 	plan, tee := teePlan(emit)
-	confirm := u.confirmWrite(ctx, plan, cliPath,
-		"Write this image to the iPod?", "Write it")
-	return u.be.Flash(ctx, file, confirm, tee)
+	return u.be.Flash(ctx, file, u.confirmWrite(ctx, plan, g), tee)
 }
 
 // teePlan splits a job's log events two ways: on to the window, and
@@ -222,38 +356,6 @@ func teePlan(emit func(Event)) (*strings.Builder, func(Event)) {
 	}
 }
 
-// confirmWrite is the modal that guards every raw write this app makes:
-// the flasher's own plan, and the device path typed exactly. Flash,
-// Update and Install share it, because a second dialog with a slightly
-// different gate is a second gate to get wrong.
-//
-// cliPath is read from the model on the UI goroutine by the caller and
-// passed in: this runs on the job goroutine, where u.st is off limits.
-func (u *UI) confirmWrite(ctx context.Context, plan *strings.Builder,
-	cliPath, title, okLabel string) func(prompt string) (string, error) {
-	return func(prompt string) (string, error) {
-		note := ""
-		if runtime.GOOS == "windows" && cliPath != "" {
-			note = "\n\nWindows will show a UAC prompt for:\n  " + cliPath
-		}
-		want, ok := devicePathFromPrompt(prompt)
-		if !ok {
-			// The flasher's wording changed under us. Refusing here is
-			// the only honest move: a dialog that cannot say what to
-			// type would either wave the write through or fail it
-			// with a message about a path nobody was shown.
-			return "", fmt.Errorf("the flasher's confirmation prompt is not in the form core-app knows: %q", prompt)
-		}
-		return u.ask(ctx, &dialogRequest{
-			title:   title,
-			body:    tail(plan.String(), 40) + note,
-			prompt:  strings.TrimSpace(prompt),
-			want:    want,
-			okLabel: okLabel,
-		})
-	}
-}
-
 // startInstall is the Install screen's one button: put Core on an iPod
 // that is still running Apple's firmware.
 //
@@ -267,9 +369,12 @@ func (u *UI) confirmWrite(ctx context.Context, plan *strings.Builder,
 // that verified but somehow left something else installed cannot show
 // the main screen.
 func (u *UI) startInstall(file string) {
-	cli := u.st.CLIPath
 	rel := u.st.Release
+	g := u.gate("")
 	u.start(JobInstall, func(ctx context.Context, emit func(Event)) error {
+		if !g.dev.Tested {
+			return ErrUntested
+		}
 		image := file
 		if image == "" {
 			if !rel.Checked || rel.Tag == "" {
@@ -288,9 +393,14 @@ func (u *UI) startInstall(file string) {
 			}
 		}
 
+		g.image = image
+		if file != "" {
+			g.title = "Install Core from " + fileBase(file) + " on this iPod?"
+		} else {
+			g.title = "Install Core " + rel.Tag + " on this iPod?"
+		}
 		plan, tee := teePlan(emit)
-		confirm := u.confirmWrite(ctx, plan, cli,
-			"Install Core on this iPod?", "Install it")
+		confirm := u.confirmWrite(ctx, plan, g)
 		res, err := u.be.Install(ctx, installer.Options{Image: image}, tee, confirm)
 		if err != nil {
 			return err
@@ -305,15 +415,7 @@ func (u *UI) startInstall(file string) {
 			}
 		}
 
-		dev, lib, rerr := u.be.Refresh(ctx)
-		if rerr != nil {
-			return rerr
-		}
-		u.mu.Lock()
-		u.newDev, u.newLib = &dev, &lib
-		u.mu.Unlock()
-		emit(Event{Kind: EventLog, Text: "firmware now: " + dev.Installed.Description})
-		return nil
+		return u.readBack(ctx, emit)
 	})
 }
 
@@ -327,23 +429,43 @@ func devicePathFromPrompt(prompt string) (string, bool) {
 }
 
 func (u *UI) startBackup() {
+	serial := u.st.Device.Serial
 	u.start(JobBackup, func(ctx context.Context, emit func(Event)) error {
 		path, err := u.be.Backup(ctx, emit)
 		if err != nil {
 			return err
 		}
 		emit(Event{Kind: EventLog, Text: "backup written: " + path})
+		u.mu.Lock()
+		u.newNotice = "Backed up to " + path
+		u.mu.Unlock()
+		u.readBackups(ctx, serial)
 		return nil
 	})
+}
+
+// readBackups asks the backend what the backup folder holds for this iPod
+// and hands it to the window. Job goroutine; publishes under the mutex.
+func (u *UI) readBackups(ctx context.Context, serial string) {
+	apple, n, dir := u.be.Backups(ctx, serial)
+	u.mu.Lock()
+	u.newBackups = &Backups{Apple: apple, Count: n, Dir: dir}
+	u.mu.Unlock()
 }
 
 func (u *UI) startEject() {
 	vol := u.st.Device.Volume
 	u.start(JobEject, func(ctx context.Context, emit func(Event)) error {
 		if vol == "" {
-			return fmt.Errorf("no volume to eject; press Refresh with the iPod plugged in")
+			return fmt.Errorf("no volume to eject — plug the iPod in, or use ··· → Read the iPod again")
 		}
-		return u.be.Eject(ctx, vol, emit)
+		if err := u.be.Eject(ctx, vol, emit); err != nil {
+			return err
+		}
+		// The strip shows the last log line; it should say the same thing
+		// as the header.
+		emit(Event{Kind: EventLog, Text: "ejected " + vol + " — safe to unplug"})
+		return nil
 	})
 }
 
@@ -392,7 +514,8 @@ func (u *UI) doPrimary() {
 	case ActionInstall:
 		u.startInstall("")
 	case ActionSync:
-		u.startSync(JobSync)
+		// Never straight to the copy: the preview says what will go.
+		u.startSyncPreview()
 	case ActionUpdate:
 		u.startUpdate()
 	case ActionEject:
@@ -432,7 +555,7 @@ func (u *UI) setSource(path string) {
 func (u *UI) startInspect(src string) {
 	src = strings.TrimSpace(src)
 	if src == "" {
-		u.st.Logf("scan: no music folder yet — press Browse")
+		u.st.Logf("scan: no music folder yet — choose one on the Fix tab")
 		return
 	}
 	discs := u.st.DiscFolders
@@ -454,7 +577,7 @@ func (u *UI) startInspect(src string) {
 // (plan §5 decision 2: Inspect never touches the network).
 func (u *UI) startCandidates() {
 	rep := u.st.Report
-	if rep == nil || len(rep.MissingArt) == 0 {
+	if rep == nil || len(rep.MissingArt)+len(rep.LowResArt) == 0 {
 		return
 	}
 	u.start(JobArt, func(ctx context.Context, emit func(Event)) error {
@@ -486,7 +609,7 @@ func (u *UI) startFix() {
 		answer, err := u.ask(ctx, &dialogRequest{
 			title:   "Fix the library?",
 			body:    "in " + src + "\n\n" + summary,
-			prompt:  "Names and folders can be undone until the next sync; a cover written into a file stays.",
+			prompt:  "Names, folders and replaced covers can be undone until the next sync; a cover added to an album that had none stays.",
 			okLabel: "Fix all",
 		})
 		if err != nil {
@@ -533,49 +656,23 @@ func (u *UI) startUndo(journal string) {
 			for _, sk := range rep.Skipped {
 				emit(Event{Kind: EventLog, Text: "left alone: " + sk.Op.To + " — " + sk.Reason})
 			}
-			emit(Event{Kind: EventLog, Text: "embedded covers are not undone; " +
-				"`core art --remove` takes a picture back out"})
+			emit(Event{Kind: EventLog, Text: "a replaced small cover is put back; a cover added to an " +
+				"album that had none is not undone (`core art --remove` takes a picture back out)"})
 		}
 		return err
 	})
 }
 
-// gridEvents is the Albums tab's half of the frame: a tile click shows
-// what the plan says about that album.
+// gridEvents is the Albums tab's half of the frame: a tile click opens the
+// album sheet (album.go).
 func (u *UI) gridEvents(gtx C, busy bool) {
 	for i := range u.tileClicks {
 		if i >= len(u.st.Albums) {
 			break
 		}
 		if u.tileClicks[i].Clicked(gtx) {
-			u.showAlbum(u.st.Albums[i])
+			u.openSheet(u.st.Albums[i])
 		}
-	}
-}
-
-// showAlbum puts one album's facts on screen, in the modal the write
-// confirmations already use. It is a read: there is no job behind it and
-// the reply channel is buffered, so the OK button simply closes it.
-func (u *UI) showAlbum(a Album) {
-	state := "every track is on the iPod"
-	switch a.State {
-	case TileNew:
-		state = "none of it is on the iPod yet"
-	case TileChanged:
-		state = fmt.Sprintf("%d of %d tracks are about to be copied", a.Copy, a.Tracks)
-	}
-	body := strings.Join([]string{
-		"folder on the iPod   Music/" + a.Device,
-		"folder on this PC    " + a.Dir,
-		fmt.Sprintf("tracks               %d", a.Tracks),
-		fmt.Sprintf("to copy              %d  (%s)", a.Copy, disk.HumanSize(a.Bytes)),
-	}, "\n")
-	u.dlg = &dialogRequest{
-		title:   a.Title,
-		body:    body,
-		prompt:  state,
-		okLabel: "Close",
-		reply:   make(chan string, 1),
 	}
 }
 

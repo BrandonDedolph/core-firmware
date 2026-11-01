@@ -36,10 +36,15 @@ cc = meson.get_compiler('c')
 # Never printed on the UART (the clicky boot golden matches those lines
 # exactly), so this cannot move a test. Without git (or outside a checkout)
 # meson substitutes the fallback rather than failing.
+#
+# --match 'v[0-9]*': the desktop app is versioned apart, with `app-v…` tags
+# that can sit on the same commit as a firmware tag. Only a firmware tag may
+# become the firmware's version; with no `v*` tag reachable, --always still
+# yields the bare hash, as it did before the first tag.
 core_version_h = vcs_tag(
   input: 'kernel/core_version.h.in',
   output: 'core_version.h',
-  command: ['git', 'describe', '--tags', '--always', '--dirty', '--abbrev=7'],
+  command: ['git', 'describe', '--tags', '--match', 'v[0-9]*', '--always', '--dirty', '--abbrev=7'],
   fallback: 'unknown',
   replace_string: '@VCS_TAG@',
 )
@@ -55,11 +60,12 @@ core_version_h = vcs_tag(
 # (it exits non-zero and prints nothing). That is the state of this tree until
 # the first tag is cut, and it must not break the build: meson's vcs_tag
 # catches the failure and substitutes the fallback, so an untagged tree builds
-# and reports v0.0.0.
+# and reports v0.0.0. The same --match as above keeps an `app-v…` tag out;
+# with no `v*` tag reachable this fails the same way and reports v0.0.0.
 core_version_tag_h = vcs_tag(
   input: 'kernel/core_version_tag.h.in',
   output: 'core_version_tag.h',
-  command: ['git', 'describe', '--tags', '--abbrev=0'],
+  command: ['git', 'describe', '--tags', '--match', 'v[0-9]*', '--abbrev=0'],
   fallback: 'v0.0.0',
   replace_string: '@VCS_TAG@',
 )

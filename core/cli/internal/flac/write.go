@@ -118,6 +118,21 @@ func RemovePictures(path string, opts ...Options) error {
 	})
 }
 
+// RemovePicture drops the PICTURE blocks of one type (zero means the front
+// cover) and leaves every other picture where it is. It is WritePicture's
+// inverse for a file that had no picture of that type before: an undo that
+// takes a replaced cover out again must not take the back cover with it.
+func RemovePicture(path string, typ uint32, opts ...Options) error {
+	if typ == 0 {
+		typ = PictureTypeFrontCover
+	}
+	return editChain(path, options(opts), func(blocks []metaBlock) ([]metaBlock, error) {
+		return keepBlocks(blocks, func(b metaBlock) bool {
+			return b.typ == blockPicture && pictureType(b.body) == typ
+		}), nil
+	})
+}
+
 // keepBlocks returns the chain minus every PADDING block and minus every block
 // drop reports. PADDING always goes: the writers re-create exactly one, sized
 // to whatever is left over, as the last block.

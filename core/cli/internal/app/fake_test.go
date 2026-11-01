@@ -60,6 +60,21 @@ type fakeBackend struct {
 	installAns   string
 	installErr   error
 
+	// releaseCalls and refreshCalls count the two reads the header's
+	// after-job behaviour adds; flashFirmware is what a successful fake
+	// Flash leaves installed, so a test can see the header follow it.
+	appTag, appURL string
+	appErr         error
+	appCalls       int
+
+	backupsApple time.Time
+	backupsN     int
+	backupsDir   string
+
+	releaseCalls  int
+	refreshCalls  int
+	flashFirmware string
+
 	syncCalls   []syncer.Options
 	flashCalls  []string
 	flashPrompt string
@@ -93,6 +108,12 @@ type fakeBackend struct {
 	thumbCalls []string
 	thumbErr   error
 	fetchCalls []string
+
+	// keepCalls is every RemoveDuplicate: {keep, drop}.
+	keepCalls [][2]librarian.AlbumKey
+	// applyCalls is every ApplyCover; coverFail makes it fail.
+	applyCalls []applyCall
+	coverFail  string
 }
 
 func (f *fakeBackend) Inspect(ctx context.Context, src string, discFolders bool,
@@ -145,7 +166,7 @@ func (f *fakeBackend) UndoFix(ctx context.Context, journal string, emit func(Eve
 	return f.undoReport, nil
 }
 
-func (f *fakeBackend) Thumbnail(dir string) (image.Image, error) {
+func (f *fakeBackend) Thumbnail(dir string, px int) (image.Image, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.thumbCalls = append(f.thumbCalls, dir)
@@ -168,6 +189,7 @@ func (f *fakeBackend) FetchThumb(ctx context.Context, url string) (image.Image, 
 func (f *fakeBackend) Refresh(ctx context.Context) (Device, Library, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.refreshCalls++
 	if f.pods == nil {
 		return f.dev, f.lib, f.refreshErr
 	}
@@ -302,9 +324,18 @@ func (f *fakeBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 	return plan, err
 }
 
+// AppRelease answers from appTag/appURL/appErr.
+func (f *fakeBackend) AppRelease(ctx context.Context) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.appCalls++
+	return f.appTag, f.appURL, f.appErr
+}
+
 func (f *fakeBackend) Release(ctx context.Context) (Release, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.releaseCalls++
 	return f.rel, f.releaseErr
 }
 
@@ -338,6 +369,11 @@ func (f *fakeBackend) Flash(ctx context.Context, file string,
 		return errors.New("aborted at the confirmation prompt")
 	}
 	emit(Event{Kind: EventLog, Text: "VERIFIED"})
+	f.mu.Lock()
+	if f.flashFirmware != "" {
+		f.dev.Firmware = f.flashFirmware
+	}
+	f.mu.Unlock()
 	return nil
 }
 
@@ -429,4 +465,40 @@ func answerDialogs(u *UI, answers ...string) chan int {
 		done <- n
 	}()
 	return done
+}
+
+// Backups answers from three fields a test sets.
+func (f *fakeBackend) Backups(ctx context.Context, serial string) (time.Time, int, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.backupsApple, f.backupsN, f.backupsDir
+}
+
+// RemoveDuplicate records the keep and answers with a journal.
+func (f *fakeBackend) RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
+	emit func(Event)) (*librarian.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keepCalls = append(f.keepCalls, [2]librarian.AlbumKey{keep, drop})
+	return &librarian.Result{Journal: "/journal/keep-fix.json", Trashed: 1}, nil
+}
+
+// ApplyCover records the click and answers with a replacement, or with
+// coverFail as the album's failure.
+func (f *fakeBackend) ApplyCover(ctx context.Context, rep *librarian.Report, key librarian.AlbumKey,
+	c artfetch.Candidate, after string, emit func(Event)) (*librarian.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.applyCalls = append(f.applyCalls, applyCall{key, c, after})
+	if f.coverFail != "" {
+		return &librarian.Result{Failures: []librarian.Failure{{Album: key, Reason: f.coverFail}}}, nil
+	}
+	return &librarian.Result{Journal: "/journal/cover-" + string(rune(0x30+len(f.applyCalls))) + "-fix.json", ArtWritten: 1,
+		Replaced: []librarian.Replacement{{Album: key, From: "500×500", To: "1200×1200"}}}, nil
+}
+
+type applyCall struct {
+	key   librarian.AlbumKey
+	c     artfetch.Candidate
+	after string
 }

@@ -50,6 +50,7 @@ func everyState() []struct {
 		{"demo", DemoState()},
 		{"library", LibraryState()},
 		{"details", detailsState()},
+		{"advanced", AdvancedState()},
 		{"empty", EmptyState()},
 		{"looking", LookingState()},
 		{"notinstalled", NotInstalledState()},

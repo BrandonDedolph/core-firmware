@@ -1,5 +1,7 @@
 # Plan — `core`, the app that runs the show
 
+> **History.** The window this plan describes was redesigned on 2026-10-31; the current design is [`app-ux-pass-plan.md`](app-ux-pass-plan.md). The words and buttons below (Details tab, Dry run, Sync + prune, Flash file…, Take, typed confirmations) are the old ones.
+
 Host program that owns the whole loop for an everyday user: put music on the iPod in the
 layout the firmware wants, bake every album-art size, write the index, create the two
 pre-allocated device files, flash firmware versions, fetch updates. One Go binary, the

@@ -162,3 +162,26 @@ PR. `git log --oneline -- core/ui core/kernel/main.c` since the last gallery
 commit is the checklist. The image is wrong the moment it shows a row the
 device does not have, a theme count it does not ship, or a layout it moved
 on from — and the README's readers cannot tell.
+
+## App
+
+<!--
+From core/cli, on a clean tree:
+
+  go build -tags novulkan -o /tmp/core-app ./cmd/core-app
+  /tmp/core-app --screenshot ../../docs/screens/core_app.png       --state playing --theme linen --size 980x700 --no-detect
+  /tmp/core-app --screenshot ../../docs/screens/core_app_onyx.png  --state playing --theme onyx  --size 980x700 --no-detect
+  /tmp/core-app --screenshot ../../docs/screens/core_app_album.png --state album   --theme linen --size 980x700 --no-detect
+  /tmp/core-app --screenshot ../../docs/screens/core_app_fix.png   --state library --theme linen --size 980x700 --no-detect
+  /tmp/core-app --screenshot ../../docs/screens/core_app_ipod.png  --state demo --tab summary --theme linen --size 980x700 --no-detect
+
+(under `(ulimit -v 6000000; timeout 240 …)` — an earlier layout bug allocated 40 GB per frame.)
+-->
+
+Five files here are **not** drawn by `render.py`: `core_app.png`, `core_app_onyx.png`,
+`core_app_album.png`, `core_app_fix.png` and `core_app_ipod.png` are the desktop app, rendered by `core-app --screenshot` itself through Gio's
+headless GPU path — the same code that draws the window, from the canned demo state, at the
+window's default size (980×700). The commands are in the comment above. They show the app, not
+the iPod, so the firmware-is-the-source-of-truth rule does not apply to them; the rule they follow
+is the app's own: re-shoot them whenever the window changes.
+

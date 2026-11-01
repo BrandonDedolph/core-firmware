@@ -42,6 +42,12 @@ type Backend interface {
 	// Refresh identifies the attached iPod and inspects its library
 	// volume. Read-only, top to bottom.
 	Refresh(ctx context.Context) (Device, Library, error)
+	// Backups is what the backup folder holds for this iPod: the date
+	// Apple's firmware was saved (zero when there is no apple-*.bin for
+	// this serial), how many whole-partition backups (fwpart-*.bin)
+	// there are, and the folder itself. Read-only; a folder that does
+	// not exist yet is zero and 0, not an error.
+	Backups(ctx context.Context, serial string) (apple time.Time, n int, dir string)
 	// Detect is the cheap half of Refresh: which iPods are attached,
 	// one raw open each, no volume walk and no checksum. The 2-second
 	// poll calls it; a change is what starts a Refresh.
@@ -58,8 +64,13 @@ type Backend interface {
 	// Sync plans and executes one sync. o.DryRun makes it a plan and
 	// nothing else.
 	Sync(ctx context.Context, o syncer.Options, emit func(Event)) (*syncer.Plan, error)
-	// Release asks GitHub what the latest firmware release is.
+	// Release asks GitHub what the latest firmware release is — a `v…`
+	// release carrying core.ipod; the app's own `app-v…` releases are
+	// never it.
 	Release(ctx context.Context) (Release, error)
+	// AppRelease asks GitHub for the newest desktop-app release (an
+	// `app-v…` tag): its tag and its page.
+	AppRelease(ctx context.Context) (tag, url string, err error)
 	// Download fetches (or finds cached) the release's .ipod and
 	// returns the local path, checksum already verified.
 	Download(ctx context.Context, rel Release, emit func(Event)) (string, error)
@@ -109,15 +120,24 @@ type Backend interface {
 	// changed since it was moved.
 	UndoFix(ctx context.Context, journal string, emit func(Event)) (*organizer.UndoReport, error)
 
-	// Thumbnail decodes one album folder's cover for the grid: the
-	// device's own folder.art sidecar when there is one, the embedded
-	// front cover otherwise. It is called off the UI goroutine by the
-	// thumbnail cache, never from a layout.
-	Thumbnail(dir string) (image.Image, error)
+	// Thumbnail decodes one album folder's own cover (AlbumPicture), fit
+	// to px device pixels. It is called off the UI goroutine by the cover
+	// cache, never from a layout.
+	Thumbnail(dir string, px int) (image.Image, error)
 	// FetchThumb downloads one art candidate's ~200 px thumbnail. It is
 	// on the Backend so the Library tab's tests draw the candidate row
 	// with no network at all.
 	FetchThumb(ctx context.Context, url string) (image.Image, error)
+
+	// RemoveDuplicate keeps one album of a duplicate group and moves the
+	// other album's folder to the trash beside the music folder,
+	// journaled, so UndoFix brings it back.
+	RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
+		emit func(Event)) (*librarian.Result, error)
+	// ApplyCover writes one album's chosen cover now ("Use this cover"),
+	// journaled and chained to after, the session's previous journal.
+	ApplyCover(ctx context.Context, rep *librarian.Report, key librarian.AlbumKey, c artfetch.Candidate,
+		after string, emit func(Event)) (*librarian.Result, error)
 }
 
 // RealBackend is the production wiring. Its fields are the two paths
@@ -136,6 +156,8 @@ type RealBackend struct {
 	GOOS string
 	// HTTP is the client FetchThumb uses; nil means a default one.
 	HTTP *http.Client
+	// MinArtPx is config.json's min_art_px, handed to every Inspect.
+	MinArtPx int
 
 	// art is the shared artfetch client, built once: its cache and its
 	// one-request-a-second MusicBrainz limiter have to be shared across
@@ -220,6 +242,10 @@ func (b *RealBackend) Refresh(ctx context.Context) (Device, Library, error) {
 			// with no way to ask, leaves it empty and the header falls
 			// back — a name is not worth an error on a refresh.
 			d.Label, _ = disk.VolumeLabel(d.Volume)
+			// Free space for the header. Same rule as the label: a
+			// volume that will not say is a header without the figure,
+			// not a failed refresh.
+			d.Free, d.Capacity, _ = disk.VolumeSpace(d.Volume)
 		}
 	}
 	// "Reading a raw disk needs Administrator" is worth saying on the
@@ -363,13 +389,13 @@ func (b *RealBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 		return nil, err
 	}
 	emit(Event{Kind: EventLog, Text: fmt.Sprintf(
-		"%s  plan: %d albums, %d to copy, %d already there, %d to rename, %d orphan(s)",
+		"%s  plan: %d albums, %d to copy, %d already there, %d to rename, %d not in the music folder",
 		stamp(time.Now()), plan.Albums, len(plan.Copy), len(plan.Skip), len(plan.Rename), len(plan.Prune))})
 	for _, w := range plan.Warnings {
 		emit(Event{Kind: EventLog, Text: "warning: " + w})
 	}
 	if o.DryRun {
-		emit(Event{Kind: EventProgress, Text: "dry run — nothing was written", Pct: 1})
+		emit(Event{Kind: EventProgress, Text: "preview — nothing was written", Pct: 1})
 		return plan, nil
 	}
 
@@ -397,7 +423,7 @@ func (b *RealBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 	rep, err := syncer.Execute(ctx, plan, o)
 	if rep != nil {
 		emit(Event{Kind: EventLog, Text: fmt.Sprintf(
-			"%s  %d copied (%s), %d skipped, %d pruned, art %d written / %d kept, index %d bytes",
+			"%s  %d copied (%s), %d skipped, %d removed, art %d written / %d kept, index %d bytes",
 			stamp(time.Now()), rep.Copied, disk.HumanSize(rep.CopiedBytes), rep.Skipped,
 			rep.Pruned, rep.ArtWritten, rep.ArtSkipped, rep.IndexBytes)})
 	}
@@ -406,21 +432,36 @@ func (b *RealBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 
 // --- Firmware ----------------------------------------------------------
 
-// Release asks GitHub for the latest release.
+// Release asks GitHub for the latest FIRMWARE release. Not
+// ghrelease.Latest: the app is released apart (`app-v…`), and GitHub's
+// "latest" may be an app release with no firmware on it.
 func (b *RealBackend) Release(ctx context.Context) (Release, error) {
 	repo := b.Repo
 	if repo == "" {
 		repo = ghrelease.DefaultRepo
 	}
-	rel, err := ghrelease.Latest(ctx, repo)
+	rel, err := ghrelease.LatestFirmware(ctx, repo)
 	if err != nil {
 		return Release{Checked: true, Err: err.Error()}, err
 	}
-	out := Release{Checked: true, Tag: rel.Tag, Notes: rel.Notes}
+	out := Release{Checked: true, Tag: rel.Tag, Notes: rel.Notes, Published: rel.Published}
 	if a, ok := ghrelease.FirmwareAsset(rel); ok {
 		out.Asset = a.Name
 	}
 	return out, nil
+}
+
+// AppRelease asks GitHub for the newest desktop-app release.
+func (b *RealBackend) AppRelease(ctx context.Context) (string, string, error) {
+	repo := b.Repo
+	if repo == "" {
+		repo = ghrelease.DefaultRepo
+	}
+	rel, err := ghrelease.LatestApp(ctx, repo)
+	if err != nil {
+		return "", "", err
+	}
+	return rel.Tag, rel.URL, nil
 }
 
 // Download fetches the release's firmware image into the cache. The
@@ -623,7 +664,7 @@ func verifyBackup(path string) error {
 // what keeps those two apart.
 func (b *RealBackend) Rename(ctx context.Context, volume, name string) (string, error) {
 	if volume == "" {
-		return "", fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) and press Refresh")
+		return "", fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
 	}
 	label := disk.LegalLabel(name)
 	if strings.TrimSpace(name) != "" && label == "" {
@@ -689,6 +730,7 @@ func (b *RealBackend) Inspect(ctx context.Context, src string, discFolders bool,
 	return librarian.Inspect(ctx, src, librarian.Options{
 		Progress:    libEvents(emit),
 		DiscFolders: discFolders,
+		MinArtPx:    b.MinArtPx,
 	})
 }
 
@@ -716,9 +758,11 @@ func (b *RealBackend) UndoFix(ctx context.Context, journal string, emit func(Eve
 	return librarian.Undo(ctx, journal, librarian.Options{Progress: libEvents(emit)})
 }
 
-// Thumbnail is the grid's decode: the device's own sidecar, else the
-// album's embedded front cover.
-func (b *RealBackend) Thumbnail(dir string) (image.Image, error) { return AlbumThumbnail(dir) }
+// Thumbnail is the covers' decode: the album's embedded front cover, else
+// its cover.jpg, at the size it will be drawn.
+func (b *RealBackend) Thumbnail(dir string, px int) (image.Image, error) {
+	return AlbumPicture(dir, px)
+}
 
 // FetchThumb downloads one candidate's thumbnail.
 //
@@ -765,3 +809,70 @@ func (b *RealBackend) FetchThumb(ctx context.Context, url string) (image.Image, 
 
 // maxThumbBytes is the cap on a candidate thumbnail download.
 const maxThumbBytes = 2 << 20
+
+// --- Backups -------------------------------------------------------------
+
+// Backups lists the backup folder: the one the flasher writes to (the
+// configured BackupDir, else flasher.DefaultBackupDir — the CLI's).
+func (b *RealBackend) Backups(ctx context.Context, serial string) (time.Time, int, string) {
+	dir := b.BackupDir
+	if dir == "" {
+		if d, err := flasher.DefaultBackupDir(); err == nil {
+			dir = d
+		}
+	}
+	if dir == "" {
+		return time.Time{}, 0, ""
+	}
+	apple, n := scanBackups(dir, serial)
+	return apple, n, dir
+}
+
+// scanBackups is Backups over one folder, apart so a test can point it at a
+// temp dir. Apple's backup is matched by this serial's file-name prefix
+// (flasher.AppleBackupFileName) and dated by the date in its name; the
+// newest wins.
+func scanBackups(dir, serial string) (time.Time, int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return time.Time{}, 0
+	}
+	// "apple-<serial>-2006-01-02.bin": the prefix is everything before
+	// the date and its extension.
+	sample := flasher.AppleBackupFileName(serial, time.Time{})
+	prefix := sample[:len(sample)-len("0001-01-01.bin")]
+	var apple time.Time
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".bin") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(name, "fwpart-"):
+			n++
+		case strings.HasPrefix(name, prefix):
+			date := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".bin")
+			if t, err := time.Parse("2006-01-02", date); err == nil && t.After(apple) {
+				apple = t
+			}
+		}
+	}
+	return apple, n
+}
+
+// RemoveDuplicate is librarian.RemoveDuplicate with the window's progress.
+func (b *RealBackend) RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
+	emit func(Event)) (*librarian.Result, error) {
+	return librarian.RemoveDuplicate(ctx, rep, keep, drop, librarian.Options{Progress: libEvents(emit)})
+}
+
+// ApplyCover is librarian.ApplyCover with the shared art client (a chosen
+// candidate is downloaded here, from the cache the lookup filled).
+func (b *RealBackend) ApplyCover(ctx context.Context, rep *librarian.Report, key librarian.AlbumKey,
+	c artfetch.Candidate, after string, emit func(Event)) (*librarian.Result, error) {
+	return librarian.ApplyCover(ctx, rep, key, c, after, librarian.Options{
+		Art:      b.artClient(),
+		Progress: libEvents(emit),
+	})
+}

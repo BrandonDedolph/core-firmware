@@ -196,9 +196,9 @@ Detail, sanitizer builds and the host tools: [`core/README.md`](core/README.md),
 
 One binary on your computer does the host side: it puts the music on the iPod in the layout the
 firmware reads, bakes the art sidecars, writes the index, flashes firmware and fetches updates.
-Download the one for your machine from the
-[latest release](https://github.com/BrandonDedolph/ipod-core/releases/latest) — attached from
-v0.1.3 on, or build it from [`core/cli/`](core/cli/README.md).
+Download the one for your machine from the newest `app-v…` release on the
+[releases page](https://github.com/BrandonDedolph/ipod-core/releases), or build it from
+[`core/cli/`](core/cli/README.md).
 
 | File | For |
 |---|---|
@@ -209,10 +209,19 @@ v0.1.3 on, or build it from [`core/cli/`](core/cli/README.md).
 | `core-linux-arm64` | Linux, ARM |
 
 The same five come as `core-app-*`: a desktop window over the same code, for people who would
-rather press Sync than type it. On Windows it asks for Administrator when it opens, then reads and
-flashes the iPod itself.
+rather press Sync than type it — in the iPod's own Linen or Onyx, following the system's dark mode.
+It finds the iPod by itself, offers the update when there is one, and confirms a firmware write
+with the iPod's identity and a two-second hold. On Windows it asks for Administrator when it opens,
+then reads and flashes the iPod itself.
 
-<p align="center"><img src="docs/screens/core_app.png" alt="the core desktop app" width="640"></p>
+<p align="center">
+  <img src="docs/screens/core_app.png" alt="the core desktop app, Linen" width="420">
+  <img src="docs/screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="420">
+</p>
+<p align="center">
+  <img src="docs/screens/core_app_album.png" alt="an album open: its tracklist, with the player below" width="420">
+  <img src="docs/screens/core_app_fix.png" alt="the Fix tab" width="420">
+</p>
 
 ```bash
 core info                                   # identify the iPod, in disk mode
@@ -260,10 +269,15 @@ disk and On-The-Go writes five saved slots the host pre-allocated; making a play
 own on the device still needs a filesystem writer that does not exist. The running list of what
 works and what is next is [`STATUS.md`](STATUS.md).
 
-Versions are git tags, `v0.1.0` and up. The boot screen's bottom-right stamp and Settings → About
-show the version the device runs; an untagged build shows the nearest tag, the commit distance and
-the hash, for example `v0.1.0-3-g7617196`. What changed in each release is in
-[`CHANGELOG.md`](CHANGELOG.md) and on the GitHub release, which carries the flashable `core.ipod`.
+The firmware and the desktop app are versioned and released apart. Firmware versions are git
+tags `v0.1.0` and up; the boot screen's bottom-right stamp and Settings → About show the one the
+device runs, and an untagged build shows the nearest tag, the commit distance and the hash, for
+example `v0.1.0-3-g7617196`. A firmware release carries the flashable `core.ipod`, and what
+changed is in [`CHANGELOG.md`](CHANGELOG.md). The desktop app and the `core` CLI are tagged
+`app-v0.3.0` and up; an app release carries their ten binaries, the window's About shows the
+version, and what changed is in [`core/cli/CHANGELOG.md`](core/cli/CHANGELOG.md). The app says in
+About which firmware it writes for (Core v0.2.0 or newer) and offers the firmware update first
+when the iPod's is older.
 
 ## Design
 
@@ -289,4 +303,6 @@ Apache-2.0 ([`core/LICENSE`](core/LICENSE)). The vendored FLAC decoder `dr_flac`
 MIT-0; the MP3 decoder is PacketVideo's `pvmp3` from AOSP, Apache-2.0, vendored at a pinned commit
 with its NOTICE and its patent disclaimer
 ([`core/codecs/pvmp3/`](core/codecs/pvmp3/README.md)). Nunito is under the SIL Open Font
-License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)).
+License 1.1 ([`tools/fonts-src/OFL.txt`](tools/fonts-src/OFL.txt)); `core-app` embeds three of its
+weights, with the licence beside them in
+[`core/cli/internal/app/fonts/OFL.txt`](core/cli/internal/app/fonts/OFL.txt).

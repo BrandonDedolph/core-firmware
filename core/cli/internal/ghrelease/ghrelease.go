@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -83,6 +84,13 @@ type Release struct {
 	Name   string  `json:"name"`
 	Notes  string  `json:"body"`
 	Assets []Asset `json:"assets"`
+	// Published is when the release went out (GitHub's published_at);
+	// zero when the API did not say.
+	Published time.Time `json:"published_at"`
+	// Draft and Prerelease are never offered; URL is the release's page.
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	URL        string `json:"html_url"`
 }
 
 // Client is the HTTP front end. The zero value works: New fills the
@@ -119,7 +127,75 @@ func (c *Client) base() string {
 }
 
 // Latest returns the repository's latest published release.
+//
+// It is whatever GitHub calls latest — since the app and the firmware are
+// released apart (`app-v…` and `v…` tags) that may be either, so nothing
+// that wants the FIRMWARE uses it: see LatestFirmware.
 func Latest(ctx context.Context, repo string) (Release, error) { return New().Latest(ctx, repo) }
+
+// LatestFirmware is the newest published firmware release: not a draft,
+// not a prerelease, a `v<digit>…` tag, and carrying the firmware image.
+func LatestFirmware(ctx context.Context, repo string) (Release, error) {
+	return New().LatestFirmware(ctx, repo)
+}
+
+// LatestApp is the newest published desktop-app release (an `app-v<digit>…`
+// tag).
+func LatestApp(ctx context.Context, repo string) (Release, error) {
+	return New().LatestApp(ctx, repo)
+}
+
+// firmwareTag and appTag are the two release namespaces.
+var (
+	firmwareTag = regexp.MustCompile(`^v[0-9]`)
+	appTag      = regexp.MustCompile(`^app-v[0-9]`)
+)
+
+// LatestFirmware: see the package function.
+func (c *Client) LatestFirmware(ctx context.Context, repo string) (Release, error) {
+	return c.newest(ctx, repo, "firmware (a v… tag carrying core.ipod)", func(r Release) bool {
+		_, ok := FirmwareAsset(r)
+		return firmwareTag.MatchString(r.Tag) && ok
+	})
+}
+
+// LatestApp: see the package function.
+func (c *Client) LatestApp(ctx context.Context, repo string) (Release, error) {
+	return c.newest(ctx, repo, "app", func(r Release) bool { return appTag.MatchString(r.Tag) })
+}
+
+// newest lists the repo's recent releases (one page of 20, newest first as
+// GitHub returns them) and picks the newest published one that keep
+// accepts. Newest is by published date, the list order breaking ties.
+func (c *Client) newest(ctx context.Context, repo, what string, keep func(Release) bool) (Release, error) {
+	if err := checkRepo(repo); err != nil {
+		return Release{}, err
+	}
+	url := c.base() + "/repos/" + repo + "/releases?per_page=20"
+	body, err := c.fetch(ctx, url)
+	if err != nil {
+		return Release{}, err
+	}
+	var list []Release
+	if err := json.Unmarshal(body, &list); err != nil {
+		return Release{}, fmt.Errorf("ghrelease: %s did not return a release list: %w", url, err)
+	}
+	var best *Release
+	for i := range list {
+		r := &list[i]
+		if r.Draft || r.Prerelease || r.Tag == "" || !keep(*r) {
+			continue
+		}
+		if best == nil || r.Published.After(best.Published) {
+			best = r
+		}
+	}
+	if best == nil {
+		return Release{}, fmt.Errorf("%w: no published %s release among the latest %d in %s",
+			ErrNotFound, what, len(list), repo)
+	}
+	return *best, nil
+}
 
 // ByTag returns one release by its tag ("v0.1.3").
 func ByTag(ctx context.Context, repo, tag string) (Release, error) {
@@ -161,41 +237,9 @@ func checkRepo(repo string) error {
 }
 
 func (c *Client) get(ctx context.Context, url string) (Release, error) {
-	ctx, cancel := context.WithTimeout(ctx, APITimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, err := c.fetch(ctx, url)
 	if err != nil {
-		return Release{}, fmt.Errorf("ghrelease: %w", err)
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	c.authorize(req)
-
-	resp, err := c.http().Do(req)
-	if err != nil {
-		return Release{}, fmt.Errorf("ghrelease: GET %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return Release{}, fmt.Errorf("%w: %s", ErrNotFound, url)
-	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
-		hint := ""
-		if c.Token == "" {
-			hint = " (set GITHUB_TOKEN to raise the limit)"
-		}
-		return Release{}, fmt.Errorf("%w: %s said %s%s", ErrRateLimited, url, resp.Status, hint)
-	case resp.StatusCode != http.StatusOK:
-		return Release{}, fmt.Errorf("ghrelease: GET %s: %s", url, resp.Status)
-	}
-
-	// 8 MiB is orders of magnitude more than a release document and
-	// still refuses to buffer a hostile endless body.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return Release{}, fmt.Errorf("ghrelease: reading %s: %w", url, err)
+		return Release{}, err
 	}
 	var r Release
 	if err := json.Unmarshal(body, &r); err != nil {
@@ -205,6 +249,48 @@ func (c *Client) get(ctx context.Context, url string) (Release, error) {
 		return Release{}, fmt.Errorf("%w: %s returned a release with no tag", ErrNotFound, url)
 	}
 	return r, nil
+}
+
+// fetch is one API GET: the headers, the status handling and the size cap
+// every release call shares.
+func (c *Client) fetch(ctx context.Context, url string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, APITimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ghrelease: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	c.authorize(req)
+
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ghrelease: GET %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, url)
+	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
+		hint := ""
+		if c.Token == "" {
+			hint = " (set GITHUB_TOKEN to raise the limit)"
+		}
+		return nil, fmt.Errorf("%w: %s said %s%s", ErrRateLimited, url, resp.Status, hint)
+	case resp.StatusCode != http.StatusOK:
+		return nil, fmt.Errorf("ghrelease: GET %s: %s", url, resp.Status)
+	}
+
+	// 8 MiB is orders of magnitude more than a release document and
+	// still refuses to buffer a hostile endless body.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("ghrelease: reading %s: %w", url, err)
+	}
+	return body, nil
 }
 
 func (c *Client) authorize(req *http.Request) {
@@ -386,4 +472,36 @@ func checkFile(a Asset, dst string) error {
 			dst, st.Size(), a.Size)
 	}
 	return VerifyFile(a.Name, dst)
+}
+
+// appVersionRE reads "app-vX.Y.Z" off the front of a tag or of a
+// `git describe` stamp ("app-v0.3.0-4-g1a2b3c4-dirty").
+var appVersionRE = regexp.MustCompile(`^app-v(\d+)\.(\d+)\.(\d+)`)
+
+// AppNewer reports whether the app release tagged candidate is newer than
+// the running app, whose version stamp is running. Numeric, part by part.
+// A running stamp that is not an app version — "(devel)", a bare hash from
+// a build with no app tag behind it — is never told about a newer release:
+// a developer's build is not something to nag about.
+func AppNewer(candidate, running string) bool {
+	c := appVersionRE.FindStringSubmatch(candidate)
+	r := appVersionRE.FindStringSubmatch(running)
+	if c == nil || r == nil {
+		return false
+	}
+	for i := 1; i <= 3; i++ {
+		cn, rn := atoi(c[i]), atoi(r[i])
+		if cn != rn {
+			return cn > rn
+		}
+	}
+	return false
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, ch := range s {
+		n = n*10 + int(ch-'0')
+	}
+	return n
 }

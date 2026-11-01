@@ -1,5 +1,7 @@
 # Plan — phase 2 of `core-app`: install, auto-detect, and the library manager
 
+> **History.** The window this plan describes was redesigned on 2026-10-31; the current design is [`app-ux-pass-plan.md`](app-ux-pass-plan.md). The words and buttons below (Details tab, Dry run, Sync + prune, Flash file…, Take, typed confirmations) are the old ones.
+
 Addendum to `companion-app-plan.md` (S0–S10 shipped as v0.1.3, 2026-09-15). The user's
 phase-2 asks, 2026-09-15: the app finds the iPod by itself and the only time it stops is when
 Core is not on it (one-button install); it manages the library — pulls missing cover art,

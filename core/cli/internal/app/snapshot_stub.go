@@ -7,3 +7,7 @@ package app
 func Snapshot(st State, w, h int, out string) error { return ErrNoHeadless }
 
 func snapshotWith(st State, w, h int, out string, tweak func(*UI)) error { return ErrNoHeadless }
+
+func SnapshotTheme(st State, t Theme, w, h int, out string) error { return ErrNoHeadless }
+
+func SnapshotDialog(st State, t Theme, kind string, w, h int, out string) error { return ErrNoHeadless }

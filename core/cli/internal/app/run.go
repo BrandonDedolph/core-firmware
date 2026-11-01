@@ -64,6 +64,7 @@ func runWindow(o Options) error {
 	}()
 
 	var ops op.Ops
+	title := "Core"
 	for {
 		switch e := w.Event().(type) {
 		case gio.DestroyEvent:
@@ -72,6 +73,13 @@ func runWindow(o Options) error {
 			gtx := gio.NewContext(&ops, e)
 			u.Layout(gtx)
 			e.Frame(gtx.Ops)
+			// The title follows the iPod: "Brandon's iPod · Core" while
+			// one is connected, "Core" otherwise. Set only on a change —
+			// an Option per frame is a window message per frame.
+			if t := u.Title(); t != title {
+				title = t
+				w.Option(gio.Title(t))
+			}
 		}
 	}
 }

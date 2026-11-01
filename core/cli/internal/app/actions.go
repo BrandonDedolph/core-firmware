@@ -130,15 +130,25 @@ func (u *UI) startSync(kind JobKind) {
 	})
 }
 
+// startCheck asks GitHub for the latest release. It runs once by itself
+// after the first Refresh that finds an iPod (see afterJob) and again from
+// the menu. A failure is a line in the log and nothing else: the header is
+// not the place to say that a network request the user did not make went
+// wrong, so the job itself ends cleanly and the header simply shows no
+// update state.
 func (u *UI) startCheck() {
 	u.start(JobCheck, func(ctx context.Context, emit func(Event)) error {
 		emit(Event{Kind: EventProgress, Text: "asking GitHub", Pct: -1})
 		rel, err := u.be.Release(ctx)
+		if err != nil {
+			rel.Checked, rel.Err = true, err.Error()
+		}
 		u.mu.Lock()
 		u.newRel = &rel
 		u.mu.Unlock()
 		if err != nil {
-			return err
+			emit(Event{Kind: EventLog, Text: "could not check for updates: " + firstLine(err.Error())})
+			return nil
 		}
 		emit(Event{Kind: EventLog, Text: "latest release: " + rel.Tag + " (" + rel.Asset + ")"})
 		if rel.Notes != "" {
@@ -166,7 +176,10 @@ func (u *UI) startUpdate() {
 		if err != nil {
 			return err
 		}
-		return u.flashFile(ctx, file, cli, emit)
+		if err := u.flashFile(ctx, file, cli, emit); err != nil {
+			return err
+		}
+		return u.readBack(ctx, emit)
 	})
 }
 
@@ -186,8 +199,37 @@ func (u *UI) startFlash(file string) {
 		if file == "" {
 			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or press Flash file…")
 		}
-		return u.flashFile(ctx, file, cli, emit)
+		if err := u.flashFile(ctx, file, cli, emit); err != nil {
+			return err
+		}
+		return u.readBack(ctx, emit)
 	})
+}
+
+// readBack is the one tail every write shares — Flash, Update and Install:
+// read the device again and hand the result to the window, so the header
+// says what is on the iPod NOW. Before it, a flash returned straight after
+// the write and the window kept the old version until a replug (the detect
+// poll keys on path and serial, which a flash does not change).
+//
+// It runs on the job goroutine and publishes under the mutex like every
+// other job result.
+func (u *UI) readBack(ctx context.Context, emit func(Event)) error {
+	dev, lib, err := u.be.Refresh(ctx)
+	if err != nil {
+		return err
+	}
+	u.mu.Lock()
+	u.newDev, u.newLib = &dev, &lib
+	u.mu.Unlock()
+	now := dev.Installed.Description
+	if now == "" {
+		now = dev.Firmware
+	}
+	if now != "" {
+		emit(Event{Kind: EventLog, Text: "firmware now: " + now})
+	}
+	return nil
 }
 
 // flashFile is the shared tail of Flash and Update.
@@ -305,15 +347,7 @@ func (u *UI) startInstall(file string) {
 			}
 		}
 
-		dev, lib, rerr := u.be.Refresh(ctx)
-		if rerr != nil {
-			return rerr
-		}
-		u.mu.Lock()
-		u.newDev, u.newLib = &dev, &lib
-		u.mu.Unlock()
-		emit(Event{Kind: EventLog, Text: "firmware now: " + dev.Installed.Description})
-		return nil
+		return u.readBack(ctx, emit)
 	})
 }
 

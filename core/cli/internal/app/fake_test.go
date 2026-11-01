@@ -60,6 +60,13 @@ type fakeBackend struct {
 	installAns   string
 	installErr   error
 
+	// releaseCalls and refreshCalls count the two reads the header's
+	// after-job behaviour adds; flashFirmware is what a successful fake
+	// Flash leaves installed, so a test can see the header follow it.
+	releaseCalls  int
+	refreshCalls  int
+	flashFirmware string
+
 	syncCalls   []syncer.Options
 	flashCalls  []string
 	flashPrompt string
@@ -168,6 +175,7 @@ func (f *fakeBackend) FetchThumb(ctx context.Context, url string) (image.Image, 
 func (f *fakeBackend) Refresh(ctx context.Context) (Device, Library, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.refreshCalls++
 	if f.pods == nil {
 		return f.dev, f.lib, f.refreshErr
 	}
@@ -305,6 +313,7 @@ func (f *fakeBackend) Sync(ctx context.Context, o syncer.Options, emit func(Even
 func (f *fakeBackend) Release(ctx context.Context) (Release, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.releaseCalls++
 	return f.rel, f.releaseErr
 }
 
@@ -338,6 +347,11 @@ func (f *fakeBackend) Flash(ctx context.Context, file string,
 		return errors.New("aborted at the confirmation prompt")
 	}
 	emit(Event{Kind: EventLog, Text: "VERIFIED"})
+	f.mu.Lock()
+	if f.flashFirmware != "" {
+		f.dev.Firmware = f.flashFirmware
+	}
+	f.mu.Unlock()
 	return nil
 }
 

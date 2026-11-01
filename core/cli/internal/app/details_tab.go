@@ -7,8 +7,6 @@ import (
 	"gioui.org/layout"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
-
-	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
 )
 
 // The Details tab: everything the four cards used to carry that is not a
@@ -186,7 +184,6 @@ func (u *UI) musicFacts(gtx C) D {
 				return u.buttonRow(gtx,
 					btn{&u.dryRunBtn, "Dry run", false, ready},
 					btn{&u.pruneBtn, "Sync + prune", false, ready},
-					btn{&u.ejectBtn, "Eject", false, !busy && u.st.Device.Volume != ""},
 				)
 			}),
 		)
@@ -238,14 +235,4 @@ func (u *UI) footerSource() string {
 		return "Music folder: " + src
 	}
 	return "No music folder chosen"
-}
-
-// sizeLine is the top bar's third fact: how full the iPod is. It is the
-// device's whole size until something reads the volume's free space, which
-// nothing here does yet — so it says what it knows and not what it guesses.
-func (u *UI) sizeLine() string {
-	if u.st.Device.Size <= 0 {
-		return ""
-	}
-	return disk.HumanSize(u.st.Device.Size)
 }

@@ -220,6 +220,10 @@ func (b *RealBackend) Refresh(ctx context.Context) (Device, Library, error) {
 			// with no way to ask, leaves it empty and the header falls
 			// back — a name is not worth an error on a refresh.
 			d.Label, _ = disk.VolumeLabel(d.Volume)
+			// Free space for the header. Same rule as the label: a
+			// volume that will not say is a header without the figure,
+			// not a failed refresh.
+			d.Free, d.Capacity, _ = disk.VolumeSpace(d.Volume)
 		}
 	}
 	// "Reading a raw disk needs Administrator" is worth saying on the

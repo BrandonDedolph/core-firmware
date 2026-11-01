@@ -100,6 +100,7 @@ func TestSnapshotTheTabs(t *testing.T) {
 		{"grid", DemoState()},
 		{"library", LibraryState()},
 		{"details", func() State { st := DemoState(); st.Tab = TabDetails; return st }()},
+		{"menu", MenuState()},
 	}
 	sizes := [][2]int{{900, 600}, {MinWidth, MinHeight}}
 	for _, c := range cases {
@@ -130,6 +131,7 @@ func TestSnapshotOnyx(t *testing.T) {
 		{"onyx-grid", DemoState()},
 		{"onyx-library", LibraryState()},
 		{"onyx-looking", LookingState()},
+		{"onyx-menu", MenuState()},
 	}
 	for _, c := range cases {
 		out := filepath.Join(dir, c.name+"-900x600.png")

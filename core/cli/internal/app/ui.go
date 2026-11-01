@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"gioui.org/font"
-	"gioui.org/io/clipboard"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -27,7 +25,6 @@ import (
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/artfetch"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/disk"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/flasher"
-	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/fwpart"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/librarian"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/organizer"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
@@ -110,6 +107,10 @@ type dialogRequest struct {
 	want string
 	// okLabel is the confirming button's text.
 	okLabel string
+	// info marks a dialog that only says something (About): the body is
+	// set in the text face rather than the plan's monospace, and there
+	// is one button.
+	info bool
 	// reply carries the typed answer, or "" for a cancel. Buffered, so
 	// a job that has already given up cannot wedge the UI goroutine.
 	reply chan string
@@ -194,7 +195,7 @@ type UI struct {
 	editingName bool
 
 	browseBtn                                   widget.Clickable
-	dryRunBtn, syncBtn, pruneBtn, cancelBtn     widget.Clickable
+	dryRunBtn, pruneBtn, cancelBtn              widget.Clickable
 	checkBtn, updateBtn, flashBtn, flashOpenBtn widget.Clickable
 	backupBtn, ejectBtn, copyBtn                widget.Clickable
 	nameClick, nameSaveBtn, nameCancelBtn       widget.Clickable
@@ -217,6 +218,21 @@ type UI struct {
 	namesTick    widget.Bool
 	organizeTick widget.Bool
 	discTick     widget.Bool
+
+	// The header's own Cancel (the Details card keeps its own: one
+	// Clickable drawn twice in a frame is a button that only works in
+	// one of the two places), the "···" button and its menu.
+	headCancelBtn widget.Clickable
+	menuBtn       widget.Clickable
+	menuScrim     widget.Clickable
+	menuClicks    [menuCount]widget.Clickable
+	themeClicks   [3]widget.Clickable
+	// topH is the top bar's height in the last frame: where the menu
+	// hangs from.
+	topH int
+	// autoChecked records that this launch has asked GitHub once by
+	// itself; the menu's Check for updates asks again.
+	autoChecked bool
 
 	pickerOK bool
 }
@@ -362,12 +378,9 @@ func (u *UI) drain() {
 	u.askQueue = nil
 	u.mu.Unlock()
 
-	for _, e := range events {
-		u.st.Apply(e)
-		u.afterJob(e)
-	}
 	if dev != nil {
 		u.st.Device = *dev
+		u.st.Ejected = false
 		// The label came off the volume; the friendly name is ours,
 		// and this is the only place the two are joined.
 		u.st.Device.Name = u.cfg.NameFor(dev.Serial)
@@ -387,12 +400,24 @@ func (u *UI) drain() {
 	if rel != nil {
 		u.st.Release = *rel
 	}
+	// The events go after the results they announce: a job publishes its
+	// result and THEN returns, so a Done and the device it read arrive in
+	// the same drain, and afterJob has to see the new device — not the
+	// one the job replaced — to decide what follows.
+	for _, e := range events {
+		u.st.Apply(e)
+		u.afterJob(e)
+	}
 	switch {
 	case path != "" && pathFor == JobSync:
 		u.setSource(path)
 	case path != "" && pathFor == JobFlash:
+		// The menu's "Flash an image file…" fills the path and shows it
+		// where the Flash button is. Picking a file is not consent to
+		// write it.
 		u.st.FlashFile = path
 		u.flashEd.SetText(path)
+		u.st.Tab = TabDetails
 	case path != "" && pathFor == JobInstall:
 		// "Install from a file…" is one gesture: the file dialog IS the
 		// decision, and a second click on a button that appeared where
@@ -475,7 +500,20 @@ func (u *UI) afterJob(e Event) {
 		return
 	}
 	switch e.Job {
+	case JobEject:
+		u.st.Ejected = true
+	case JobSync, JobSyncPrune:
+		// The counts in the footer and the header's free space are the
+		// volume's; a sync just changed both.
+		u.later(u.startRefresh)
 	case JobRefresh:
+		// Once per launch, the first time an iPod is there: ask GitHub
+		// whether there is something newer, so Update appears without
+		// anybody pressing Check.
+		if !u.autoChecked && u.st.Device.Found {
+			u.autoChecked = true
+			u.later(u.startCheck)
+		}
 		if u.st.Source == "" {
 			return
 		}
@@ -539,6 +577,8 @@ func (u *UI) saveConfig() {
 func (u *UI) Layout(gtx C) D {
 	u.drain()
 	if u.dlg != nil {
+		// A dialog replaces the menu that opened it.
+		u.st.MenuOpen = false
 		u.dialogEvents(gtx)
 	} else {
 		u.events(gtx)
@@ -558,10 +598,13 @@ func (u *UI) Layout(gtx C) D {
 			return u.page(g)
 		}),
 		layout.Expanded(func(gtx C) D {
-			if u.dlg == nil {
-				return D{}
+			if u.dlg != nil {
+				return u.dialog(gtx)
 			}
-			return u.dialog(gtx)
+			if u.st.MenuOpen {
+				return u.menuLayer(gtx)
+			}
+			return D{}
 		}),
 	)
 }
@@ -602,9 +645,6 @@ func (u *UI) events(gtx C) {
 		if u.dryRunBtn.Clicked(gtx) {
 			u.startSync(JobDryRun)
 		}
-		if u.syncBtn.Clicked(gtx) {
-			u.startSync(JobSync)
-		}
 		if u.pruneBtn.Clicked(gtx) {
 			u.startSync(JobSyncPrune)
 		}
@@ -630,15 +670,21 @@ func (u *UI) events(gtx C) {
 		}
 	}
 	u.nameEvents(gtx, busy)
-	if u.st.CanCancel() && u.cancelBtn.Clicked(gtx) {
+	cancel := u.cancelBtn.Clicked(gtx)
+	if u.headCancelBtn.Clicked(gtx) {
+		cancel = true
+	}
+	if u.st.CanCancel() && cancel {
 		u.st.Logf("cancel requested")
 		u.run.Cancel()
 	}
 	if u.copyBtn.Clicked(gtx) {
-		text := strings.Join(u.st.Log, "\n") + "\n"
-		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(text))})
-		u.st.Logf("copied %d log lines to the clipboard", len(u.st.Log))
+		u.copyLog(gtx)
 	}
+	if u.menuBtn.Clicked(gtx) {
+		u.st.MenuOpen = !u.st.MenuOpen
+	}
+	u.menuEvents(gtx)
 
 	// The source field is saved as it is edited, not on some Save
 	// button nobody would press.
@@ -804,63 +850,29 @@ func (u *UI) page(gtx C) D {
 	)
 }
 
-// topBar is the mockup's one-line-each frame: who this iPod is, what the
-// window is about to do, and the ONE primary button that does it.
+// topBar is the window's one header: the brand, who this iPod is and what
+// it is doing, and the actions — the ONE primary button, Eject beside it,
+// and the "···" menu.
 //
-// The button's label is the decision (State.Primary): Install Core on a stock
-// iPod, Sync when the library and the device differ, Update when a newer
-// release is known, Eject when there is nothing left. Eject is also offered
-// beside Sync, because "sync, then unplug" is one session and the second half
-// should not need another screen.
+// The button's label is the decision (State.Primary), spelled as what it
+// will do (State.PrimaryLabel): "Install Core" on a stock iPod, "Sync 7
+// albums" when the library and the device differ, "Update to v0.2.2" when a
+// newer release is known, Eject when there is nothing left. While a job that
+// can be stopped runs, a Cancel takes the primary's place.
 func (u *UI) topBar(gtx C) D {
-	head, sub := u.topStatus()
-	headCol := u.pal.Ink
-	if u.st.Job != nil && u.st.Job.Failed && !u.st.Busy() {
-		// A job that failed is a warning: its line is the accent.
-		headCol = u.pal.Accent
-	}
-	act := u.st.Primary()
-	busy := u.st.Busy()
-	return layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.
+	dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.
 		Layout(gtx, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(u.brand),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(18)}.Layout),
-				layout.Rigid(func(gtx C) D {
-					gtx.Constraints.Max.X = gtx.Constraints.Max.X / 3
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(u.line(16, u.pal.Ink, u.deviceHead())),
-						layout.Rigid(u.line(11, u.pal.Muted, u.deviceSub())),
-					)
-				}),
-				layout.Flexed(1, func(gtx C) D {
-					return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx C) D {
-						gtx.Constraints.Min.X = gtx.Constraints.Max.X
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(u.line(13, headCol, head)),
-							layout.Rigid(u.line(11, u.pal.Muted, sub)),
-						)
-					})
-				}),
-				layout.Rigid(func(gtx C) D {
-					if act == ActionNone {
-						return D{}
-					}
-					return u.button(gtx, btn{&u.primaryBtn, act.Label(), true, !busy})
-				}),
-				layout.Rigid(func(gtx C) D {
-					// The secondary Eject, only where the primary is
-					// something else and there is a volume to let go of.
-					if act == ActionEject || act == ActionNone || u.st.Device.Volume == "" {
-						return D{}
-					}
-					return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx C) D {
-						return u.button(gtx, btn{&u.ejectBtn, "Eject", false, !busy})
-					})
-				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(20)}.Layout),
+				layout.Flexed(1, u.deviceBlock),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(u.actions),
 			)
 		})
+	u.topH = dims.Size.Y
+	return dims
 }
 
 // brand is the lockup at the left of the top bar: the boot screen's mark and
@@ -879,86 +891,210 @@ func (u *UI) brand(gtx C) D {
 	)
 }
 
-// deviceHead is the iPod's name, or what the window is looking for.
-func (u *UI) deviceHead() string {
+// deviceBlock is the two lines in the middle of the bar: the iPod's name
+// (and its model, when the name is one the user gave it), and one status
+// line.
+func (u *UI) deviceBlock(gtx C) D {
+	name, model := u.headName()
+	nameCol, weight := u.pal.Ink, font.Bold
 	if !u.st.Device.Found {
-		return "No iPod"
+		nameCol, weight = u.pal.Muted, font.SemiBold
 	}
-	return u.st.Device.DisplayName()
+	status, statusCol := u.statusLine()
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					l := material.Label(u.th, unit.Sp(14), name)
+					l.Font.Weight = weight
+					l.Color = nameCol
+					l.MaxLines = 1
+					l.Truncator = " "
+					return l.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx C) D {
+					if model == "" {
+						return D{}
+					}
+					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				layout.Flexed(1, func(gtx C) D {
+					if model == "" {
+						return D{}
+					}
+					l := material.Label(u.th, unit.Sp(12.5), model)
+					l.Color = u.pal.Muted
+					l.MaxLines = 1
+					l.Truncator = " "
+					return l.Layout(gtx)
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+		layout.Rigid(u.line(11.5, statusCol, status)),
+	)
 }
 
-// deviceSub is the firmware and the size, one line: the mockup's
-// "Core v0.1.3 · up to date · 20.3 GB of 74.5 GB".
-func (u *UI) deviceSub() string {
+// headName is line 1 of the device block: what to call this iPod, and the
+// model beside it when the first half is a name the user chose. A name is
+// remembered in config.json against the disk's serial; without one the
+// model IS the name, and saying it twice would be noise.
+func (u *UI) headName() (name, model string) {
 	d := u.st.Device
 	if !d.Found {
-		if u.st.Detecting {
-			return "watching every two seconds"
-		}
-		return "not connected"
+		return "No iPod yet", ""
 	}
-	var parts []string
-	switch {
-	case d.Installed.Kind == fwpart.Other:
-		parts = append(parts, "Apple firmware")
-	case installedTag(d.Firmware) != "":
-		parts = append(parts, "Core "+installedTag(d.Firmware))
-	default:
-		parts = append(parts, "Core")
+	m := strings.TrimSpace(d.Model)
+	if m == "" {
+		m = DefaultDeviceName
 	}
-	switch {
-	case u.st.UpdateAvailable():
-		parts = append(parts, u.st.Release.Tag+" available")
-	case u.st.Release.Checked && u.st.Release.Err == "":
-		parts = append(parts, "up to date")
+	if u.st.Phase() == PhaseNotInstalled {
+		return m, "Apple firmware"
 	}
-	if sz := u.sizeLine(); sz != "" {
-		parts = append(parts, sz)
+	if n := strings.TrimSpace(d.Name); n != "" {
+		return n, m
 	}
-	return strings.Join(parts, "  ·  ")
+	return m, ""
 }
 
-// topStatus is the middle of the bar: the sentence that says what the one
-// button is for. A running job owns it — a status line that still says "7
-// albums to sync" while the sync runs is a line nobody reads twice.
-func (u *UI) topStatus() (head, sub string) {
-	if u.st.Busy() || (u.st.Job != nil && u.st.Job.Failed) {
-		return u.st.StatusLine(), u.jobSub()
+// statusLine is line 2 of the device block, and its colour.
+//
+// A running job owns it ("sync: copying … · 42%"), except the update check,
+// which is the "checking…" in the ordinary line — it runs by itself at
+// launch, and a header that flickers to "check for updates: asking GitHub"
+// every time the app opens is a header shouting about nothing. A job that
+// failed is the one warning, in the accent; the check never fails here (its
+// errors go to the log).
+func (u *UI) statusLine() (string, color.NRGBA) {
+	d, j := u.st.Device, u.st.Job
+	if j != nil && j.Kind != JobCheck {
+		switch {
+		case j.Running():
+			s := u.st.StatusLine()
+			if j.Pct > 0 && j.Pct < 1 {
+				s += fmt.Sprintf("  ·  %.0f%%", j.Pct*100)
+			}
+			return s, u.pal.MutedD
+		case j.Failed:
+			return u.st.StatusLine(), u.pal.Accent
+		}
+	}
+	if u.st.Ejected && d.Found {
+		return "Ejected — safe to unplug", u.pal.MutedD
 	}
 	switch u.st.Phase() {
 	case PhaseLooking:
-		return "Looking for an iPod…", "hold Select + Menu, then Select + Play at the Apple logo"
+		if u.st.Detecting {
+			return "looking every two seconds", u.pal.Muted
+		}
+		return "not connected", u.pal.Muted
 	case PhaseNotInstalled:
-		return "Core is not installed on this iPod",
-			"Apple's firmware is backed up to a file first"
+		// The size, not the free space: nothing of ours is on it yet,
+		// and "74.5 GB free of 74.5" reads as a riddle.
+		n := d.Capacity
+		if n <= 0 {
+			n = d.Size
+		}
+		if n <= 0 {
+			return "", u.pal.Muted
+		}
+		v, unit := humanBinary(n)
+		return v + " " + unit, u.pal.Muted
 	}
-	if n := u.st.PendingAlbums(); n > 0 {
-		return fmt.Sprintf("%d album%s to sync", n, plural(n)),
-			fmt.Sprintf("%d tracks · %s · from %s", u.st.PendingTracks(),
-				disk.HumanSize(u.st.PendingBytes()), sourceName(u.st.Source))
+	var parts []string
+	if tag := installedTag(d.Firmware); tag != "" {
+		parts = append(parts, "Core "+tag)
+	} else {
+		parts = append(parts, "Core")
 	}
-	if u.st.LibraryChanged {
-		return "The library changed", "renamed files are copied again on the next sync"
+	switch {
+	case j.Running() && j.Kind == JobCheck:
+		parts = append(parts, "checking…")
+	case u.st.UpdateAvailable():
+		parts = append(parts, u.st.Release.Tag+" available")
+	case u.st.Release.Checked && u.st.Release.Err == "" && u.st.Release.Tag != "":
+		parts = append(parts, "up to date")
 	}
-	if u.st.UpdateAvailable() {
-		return "A newer Core is available", u.st.Release.Tag + " · " + u.st.Release.Asset
+	if sp := u.spaceText(); sp != "" {
+		parts = append(parts, sp)
 	}
-	if len(u.st.Albums) > 0 {
-		return "Everything is on the iPod", "eject before pulling the cable"
-	}
-	return "Ready", "choose a music folder to see your albums"
+	return strings.Join(parts, "  ·  "), u.pal.Muted
 }
 
-// jobSub is the second line while a job runs: its own progress text, which
-// the status line above has already had the job name prefixed to.
-func (u *UI) jobSub() string {
-	if u.st.Job == nil {
-		return ""
+// spaceText is "51.2 GB free of 74.5": the music volume's free space and
+// size as its file system reports them, in the binary units Explorer calls
+// GB. The total's unit is left off when it is the same as the free figure's.
+// Before the volume has been read it is the disk's size, and with neither it
+// is nothing.
+func (u *UI) spaceText() string {
+	d := u.st.Device
+	if d.Capacity > 0 {
+		fv, fu := humanBinary(d.Free)
+		tv, tu := humanBinary(d.Capacity)
+		if fu == tu {
+			return fv + " " + fu + " free of " + tv
+		}
+		return fv + " " + fu + " free of " + tv + " " + tu
 	}
-	if u.st.Job.Pct > 0 && u.st.Job.Pct < 1 {
-		return fmt.Sprintf("%.0f%%", u.st.Job.Pct*100)
+	if d.Size > 0 {
+		v, unit := humanBinary(d.Size)
+		return v + " " + unit
 	}
 	return ""
+}
+
+// humanBinary is a byte count in 1024-based units with the names Windows
+// gives them (GB, MB, KB), one decimal for GB.
+func humanBinary(n int64) (string, string) {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f", float64(n)/(1<<30)), "GB"
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f", float64(n)/(1<<20)), "MB"
+	default:
+		return fmt.Sprintf("%.0f", float64(n)/(1<<10)), "KB"
+	}
+}
+
+// actions is the right of the bar: primary (or Cancel), Eject, "···".
+func (u *UI) actions(gtx C) D {
+	act := u.st.Primary()
+	busy := u.st.Busy()
+	if u.st.Ejected && act == ActionEject {
+		act = ActionNone
+	}
+	var children []layout.FlexChild
+	add := func(w layout.Widget) {
+		if len(children) > 0 {
+			children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout))
+		}
+		children = append(children, layout.Rigid(w))
+	}
+	switch {
+	case u.st.CanCancel():
+		add(func(gtx C) D { return u.button(gtx, btn{&u.headCancelBtn, "Cancel", false, true}) })
+	case act != ActionNone:
+		add(func(gtx C) D {
+			return u.button(gtx, btn{&u.primaryBtn, u.st.PrimaryLabel(), true, !busy})
+		})
+	}
+	// Eject beside the primary, wherever the primary is something else
+	// and there is a volume to let go of: "sync, then unplug" is one
+	// session.
+	if act != ActionEject && act != ActionNone && u.st.Device.Volume != "" {
+		add(func(gtx C) D { return u.button(gtx, btn{&u.ejectBtn, "Eject", false, !busy}) })
+	}
+	add(func(gtx C) D { return u.button(gtx, btn{&u.menuBtn, "···", false, true}) })
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// Title is the window's title: the iPod's name while one is connected.
+func (u *UI) Title() string {
+	if !u.st.Device.Found {
+		return "Core"
+	}
+	name, _ := u.headName()
+	return name + " · Core"
 }
 
 // sourceName is the last element of the music folder, for a line that has
@@ -1486,7 +1622,11 @@ func (u *UI) dialog(gtx C) D {
 						// box. Cap the height at what the text actually
 						// needs and the dialog shrinks to its content;
 						// a long plan still scrolls.
-						if want := len(lines) * gtx.Sp(unit.Sp(16)); want < gtx.Constraints.Max.Y {
+						lh := unit.Sp(16)
+						if u.dlg.info {
+							lh = unit.Sp(19)
+						}
+						if want := len(lines) * gtx.Sp(lh); want < gtx.Constraints.Max.Y {
 							gtx.Constraints.Max.Y = want
 						}
 						gtx.Constraints.Min.Y = 0
@@ -1495,6 +1635,9 @@ func (u *UI) dialog(gtx C) D {
 						return list.Layout(gtx, len(lines), func(gtx C, i int) D {
 							l := material.Label(u.th, unit.Sp(11), lines[i])
 							l.Font = Mono
+							if u.dlg.info {
+								l = material.Label(u.th, unit.Sp(12), lines[i])
+							}
 							l.Color = u.pal.MutedD
 							l.MaxLines = 1
 							l.Truncator = " "
@@ -1502,7 +1645,12 @@ func (u *UI) dialog(gtx C) D {
 						})
 					}),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(u.text(13, u.pal.Ink, u.dlg.prompt)),
+					layout.Rigid(func(gtx C) D {
+						if u.dlg.prompt == "" {
+							return D{}
+						}
+						return u.text(13, u.pal.Ink, u.dlg.prompt)(gtx)
+					}),
 					layout.Rigid(func(gtx C) D {
 						if u.dlg.want == "" {
 							return D{}
@@ -1516,6 +1664,9 @@ func (u *UI) dialog(gtx C) D {
 						ok := u.dlg.want == "" || strings.TrimSpace(u.confirmEd.Text()) == u.dlg.want
 						return layout.Flex{}.Layout(gtx,
 							layout.Rigid(func(gtx C) D {
+								if u.dlg.info {
+									return D{}
+								}
 								return u.button(gtx, btn{&u.dlgCancel, "Cancel", false, true})
 							}),
 							layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),

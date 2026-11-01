@@ -164,6 +164,7 @@ func (u *UI) applyDetect(n *detectNews) {
 		// showing 928 songs on a drive that is not there is a card that
 		// will be believed.
 		u.st.Device = Device{Err: reason, Elevated: u.st.Device.Elevated}
+		u.st.Ejected = false
 		u.st.Library = Library{}
 		if reason != "" {
 			u.st.Logf("%s", reason)

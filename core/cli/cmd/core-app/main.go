@@ -17,7 +17,7 @@
 //	core-app --source DIR             open it with the music folder preset
 //	core-app --log FILE               append startup diagnostics to FILE
 //	core-app --no-detect              do not poll for the iPod
-//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled]
+//	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu]
 //	              [--size 900x600] [--tab albums|library|details]
 //	              [--theme system|linen|onyx]
 //	                                  render one frame headless and exit
@@ -50,7 +50,7 @@ func main() {
 	var (
 		screenshot = flag.String("screenshot", "", "Render one frame to this PNG and exit (no window)")
 		stateName  = flag.String("state", "demo",
-			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled")
+			"Which canned state --screenshot renders: demo, library, empty, looking, notinstalled, menu")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
 		tabName  = flag.String("tab", "", "Which tab --screenshot shows: albums, library, details (default: the state's own)")
 		source   = flag.String("source", "", "Preset the music source folder")
@@ -141,9 +141,11 @@ func cannedState(name string) (app.State, error) {
 		return app.NotInstalledState(), nil
 	case "library", "fix":
 		return app.LibraryState(), nil
+	case "menu":
+		return app.MenuState(), nil
 	default:
 		return app.State{}, fmt.Errorf(
-			"--state %q: expected demo, library, empty, looking or notinstalled", name)
+			"--state %q: expected demo, library, empty, looking, notinstalled or menu", name)
 	}
 }
 

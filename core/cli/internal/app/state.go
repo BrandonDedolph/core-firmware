@@ -167,9 +167,15 @@ type Device struct {
 	// turns on — Other means Apple's firmware is still on this iPod and
 	// there is nothing else to offer but an install — and it is the zero
 	// Installed until something has actually classified the device.
-	Installed             fwpart.Installed
-	Tested                bool
-	Volume                string
+	Installed fwpart.Installed
+	Tested    bool
+	Volume    string
+	// Free and Capacity are the music volume's free and total bytes, as
+	// its file system reports them (disk.VolumeSpace) — read off the
+	// volume, not derived from the disk's size, which also counts the
+	// firmware partition and the FAT. Both zero when nothing has read
+	// them.
+	Free, Capacity        int64
 	Firmware              string
 	OSOSOK                bool
 	OSOSNote              string
@@ -300,8 +306,15 @@ type State struct {
 	// --no-detect run leaves it false and the screen says nothing it
 	// cannot deliver.
 	Detecting bool
-	Job       *JobStatus
-	Log       []string
+	// Ejected records a finished Eject: the header says the iPod is
+	// safe to unplug until the poll loses it (or a Refresh reads it
+	// again).
+	Ejected bool
+	// MenuOpen is the "···" menu. It is a view field, like Tab, so a
+	// canned state can be shot with the menu on screen.
+	MenuOpen bool
+	Job      *JobStatus
+	Log      []string
 
 	// Tab is which of the three screens the body shows.
 	Tab Tab
@@ -570,6 +583,23 @@ func (a Action) Label() string {
 	default:
 		return ""
 	}
+}
+
+// PrimaryLabel is the top bar's button as it is drawn: the action, with
+// the count or the version that says what pressing it will do — "Sync 7
+// albums", "Update to v0.2.2".
+func (s *State) PrimaryLabel() string {
+	a := s.Primary()
+	switch a {
+	case ActionSync:
+		if n := s.PendingAlbums(); n > 0 {
+			return fmt.Sprintf("Sync %d album%s", n, plural(n))
+		}
+		return "Sync changes"
+	case ActionUpdate:
+		return "Update to " + s.Release.Tag
+	}
+	return a.Label()
 }
 
 // Primary is the whole decision table for the top bar's button.

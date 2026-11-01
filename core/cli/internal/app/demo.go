@@ -34,13 +34,17 @@ func DemoState() State {
 		Device: Device{
 			Found:      true,
 			Path:       `\\.\PhysicalDrive2`,
+			Name:       "Brandon's iPod",
 			Model:      "iPod Video 5.5G 80 GB",
 			Serial:     "000A2700168F1E3C",
 			Size:       80_026_361_856,
 			SectorSize: 2048,
 			Tested:     true,
 			Volume:     `D:\`,
-			Firmware:   "v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
+			// The bench volume: 74.5 GB as Explorer counts it, 51.2 free.
+			Free:     54_975_581_388,
+			Capacity: 79_993_765_888,
+			Firmware: "v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
 			Installed: fwpart.Installed{
 				Kind: fwpart.Core, Version: "v0.1.2", BuildID: "2026-09-14T22:41:07Z g928727d",
 				Description: "Core v0.1.2 (build 2026-09-14T22:41:07Z g928727d)",
@@ -237,6 +241,14 @@ func LibraryState() State {
 	return st
 }
 
+// MenuState is the demo with the "···" menu open, for reviewing the menu
+// from a shell.
+func MenuState() State {
+	st := DemoState()
+	st.MenuOpen = true
+	return st
+}
+
 // EmptyState is the first run: nothing plugged in, nothing configured.
 func EmptyState() State {
 	st := State{
@@ -279,6 +291,8 @@ func NotInstalledState() State {
 			Serial:     "000A2700168F1E3C",
 			Label:      "IPOD",
 			Size:       80_026_361_856,
+			Free:       79_960_000_000,
+			Capacity:   79_993_765_888,
 			SectorSize: 2048,
 			Tested:     true,
 			Volume:     `D:\`,

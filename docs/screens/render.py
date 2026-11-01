@@ -397,8 +397,44 @@ regular_13  = regular_12
 bold_17     = bold_18
 
 # glyphs used as literals on-device
-LAQUO = "‹"   # 'single left angle quote
+LAQUO = "‹"   # 'single left angle quote (no longer used for chrome marks)
 RAQUO = "›"
+
+# The disclosure chevron is a DRAWN mark since 2026-10-31, not the quote glyph:
+# core/ui/chrome.c g_chev_cov, a 4x7 coverage mask from tools/chevron_mask.py
+# (1.25 px stroke), blended like glyph coverage. Mirrored for the header's
+# back mark. Same bytes as the firmware table.
+CHEV_W, CHEV_H = 4, 7
+CHEV_COV = [
+    120,  97,   0,   0,
+    107, 252,  72,   0,
+      0, 146, 241,  46,
+      0,   4, 226, 189,
+      0, 133, 245,  55,
+     95, 254,  84,   0,
+    132, 111,   0,   0,
+]
+CHEV_X = W - 16 - CHEV_W                 # right edge = the value column
+
+def chev_y(ry, rh):
+    """chrome.h UI_CHEV_Y: the mark's top for a row at ry of height rh."""
+    return ry + rh // 2 - CHEV_H // 2
+
+def row_base(ry, rh):
+    """chrome.h UI_ROW_BASE: a single-line row's text baseline — cap height
+    centred on the bar (was rh//2 + 3, which centred the x-height and left
+    Title Case labels two pixels high)."""
+    return ry + rh // 2 + 5
+
+def draw_chevron(sc, x, y, left, ink):
+    """core/ui/chrome.c ui_chevron: blend the mask at box top-left (x, y)."""
+    for j in range(CHEV_H):
+        for i in range(CHEV_W):
+            a = CHEV_COV[j * CHEV_W + i]
+            if not a:
+                continue
+            px = x + (CHEV_W - 1 - i if left else i)
+            sc.blend_px(px, y + j, ink, a)
 MIDDOT = "·"
 
 def text_width(s, font):
@@ -455,7 +491,15 @@ class Screen:
         return r
 
     def fill_round_rect(self, x, y, w, h, r, c):
-        """Integer-inset rounded rect — matches main.c fill_round_rect exactly."""
+        """Rounded rect. The firmware's ui_round_rect (core/ui/chrome.c) has been
+        anti-aliased since 2026-10-31 — bars, pills and plates alike — so this
+        is the AA form; the integer-inset version below is kept only as
+        fill_round_rect_stepped for reference."""
+        return self.fill_round_rect_aa(x, y, w, h, r, c)
+
+    def fill_round_rect_stepped(self, x, y, w, h, r, c):
+        """Integer-inset rounded rect — what main.c fill_round_rect drew before
+        the corners were anti-aliased. No caller; kept for comparison."""
         if r < 1:
             self.fill_rect(x, y, w, h, c)
             return
@@ -476,8 +520,8 @@ class Screen:
             self.fill_rect(x + inset, y + ry, w - 2 * inset, 1, c)
 
     def fill_round_rect_aa(self, x, y, w, h, r, c):
-        """AA rounded rect for plates: solid body + 4x4 supersampled corners
-        blended onto the existing framebuffer (matches main.c)."""
+        """AA rounded rect: solid body + 4x4 supersampled corners blended onto
+        the existing framebuffer (matches core/ui/chrome.c ui_round_rect)."""
         if r < 1:
             self.fill_rect(x, y, w, h, c)
             return
@@ -551,6 +595,22 @@ class Screen:
                     _l2s(lg * a + LIN[bg] * (1 - a)),
                     _l2s(lb * a + LIN[bb] * (1 - a)),
                 )
+
+    def blend_px(self, x, y, c, a255):
+        """One pixel of `c` over the framebuffer at coverage a255 (0..255),
+        gamma-correct like the corner and glyph blends. chevron() uses it."""
+        if not (0 <= x < W and 0 <= y < H) or a255 == 0:
+            return
+        if a255 >= 255:
+            self.px[x, y] = c
+            return
+        a = a255 / 255.0
+        br, bg, bb = self.px[x, y]
+        self.px[x, y] = (
+            _l2s(LIN[c[0]] * a + LIN[br] * (1 - a)),
+            _l2s(LIN[c[1]] * a + LIN[bg] * (1 - a)),
+            _l2s(LIN[c[2]] * a + LIN[bb] * (1 - a)),
+        )
 
     # -- text (gamma-correct) -------------------------------------------
     def text(self, x, baseline, s, font, ink, clip=None):
@@ -694,7 +754,8 @@ def status_strip(sc, left="", pct=78, locked=False, sleep=None):
 def header(sc, title, right=None, back=False):
     x = 12
     if back:
-        x = sc.text(x, HDR_BASE, LAQUO, FONT_HEADER, MUTED2) + 4
+        draw_chevron(sc, x, HDR_BASE - 8, True, MUTED2)     # ui_header: mirrored mark
+        x += CHEV_W + 4
     sc.text(x, HDR_BASE, title, FONT_HEADER, INK)
     if right:
         sc.text_right(W - 12, HDR_BASE - 1, right, FONT_SMALL, MUTED2)
@@ -719,7 +780,7 @@ def list_row(sc, y0, r, text, sub=None, right=None, chevron=False,
              selected=False, greyed=False, chip=None, rh=ROW_H,
              title_offset=0, title_priority=False):
     ry = y0 + r * rh
-    rowmid = ry + rh // 2 + 3
+    rowmid = row_base(ry, rh)
     if selected:
         sc.fill_round_rect(6, ry + 1, W - 16, rh - 2, 4, SEL_BG)
         fg, subc, rightc, chevc = SEL_FG, SEL_SUB, SEL_SUB, SEL_SUB
@@ -755,7 +816,7 @@ def list_row(sc, y0, r, text, sub=None, right=None, chevron=False,
         else:
             title_right = reserved
     elif chevron:
-        title_right = W - 18 - 4
+        title_right = CHEV_X - 6
     else:
         title_right = W - 16
     avail = title_right - tx
@@ -769,7 +830,7 @@ def list_row(sc, y0, r, text, sub=None, right=None, chevron=False,
     if show_right:
         sc.text_right(W - 16, rowmid, right, bold_11, rightc)
     elif chevron:
-        sc.text(W - 18, rowmid, RAQUO, FONT_ROW, chevc)
+        draw_chevron(sc, CHEV_X, chev_y(ry, rh), False, chevc)
 
 
 # ---------------------------------------------------------------------------
@@ -853,10 +914,10 @@ def screen_detail(sel=DETAIL_SEL):
         fg = SEL_FG if sel else INK
         nc = SEL_SUB if sel else MUTED2
         num = str(r + 1)
-        sc.text_right(24, ry + 15, num, FONT_SMALL, nc)
+        sc.text_right(24, row_base(ry, ROW_H), num, FONT_SMALL, nc)
         dw = text_width(dur, bold_11)
-        sc.text_right(W - 16, ry + 15, dur, bold_11, SEL_SUB if sel else MUTED_D)
-        sc.text(30, ry + 15, t, FONT_HEADER if sel else FONT_ROW, fg,
+        sc.text_right(W - 16, row_base(ry, ROW_H), dur, bold_11, SEL_SUB if sel else MUTED_D)
+        sc.text(30, row_base(ry, ROW_H), t, FONT_HEADER if sel else FONT_ROW, fg,
                 clip=(30, W - 16 - dw - 8))
     scrollbar(sc, 108, 0, 5, DETAIL_N)
     return sc.img
@@ -1221,8 +1282,8 @@ def screen_battery_page():
     status_strip(sc)                 # main.c settings_render_cur
     # the Charge Rate row, selected (the only row)
     _sel_bar(sc, LIST_Y0, ROW_H, 0)
-    sc.text(14, LIST_Y0 + 15, "Charge Rate", FONT_HEADER, SEL_FG)
-    sc.text_right(W - 16, LIST_Y0 + 15, "%d mA" % BT_RATE_MA, regular_11, SEL_SUB)
+    sc.text(14, row_base(LIST_Y0, ROW_H), "Charge Rate", FONT_HEADER, SEL_FG)
+    sc.text_right(W - 16, row_base(LIST_Y0, ROW_H), "%d mA" % BT_RATE_MA, regular_11, SEL_SUB)
     # headline
     sc.text(16, BP_HEAD_BASE, "Charging", FONT_TITLE, INK)
     sc.text_right(W - 16, BP_HEAD_BASE, "%d mV" % BT_MV, FONT_TITLE, INK)
@@ -2065,11 +2126,11 @@ def screen_settings(sel=ROOT_SEL):
         fg = SEL_FG if is_sel else INK
         rightc = SEL_SUB if is_sel else MUTED_D
         chevc = SEL_SUB if is_sel else CHEVRON
-        sc.text(14, ry + 15, ROOT_L[r], FONT_HEADER if is_sel else FONT_ROW, fg)
+        sc.text(14, row_base(ry, ROW_H), ROOT_L[r], FONT_HEADER if is_sel else FONT_ROW, fg)
         if r in right_vals:
-            sc.text_right(W - 16, ry + 15, right_vals[r], regular_11, rightc)
+            sc.text_right(W - 16, row_base(ry, ROW_H), right_vals[r], regular_11, rightc)
         else:
-            sc.text(W - 18, ry + 15, RAQUO, FONT_ROW, chevc)
+            draw_chevron(sc, CHEV_X, chev_y(ry, ROW_H), False, chevc)
     scrollbar(sc, LIST_Y0, top, LIST_ROWS, len(ROOT_L))
     return sc.img
 
@@ -2093,8 +2154,8 @@ def screen_datetime(sel=DT_SEL):
             _sel_bar(sc, LIST_Y0, ROW_H, r)
         fg = SEL_FG if is_sel else INK
         rightc = SEL_SUB if is_sel else MUTED_D
-        sc.text(14, ry + 15, label, FONT_HEADER if is_sel else FONT_ROW, fg)
-        sc.text_right(W - 16, ry + 15, val, regular_11, rightc)
+        sc.text(14, row_base(ry, ROW_H), label, FONT_HEADER if is_sel else FONT_ROW, fg)
+        sc.text_right(W - 16, row_base(ry, ROW_H), val, regular_11, rightc)
     return sc.img
 
 
@@ -2276,8 +2337,8 @@ def screen_sound(rows=None, sel_row=SOUND_SEL):
         if locked:
             fg = rightc = SEL_SUB if sel else MUTED2
         if den <= 0:                 # SELECT row: label + value, centred
-            sc.text(14, ry + 15, label, FONT_HEADER if sel else FONT_ROW, fg)
-            sc.text_right(W - 16, ry + 15, val, regular_11, rightc)
+            sc.text(14, row_base(ry, ROW_H), label, FONT_HEADER if sel else FONT_ROW, fg)
+            sc.text_right(W - 16, row_base(ry, ROW_H), val, regular_11, rightc)
             continue
         sc.text(14, ry + 11, label, FONT_HEADER if sel else FONT_ROW, fg)
         sc.text_right(W - 16, ry + 11, val, regular_11, rightc)
@@ -2311,8 +2372,8 @@ def screen_playback():
             _sel_bar(sc, LIST_Y0, ROW_H, r)
         fg = SEL_FG if sel else INK
         rightc = SEL_SUB if sel else MUTED_D
-        sc.text(14, ry + 15, label, FONT_HEADER if sel else FONT_ROW, fg)
-        sc.text_right(W - 16, ry + 15, val, regular_11, rightc)
+        sc.text(14, row_base(ry, ROW_H), label, FONT_HEADER if sel else FONT_ROW, fg)
+        sc.text_right(W - 16, row_base(ry, ROW_H), val, regular_11, rightc)
     return sc.img
 
 
@@ -2334,9 +2395,9 @@ def screen_clicker():
         # list_render right-value slot — regular_11 (FONT_SUB), MUTED_D when
         # not selected, same as any other row's right value.
         markc = SEL_SUB if sel else MUTED_D
-        sc.text(14, ry + 15, label, FONT_HEADER if sel else FONT_ROW, fg)
+        sc.text(14, row_base(ry, ROW_H), label, FONT_HEADER if sel else FONT_ROW, fg)
         if r == CLICK_ACTIVE:
-            sc.text_right(W - 16, ry + 15, MIDDOT, regular_11, markc)  # marks active
+            sc.text_right(W - 16, row_base(ry, ROW_H), MIDDOT, regular_11, markc)  # marks active
     return sc.img
 
 

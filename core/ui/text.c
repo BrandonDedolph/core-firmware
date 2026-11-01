@@ -111,6 +111,24 @@ static const uint8_t linear_to_srgb6[256] = {
      61,  61,  62,  62,  62,  62,  62,  62,  62,  62,  62,  63,  63,  63,  63,  63,
 };
 
+uint16_t text_blend565(uint16_t bg, uint16_t ink, uint8_t alpha)
+{
+    if (alpha == 0)   return bg;
+    if (alpha == 255) return ink;
+    uint8_t inv = (uint8_t)(255 - alpha);
+    unsigned xr = (unsigned)srgb5_to_linear[(ink >> 11) & 0x1F] * alpha
+                + (unsigned)srgb5_to_linear[(bg  >> 11) & 0x1F] * inv;
+    unsigned xg = (unsigned)srgb6_to_linear[(ink >>  5) & 0x3F] * alpha
+                + (unsigned)srgb6_to_linear[(bg  >>  5) & 0x3F] * inv;
+    unsigned xb = (unsigned)srgb5_to_linear[ ink        & 0x1F] * alpha
+                + (unsigned)srgb5_to_linear[ bg         & 0x1F] * inv;
+    /* Same exact floor(x/255) add-shift as the glyph loop. */
+    uint8_t r = linear_to_srgb5[(xr + 1 + (xr >> 8)) >> 8];
+    uint8_t g = linear_to_srgb6[(xg + 1 + (xg >> 8)) >> 8];
+    uint8_t b = linear_to_srgb5[(xb + 1 + (xb >> 8)) >> 8];
+    return (uint16_t)(((uint16_t)r << 11) | ((uint16_t)g << 5) | (uint16_t)b);
+}
+
 /* Decode one UTF-8 sequence at *p, advance *p past it, and return the codepoint
  * (or -1 at the terminating NUL). Malformed bytes yield U+FFFD and advance one
  * byte so a bad string can't stall. UI strings are UTF-8; ASCII is the 1-byte

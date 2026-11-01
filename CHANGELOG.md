@@ -3,6 +3,15 @@
 Each release lists what changed on the device since the previous one. Versions are git tags;
 the boot screen and Settings → About show the one the device runs.
 
+## Unreleased
+
+- **Smoother list rows.** The selection bar's corners are anti-aliased instead
+  of stepped, and so is every other rounded shape in the UI. The small
+  disclosure mark at the right of a row that opens a list is a drawn chevron
+  now, not a typographic quote mark, and the header's back mark matches it.
+  Row text sits two pixels lower, so a label's capitals are centred in the bar
+  rather than riding high.
+
 ## v0.2.0 — 2026-09-24
 
 Since v0.1.3. MP3 plays, Search and the A–Z letter are on every list, On-The-Go, Shuffle

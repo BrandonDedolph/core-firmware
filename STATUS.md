@@ -3,6 +3,44 @@
 The README is the canonical public story; this doc is the running list of
 what works, what doesn't, and what to pick up next.
 
+## 2026-10-31 — list rows: smooth bar corners, a drawn chevron, caps centred — UNFLASHED
+
+Three things about the list row, all measured on the host through the real
+`ui/chrome.c` (the `render_rows` harness in the session scratchpad draws a
+Music menu and dumps the framebuffer; `tests/ui/chrome_test.c` now pins each).
+
+1. **The selection bar's corners are anti-aliased.** `ui_round_rect` was an
+   integer-inset stepped rect — at r=4 three visible stair steps per corner.
+   The 4x4-supersampled AA rect that only the volume plate and boot mark had
+   (a `static` in main.c) is now THE `ui_round_rect` in chrome.c, so bars,
+   pills, plates, the search ring and the battery toast all share it; main.c
+   lost its copy and its linear `blend565`. The corner fringe blends through
+   `text_blend565`, newly exported from text.c — the same gamma-correct blend
+   the glyph edges use, so the arc falls off the way the type does (a linear
+   blend reads heavier at the same coverage). 64 blended pixels per bar.
+2. **The chevron is a drawn mark, not a glyph.** It was Nunito's single angle
+   quote (`›`) from the regular-12 face: 3x6 px, punctuation, and it read as a
+   stray mark on the panel. Now `ui_chevron()`: a 4x7 coverage mask with a
+   1.25 px stroke (`tools/chevron_mask.py` regenerates it; the user picked
+   this weight from a sheet of seven rendered options), blended like glyph
+   coverage, right edge on the value column (`UI_CHEV_X` = W-20), centred on
+   the bar (`UI_CHEV_Y`). The header's back mark is the same mask mirrored,
+   with the title starting where it did. Colours unchanged (PAL_CHEVRON /
+   PAL_SEL_SUB). Settings rows use the same call.
+3. **Row text sits 2 px lower.** The user saw the highlighted text riding high
+   in its bar; measured, every Title Case label's cap band was centred 2 px
+   above the bar's centre (the old `rh/2 + 3` baseline centred the x-height).
+   `UI_ROW_BASE(ry, rh)` = `rh/2 + 5` centres the caps exactly, and is now the
+   one rule for chrome.c rows, Settings rows and the album tracklist in
+   main.c (five `ry + 15` sites). Two-line rows (`ROW_H2`) are unchanged.
+
+`docs/screens/render.py` follows all three (AA `fill_round_rect`,
+`draw_chevron`, `row_base`), and the gallery is re-rendered — 40 PNG/GIFs
+changed, mostly by the corner pixels. 82 suites, ARM `-Werror` clean,
+`make verify-hw` OK. Bench: Music, Settings and an album tracklist — the bar's
+corners, the chevron's weight at arm's length, and that no row's text looks
+high; the marquee clip still starts at the bar interior.
+
 ## 2026-09-24 — "crunchiness": ReplayGain was clipping, UNFLASHED
 
 The report was a persistent texture during playback, after the pop rounds

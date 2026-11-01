@@ -71,6 +71,15 @@ int text_draw_clip_v(uint16_t *fb, int fb_w, int fb_h, int x, int y,
  * the pen the text_draw* calls return for the same string and font. */
 int text_width(const char *s, const text_font_t *font);
 
+/*
+ * The renderer's own pixel blend: `ink` over `bg` by coverage `alpha`
+ * (0..255), gamma-correct through the same sRGB<->linear tables the glyph
+ * edges use. Exported so anything else that anti-aliases an edge against the
+ * framebuffer (the rounded corners in chrome.c) fringes exactly the way type
+ * does; a linear-space-naive blend reads visibly heavier at the same coverage.
+ */
+uint16_t text_blend565(uint16_t bg, uint16_t ink, uint8_t alpha);
+
 /* Recommended row spacing (line height) for this face, in pixels. */
 int text_line_height(const text_font_t *font);
 

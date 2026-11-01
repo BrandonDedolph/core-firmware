@@ -79,6 +79,14 @@
 #define HDR_DIV_Y  38     /* header divider row                          */
 #define LIST_Y0    42     /* first list row top                          */
 #define ROW_H      24     /* px per single-line list row                 */
+/* Baseline of a single-line row's text, for a row top `ry` and height `rh`.
+ * Centres the CAP HEIGHT of the row faces on the selection bar: bold-13 caps
+ * are 10 px tall and the bar is rh-2 px, so the cap band sits at
+ * [mid-5, mid+5). It used to be rh/2+3, which centred the x-height instead and
+ * left every Title Case label riding two pixels high in its bar. One rule for
+ * chrome.c, Settings and the album tracklist, so a row never shifts between
+ * screens. */
+#define UI_ROW_BASE(ry, rh)  ((ry) + (rh) / 2 + 5)
 #define LIST_ROWS  8      /* visible rows: (240-42)/24 ~= 8              */
 
 /*
@@ -169,22 +177,37 @@ int  ui_text_ellipsis_fit(char *buf, int buf_sz, const char *s,
 
 /*
  * Bitwise integer square root — ~4 iterations for the radii used here, and no
- * multiply in the loop. Public because the anti-aliased modal corners and the
- * circular art masks in main.c need the same primitive; the form it replaced
- * stepped r up one at a time WITH a multiply, per scanline, on every list
- * repaint.
+ * multiply in the loop. Public because the circular art masks in main.c need
+ * it.
  */
 int ui_isqrt(int v);
 
-/* Largest corner radius the inset/coverage caches are sized for. */
+/* Largest corner radius the corner-coverage cache is sized for. */
 #define UI_RR_MAX_R 16
 
 /*
- * Filled rounded rectangle. The design's selection bars (r=4) and plates
- * (r=6) are rounded, not square. r < 1 degenerates to a plain fill; r is
- * clamped to half the smaller side and to an internal maximum.
+ * Filled rounded rectangle, anti-aliased. The design's selection bars (r=4)
+ * and plates (r=6) are rounded, not square. The corners' boundary pixels are
+ * blended into what the framebuffer already holds (gamma-correct, via
+ * text_blend565), so the background under them must be painted first.
+ * r < 1 degenerates to a plain fill; r is clamped to half the smaller side and
+ * to UI_RR_MAX_R. Reports the whole rect as damage.
  */
 void ui_round_rect(int x, int y, int w, int h, int r, uint16_t c);
+
+/*
+ * The disclosure chevron: a drawn mark, UI_CHEV_W x UI_CHEV_H, blended into the
+ * framebuffer from a hand-authored coverage mask through the text renderer's
+ * gamma blend — not a glyph. The Nunito single angle quote it replaces is
+ * punctuation, 3 px wide and squat at these sizes; it read as a stray mark on
+ * the panel. `left` mirrors it (the header's back mark). (x, y) is the box's
+ * top-left; a row centres it with UI_CHEV_Y. Reports its box as damage.
+ */
+#define UI_CHEV_W 4
+#define UI_CHEV_H 7
+#define UI_CHEV_X          (LCD_WIDTH - 16 - UI_CHEV_W)   /* right edge = value column */
+#define UI_CHEV_Y(ry, rh)  ((ry) + (rh) / 2 - UI_CHEV_H / 2)
+void ui_chevron(int x, int y, int left, uint16_t ink);
 
 /* ---------- List furniture ------------------------------------------- */
 

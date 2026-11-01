@@ -219,17 +219,17 @@ static void list_render(int screen, const settings_t *s, int sel)
             continue;
         }
 
-        /* Non-slider rows: label centred in the row height. */
-        st_text(14, ry + 15, settings_label(screen, r),
+        /* Non-slider rows: label's caps centred on the bar (UI_ROW_BASE). */
+        st_text(14, UI_ROW_BASE(ry, ROW_H), settings_label(screen, r),
                 is_sel ? F_HEADER : F_ROW, fg);
 
         if (is_toggle) {
             draw_toggle(ry, is_sel, on);
         } else if (buf[0]) {
-            st_text_right(16, ry + 15, buf, F_SUB, rightc);
+            st_text_right(16, UI_ROW_BASE(ry, ROW_H), buf, F_SUB, rightc);
         } else {
             /* submenu / action with no value -> chevron. */
-            st_text(LCD_WIDTH - 18, ry + 15, UI_GLYPH_RAQUO, F_ROW, chevc);
+            ui_chevron(UI_CHEV_X, UI_CHEV_Y(ry, ROW_H), 0, chevc);
         }
     }
 }

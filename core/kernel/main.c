@@ -155,94 +155,17 @@ static int ui_window_up(ui_window_t *w, uint32_t span, uint32_t now)
  * ------------------------------------------------------------------------- */
 
 /* Theme tokens (LINEN_*) and the Nunito face macros moved to ui/chrome.h,
- * next to the list chrome that consumes them. */
-/* Linear RGB565 blend: fg over bg by alpha a (0..256). Cheap (no gamma) — fine
- * for the subtle 1px anti-alias fringe on modal corners. */
-static uint16_t blend565(uint16_t bg, uint16_t fg, int a)
-{
-    int inv = 256 - a;
-    int r = (((fg >> 11) & 0x1F) * a + ((bg >> 11) & 0x1F) * inv) >> 8;
-    int g = (((fg >>  5) & 0x3F) * a + ((bg >>  5) & 0x3F) * inv) >> 8;
-    int b = (( fg        & 0x1F) * a + ( bg        & 0x1F) * inv) >> 8;
-    return (uint16_t)((r << 11) | (g << 5) | b);
-}
-
-/* 4x4-supersampled coverage of one corner quadrant, memoized per radius: the
- * count (0..16) of sub-samples inside the circle for corner pixel (ry, rx). The
- * AA rounded rect used to recompute this 16-sample loop for every corner pixel
- * of every paint, for a radius that is always one of a handful of values. */
+ * next to the list chrome that consumes them — and so has the anti-aliased
+ * rounded rect that used to live here as fill_round_rect_aa: it is
+ * ui_round_rect now, the one rounded rect for bars and plates alike. */
 #define AA_SS 16                            /* S*S sub-samples, S = 4          */
-static int     g_aa_r = -1;
-static uint8_t g_aa_mask[UI_RR_MAX_R * UI_RR_MAX_R];
-
-static const uint8_t *aa_corner_mask(int r)
-{
-    if (r != g_aa_r) {
-        const int S = 4, cN = r * 2 * S;             /* circle centre, x2S      */
-        for (int ry = 0; ry < r; ry++) {
-            for (int rx = 0; rx < r; rx++) {
-                int inside = 0;
-                for (int sy = 0; sy < S; sy++) {
-                    int dy = ry * 2 * S + sy * 2 + 1 - cN;
-                    for (int sx = 0; sx < S; sx++) {
-                        int dx = rx * 2 * S + sx * 2 + 1 - cN;
-                        if (dx * dx + dy * dy <= cN * cN) inside++;
-                    }
-                }
-                g_aa_mask[ry * UI_RR_MAX_R + rx] = (uint8_t)inside;
-            }
-        }
-        g_aa_r = r;
-    }
-    return g_aa_mask;
-}
-
-/* Anti-aliased filled rounded rect: solid interior + straight edges, with the
- * four corner quadrants super-sampled (4x4) so their boundary pixels blend into
- * whatever is already in the framebuffer — smooth corners instead of the integer
- * stair-steps of fill_round_rect. Reads the FB, so the background under the
- * corners must already be drawn (true for the modals). Costlier than the plain
- * version, so it is used only for the volume plate (drawn on events). */
-static void fill_round_rect_aa(int x, int y, int w, int h, int r, uint16_t c)
-{
-    if (r < 1) { console_fill_rect(x, y, w, h, c); return; }
-    if (2 * r > w) r = w / 2;
-    if (2 * r > h) r = h / 2;
-    if (r > UI_RR_MAX_R) r = UI_RR_MAX_R;
-    console_fill_rect(x, y + r, w, h - 2 * r, c);          /* solid middle band  */
-    /* The corner quadrants are blended straight into the framebuffer below, so
-     * they'd be invisible to the damage tracker (the edge fills stop at x+r).
-     * Report the whole rect once. */
-    console_damage_add(x, y, w, h);
-    uint16_t *fb = console_fb();
-    const uint8_t *mask = aa_corner_mask(r);
-    for (int ry = 0; ry < r; ry++) {
-        console_fill_rect(x + r, y + ry,         w - 2 * r, 1, c);   /* top edge */
-        console_fill_rect(x + r, y + h - 1 - ry, w - 2 * r, 1, c);   /* bot edge */
-        for (int rx = 0; rx < r; rx++) {
-            int inside = mask[ry * UI_RR_MAX_R + rx];
-            if (inside == 0) continue;
-            int a = inside * 256 / AA_SS;
-            int xs[2] = { x + rx, x + w - 1 - rx };
-            int ys[2] = { y + ry, y + h - 1 - ry };
-            for (int i = 0; i < 2; i++)
-                for (int j = 0; j < 2; j++) {
-                    int px = xs[i], py = ys[j];
-                    if (px < 0 || py < 0 || px >= LCD_WIDTH || py >= LCD_HEIGHT) continue;
-                    uint16_t *d = &fb[py * LCD_WIDTH + px];
-                    *d = (a >= 256) ? c : blend565(*d, c, a);
-                }
-        }
-    }
-}
-
 /* Anti-aliased filled disc of radius r, centred on the pixel EDGE (cx, cy) —
  * it covers pixels cx-r .. cx+r-1, the same convention as
- * fill_round_rect_aa(cx-r, cy-r, 2r, 2r, r). The boot mark's ring, dot and
- * hole. fill_round_rect_aa cannot draw it: its memoized corner mask stops at
+ * ui_round_rect(cx-r, cy-r, 2r, 2r, r). The boot mark's ring, dot and
+ * hole. ui_round_rect cannot draw it: its memoized corner mask stops at
  * UI_RR_MAX_R (16) and the ring is 19, and sizing that table for one caller
- * would grow it for every plate. Same 4x4 super-sampling and the same blend565
- * as the plates, boundary pixels only; pixels wholly inside are solid, wholly
+ * would grow it for every plate. Same 4x4 super-sampling and the same gamma
+ * blend as the plates, boundary pixels only; pixels wholly inside are solid, wholly
  * outside untouched. Reads the FB, so paint the background first, and paint
  * the discs largest first (the ring is an INK disc with a SURFACE disc inside
  * it). Drawn a few times per second at most (the boot screen), so the
@@ -252,7 +175,7 @@ static void fill_disc_aa(int cx, int cy, int r, uint16_t c)
     uint16_t *fb = console_fb();
     int R2 = (8 * r) * (8 * r);
     /* Blended straight into the framebuffer, so the damage tracker would never
-     * see it: report the bounding box once, as fill_round_rect_aa does. */
+     * see it: report the bounding box once, as ui_round_rect does. */
     console_damage_add(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
     for (int py = cy - r - 1; py <= cy + r; py++) {
         if (py < 0 || py >= LCD_HEIGHT) continue;
@@ -268,7 +191,8 @@ static void fill_disc_aa(int cx, int cy, int r, uint16_t c)
             }
             if (inside == 0) continue;
             uint16_t *d = &fb[py * LCD_WIDTH + px];
-            *d = (inside >= AA_SS) ? c : blend565(*d, c, inside * (256 / AA_SS));
+            *d = (inside >= AA_SS) ? c
+                : text_blend565(*d, c, (uint8_t)((inside * 255 + AA_SS / 2) / AA_SS));
         }
     }
 }
@@ -1654,7 +1578,7 @@ static void detail_row_draw(int r, int vi)
         int hi = 0;
         for (const char *p = "DISC "; *p; p++) h[hi++] = *p;
         u32_to_dec(h + hi, (unsigned)(-(int)v - 1));
-        ui_text(14, ry + 15, h, FONT_SMALL, LINEN_MUTED_D);
+        ui_text(14, UI_ROW_BASE(ry, ROW_H), h, FONT_SMALL, LINEN_MUTED_D);
         return;
     }
     int idx = v;
@@ -1676,7 +1600,7 @@ static void detail_row_draw(int r, int vi)
         u32_to_dec(num, (unsigned)(g_track_num[idx] ? g_track_num[idx]
                                                     : idx + 1));
         int nw = text_width(num, FONT_SMALL);
-        ui_text(num_rx - nw, ry + 15, num, FONT_SMALL, nc);
+        ui_text(num_rx - nw, UI_ROW_BASE(ry, ROW_H), num, FONT_SMALL, nc);
     }
     /* Duration on the right (from the index); the title must stop before it. */
     int title_right = LCD_WIDTH - 16;
@@ -1684,7 +1608,7 @@ static void detail_row_draw(int r, int vi)
         char dts[FMT_TIME_MAX];
         fmt_time(dts, g_track_dur[idx]);
         int dw = text_width(dts, text_font_bold_12());
-        ui_text(LCD_WIDTH - 16 - dw, ry + 15, dts, text_font_bold_12(),
+        ui_text(LCD_WIDTH - 16 - dw, UI_ROW_BASE(ry, ROW_H), dts, text_font_bold_12(),
                 is_sel ? LINEN_SEL_SUB : LINEN_MUTED_D);
         title_right = LCD_WIDTH - 16 - dw - 8;
     }
@@ -1697,10 +1621,10 @@ static void detail_row_draw(int r, int vi)
     const char *tt = g_track_title[idx] ? g_track_title[idx]
                                         : track_display(e->name);
     if (is_sel) {
-        mq_text(title_x, ry + 15, title_right - title_x, tt, tf, fg,
+        mq_text(title_x, UI_ROW_BASE(ry, ROW_H), title_right - title_x, tt, tf, fg,
                 LINEN_SEL_BG, ry, ry + ROW_H);
     } else {
-        ui_text_clip(title_x, ry + 15, tt, tf, fg, title_x, title_right);
+        ui_text_clip(title_x, UI_ROW_BASE(ry, ROW_H), tt, tf, fg, title_x, title_right);
     }
 }
 
@@ -4604,7 +4528,7 @@ static void draw_speaker(int sx, int sy, uint16_t c, int vol)
 static void volume_overlay_render(int vol, int limit)
 {
     const int PX = VOL_PLATE_X, PY = VOL_PLATE_Y, PW = VOL_PLATE_W, PH = VOL_PLATE_H;
-    fill_round_rect_aa(PX, PY, PW, PH, 8, LINEN_PLATE);    /* raised plate, AA r8  */
+    ui_round_rect(PX, PY, PW, PH, 8, LINEN_PLATE);    /* raised plate, AA r8  */
 
     draw_speaker(PX + 16, PY + PH / 2, LINEN_INK, vol);
 
@@ -4705,11 +4629,11 @@ static void nowplaying_transport_render(uint32_t elapsed_s, uint32_t total_s)
      * bh 8 with AA pill caps reads smoother than the old 6px integer-stepped
      * caps. */
     int pbx = 18, by = 209, bw = LCD_WIDTH - 36, bh = 8;
-    fill_round_rect_aa(pbx, by, bw, bh, bh / 2, LINEN_TRK);
+    ui_round_rect(pbx, by, bw, bh, bh / 2, LINEN_TRK);
     int fw = (total_s > 0) ? (int)((shown * (uint32_t)bw) / total_s) : 0;
     if (fw > bw) fw = bw;
     if (fw >= bh) {
-        fill_round_rect_aa(pbx, by, fw, bh, bh / 2, LINEN_INK);
+        ui_round_rect(pbx, by, fw, bh, bh / 2, LINEN_INK);
     } else if (fw > 0) {
         console_fill_rect(pbx, by, fw, bh, LINEN_INK);
     }
@@ -6338,8 +6262,8 @@ static void az_overlay_render(char ch)
 {
     const int PW = 66, PH = 66;
     int px = (LCD_WIDTH - PW) / 2, py = (LCD_HEIGHT - PH) / 2;
-    fill_round_rect_aa(px - 1, py - 1, PW + 2, PH + 2, 13, LINEN_BORDER);
-    fill_round_rect_aa(px, py, PW, PH, 12, LINEN_PLATE);
+    ui_round_rect(px - 1, py - 1, PW + 2, PH + 2, 13, LINEN_BORDER);
+    ui_round_rect(px, py, PW, PH, 12, LINEN_PLATE);
     char s[2] = { ch, '\0' };
     int w = text_width(s, FONT_TITLE);
     ui_text(px + (PW - w) / 2, py + PH / 2 + 8, s, FONT_TITLE, LINEN_INK);

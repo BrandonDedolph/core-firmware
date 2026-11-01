@@ -134,11 +134,88 @@ int main(void)
         xpect(&c, "round rect actually rounds (top row inset vs middle)",
               first > 0 && first < mid && mid == 60);
     }
+    {
+        /* The corners are anti-aliased: the boundary pixels of the arc are a
+         * BLEND of fill over background, neither pure. For r=6 at (40,50),
+         * the pixel one in from the top-left is on the arc's edge. The very
+         * corner pixel is outside the circle and must stay background. */
+        const uint16_t *fb = console_framebuffer();
+        uint16_t corner = fb[50 * LCD_WIDTH + 40];
+        uint16_t edge   = fb[51 * LCD_WIDTH + 41];
+        xpect(&c, "round rect leaves the very corner pixel untouched",
+              corner == 0x0000);
+        xpect(&c, "round rect blends the arc's boundary pixel (not bg, not fill)",
+              edge != 0x0000 && edge != 0xF800 && (edge & 0xF800) != 0
+              && (edge & 0x07FF) == 0);
+        /* Drawn into a black FB through text_blend565: red over black keeps
+         * green/blue at zero, so a partial red is the only legal value. */
+    }
+    /* The corner blend bypasses console_fill_rect, so the rect must report
+     * itself: the damage rect has to cover the whole box, corners included. */
+    console_clear(0x0000);
+    console_damage_reset();
+    ui_round_rect(40, 50, 60, 30, 6, 0xF800);
+    {
+        int dx, dy, dw, dh;
+        int any = console_damage_get(&dx, &dy, &dw, &dh);
+        xpect(&c, "round rect reports its whole box as damage",
+              any == 1 && dx <= 40 && dy <= 50 && dx + dw >= 100 && dy + dh >= 80);
+    }
     /* A rect hanging off the left/top edge must clip, not wrap or corrupt. */
     console_clear(0x0000);
     ui_round_rect(-20, -10, 60, 40, 6, 0x07E0);
     xpect(&c, "round rect clipped at the origin writes nothing off-panel",
           count_outside(0, 0, 40, 30, 0x07E0) == 0);
+
+    /* ---- 3b. the row's text is centred on its bar, and the chevron is a
+     *          drawn mark at the value column ------------------------------ */
+    {
+        /* Caps-only label: the ink's vertical centre must sit on the bar's.
+         * Before UI_ROW_BASE every Title Case label rode 2 px high. */
+        theme_set(0);
+        console_clear(LINEN_SURFACE);
+        ui_list_row(LIST_Y0, 1, "HIH", NULL, NULL, 1, 1, 0, NULL, 0, ROW_H);
+        int ry = LIST_Y0 + ROW_H;
+        const uint16_t *fb = console_framebuffer();
+        int lo = -1, hi = -1;
+        for (int y = ry + 1; y < ry + ROW_H - 1; y++)
+            for (int x = 14; x < 60; x++)
+                if (fb[y * LCD_WIDTH + x] != LINEN_SEL_BG) {
+                    if (lo < 0) lo = y;
+                    hi = y;
+                    break;
+                }
+        /* bar rows ry+1 .. ry+ROW_H-2, centre*2 = 2*ry + ROW_H - 1 */
+        int bar2 = 2 * ry + ROW_H - 1, ink2 = lo + hi;
+        xpect(&c, "selected row's caps are centred on the bar (within 1/2 px)",
+              lo > 0 && (ink2 - bar2 <= 1) && (bar2 - ink2 <= 1));
+        /* The chevron: ink inside its 4x7 box at the value column, none in
+         * the old glyph's spot to its right, and none above/below the box. */
+        int bx = UI_CHEV_X, by = UI_CHEV_Y(ry, ROW_H);
+        xpect(&c, "chevron draws inside its box",
+              count_in(bx, by, UI_CHEV_W, UI_CHEV_H, LINEN_SEL_BG)
+                  < UI_CHEV_W * UI_CHEV_H);
+        /* (Straight-edge rows only: the bar's own rounded corner blends
+         * into x = W-15.. on its first and last four rows.) */
+        xpect(&c, "chevron's right edge is the value column (W-16)",
+              count_in(LCD_WIDTH - 16, ry + 5, 4, ROW_H - 10, LINEN_SEL_BG)
+                  == 4 * (ROW_H - 10));
+        xpect(&c, "chevron stays clear of the bar's top and bottom rows",
+              count_in(bx - 2, ry + 1, UI_CHEV_W + 4, by - ry - 1, LINEN_SEL_BG)
+                  == (UI_CHEV_W + 4) * (by - ry - 1));
+        /* Its vertical centre is the bar's, like the text. */
+        xpect(&c, "chevron box is centred on the bar",
+              (2 * by + UI_CHEV_H - 1) - bar2 <= 1
+              && bar2 - (2 * by + UI_CHEV_H - 1) <= 1);
+        /* Mirrored mark in the header, where the back glyph was. */
+        console_clear(LINEN_SURFACE);
+        ui_header("Albums", NULL, 1);
+        xpect(&c, "header back mark is drawn at x=12 on the title's cap band",
+              count_in(12, HDR_BASE - 8, UI_CHEV_W, UI_CHEV_H, LINEN_SURFACE)
+                  < UI_CHEV_W * UI_CHEV_H
+              && count_in(12, HDR_BASE - 8, 1, UI_CHEV_H, LINEN_SURFACE)
+                  < UI_CHEV_H);
+    }
 
     /* ---- 4. ui_header --------------------------------------------------- */
     console_clear(0x0000);
@@ -214,7 +291,8 @@ int main(void)
         memcpy(snap, console_framebuffer(), sizeof snap);
 
         console_clear(LINEN_SURFACE);
-        int x = ui_text(12, HDR_BASE, UI_GLYPH_LAQUO, FONT_HEADER, LINEN_MUTED2) + 4;
+        ui_chevron(12, HDR_BASE - 8, 1, LINEN_MUTED2);
+        int x = 12 + UI_CHEV_W + 4;
         ui_text(x, HDR_BASE, "Artists", FONT_HEADER, LINEN_INK);
         int rw = text_width("3 / 12", FONT_SMALL);
         ui_text(LCD_WIDTH - 12 - rw, HDR_BASE - 1, "3 / 12", FONT_SMALL, LINEN_MUTED2);

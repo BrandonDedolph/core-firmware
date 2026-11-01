@@ -155,9 +155,7 @@ int ui_text_ellipsis(int x, int y, const char *s, const text_font_t *font,
 }
 
 
-/* Filled rounded rectangle (radius `r`) — the design's selection bars (r=4) and
- * plates (r=6) are rounded, not square; this replaces the hard console_fill_rect
- * at those spots. Each corner row is inset along a quarter-circle. */
+/* Bitwise integer sqrt — the circular art masks in main.c still want it. */
 int ui_isqrt(int v)
 {
     /* Bitwise integer sqrt: ~4 iterations for the radii we use, no multiply in
@@ -178,34 +176,111 @@ int ui_isqrt(int v)
     return (int)res;
 }
 
+/* 4x4-supersampled coverage of one corner quadrant, memoized for the last
+ * radius asked for: the count (0..16) of sub-samples inside the quarter circle
+ * for corner pixel (ry, rx). Radii come in a handful of values (4 for a
+ * selection bar, 6/8/12 for plates) and a list repaint asks for the same one
+ * every time, so one slot is enough; a modal over a list costs a recompute of
+ * at most 16*16*16 integer ops on the way in and out. */
+#define RR_SS 16                                 /* S*S sub-samples, S = 4 */
 static int     g_rr_r = -1;
-static uint8_t g_rr_inset[UI_RR_MAX_R];
+static uint8_t g_rr_cov[UI_RR_MAX_R * UI_RR_MAX_R];
 
-static const uint8_t *rr_insets(int r)
+static const uint8_t *rr_coverage(int r)
 {
     if (r != g_rr_r) {
-        for (int k = 0; k < r; k++) {
-            int dy = r - k;
-            g_rr_inset[k] = (uint8_t)(r - ui_isqrt(r * r - dy * dy));
+        const int S = 4, cN = r * 2 * S;             /* circle centre, x2S */
+        for (int ry = 0; ry < r; ry++) {
+            for (int rx = 0; rx < r; rx++) {
+                int inside = 0;
+                for (int sy = 0; sy < S; sy++) {
+                    int dy = ry * 2 * S + sy * 2 + 1 - cN;
+                    for (int sx = 0; sx < S; sx++) {
+                        int dx = rx * 2 * S + sx * 2 + 1 - cN;
+                        if (dx * dx + dy * dy <= cN * cN) inside++;
+                    }
+                }
+                g_rr_cov[ry * UI_RR_MAX_R + rx] = (uint8_t)inside;
+            }
         }
         g_rr_r = r;
     }
-    return g_rr_inset;
+    return g_rr_cov;
 }
 
+/* Filled rounded rectangle (radius `r`) — the design's selection bars (r=4)
+ * and plates (r=6) are rounded, not square. Solid interior and straight
+ * edges through console_fill_rect; the four corner quadrants are drawn from
+ * the super-sampled coverage above and their boundary pixels blended into
+ * whatever the framebuffer already holds, through the same gamma-correct
+ * blend the type uses — a smooth arc instead of the integer stair-steps the
+ * old per-scanline inset produced (at r=4 the bar's corner was three visible
+ * steps, every bit as jagged at 320x240 as it sounds). Reads the FB, so the
+ * background under the corners must already be painted: true everywhere
+ * this is called (a full paint starts from console_clear, a partial row
+ * repaint from ui_list_row_clear). Drawing the same rect twice over itself
+ * without a clear in between would only deepen the corner fringe slightly;
+ * it cannot bleed outside the rect. Cost at r=4: 64 blended pixels per bar. */
 void ui_round_rect(int x, int y, int w, int h, int r, uint16_t c)
 {
     if (r < 1) { console_fill_rect(x, y, w, h, c); return; }
     if (2 * r > w) r = w / 2;
     if (2 * r > h) r = h / 2;
     if (r > UI_RR_MAX_R) r = UI_RR_MAX_R;
-    const uint8_t *ins = rr_insets(r);
-    for (int ry = 0; ry < h; ry++) {
-        int inset = 0, k = -1;
-        if (ry < r)            k = ry;
-        else if (ry >= h - r)  k = h - 1 - ry;
-        if (k >= 0) inset = ins[k];
-        console_fill_rect(x + inset, y + ry, w - 2 * inset, 1, c);
+    console_fill_rect(x, y + r, w, h - 2 * r, c);          /* solid middle band  */
+    /* The corner pixels go straight into the framebuffer, invisible to the
+     * damage tracker (the edge fills stop at x+r). Report the whole rect once. */
+    console_damage_add(x, y, w, h);
+    uint16_t *fb = console_fb();
+    const uint8_t *cov = rr_coverage(r);
+    for (int ry = 0; ry < r; ry++) {
+        console_fill_rect(x + r, y + ry,         w - 2 * r, 1, c);   /* top edge */
+        console_fill_rect(x + r, y + h - 1 - ry, w - 2 * r, 1, c);   /* bot edge */
+        for (int rx = 0; rx < r; rx++) {
+            int inside = cov[ry * UI_RR_MAX_R + rx];
+            if (inside == 0) continue;
+            uint8_t a = (uint8_t)((inside * 255 + RR_SS / 2) / RR_SS);
+            int xs[2] = { x + rx, x + w - 1 - rx };
+            int ys[2] = { y + ry, y + h - 1 - ry };
+            for (int i = 0; i < 2; i++)
+                for (int j = 0; j < 2; j++) {
+                    int px = xs[i], py = ys[j];
+                    if (px < 0 || py < 0 || px >= LCD_WIDTH || py >= LCD_HEIGHT) continue;
+                    uint16_t *d = &fb[py * LCD_WIDTH + px];
+                    *d = (inside >= RR_SS) ? c : text_blend565(*d, c, a);
+                }
+        }
+    }
+}
+
+/* Coverage of the chevron, a ">" polyline with a 1.2 px stroke and round
+ * ends, rendered at 16x and box-filtered to 4x7 (tools/chevron_mask.py
+ * regenerates it). Column 0 is the two tips, column 3 the point. */
+static const uint8_t g_chev_cov[UI_CHEV_W * UI_CHEV_H] = {
+    120,  97,   0,   0,
+    107, 252,  72,   0,
+      0, 146, 241,  46,
+      0,   4, 226, 189,
+      0, 133, 245,  55,
+     95, 254,  84,   0,
+    132, 111,   0,   0,
+};
+
+void ui_chevron(int x, int y, int left, uint16_t ink)
+{
+    uint16_t *fb = console_fb();
+    console_damage_add(x, y, UI_CHEV_W, UI_CHEV_H);
+    for (int j = 0; j < UI_CHEV_H; j++) {
+        int py = y + j;
+        if (py < 0 || py >= LCD_HEIGHT) continue;
+        for (int i = 0; i < UI_CHEV_W; i++) {
+            int px = x + (left ? UI_CHEV_W - 1 - i : i);
+            if (px < 0 || px >= LCD_WIDTH) continue;
+            uint8_t a = g_chev_cov[j * UI_CHEV_W + i];
+            if (!a) continue;
+            uint16_t *d = &fb[py * LCD_WIDTH + px];
+            *d = text_blend565(*d, ink, a);
+        }
     }
 }
 
@@ -213,7 +288,11 @@ void ui_header(const char *title, const char *right, int back)
 {
     int x = 12;
     if (back) {
-        x = ui_text(x, HDR_BASE, UI_GLYPH_LAQUO, FONT_HEADER, LINEN_MUTED2) + 4;
+        /* Mirrored chevron, centred on the title's cap band (bold-13 caps are
+         * 10 px above HDR_BASE). The title starts where it did when the mark
+         * was the 4 px quote glyph plus a 4 px gap. */
+        ui_chevron(x, HDR_BASE - 8, 1, LINEN_MUTED2);
+        x += UI_CHEV_W + 4;
     }
     /* Measure the right-hand value FIRST: the title's room is what is left
      * after it, less an 8 px gap. Real titles overflow — a Songs list
@@ -241,7 +320,7 @@ void ui_list_row(int y0, int r, const char *text, const char *sub,
                         const uint16_t *chip, int title_priority, int rh)
 {
     int ry = y0 + r * rh;
-    int rowmid = ry + rh / 2 + 3;         /* vertical centre for value/chevron   */
+    int rowmid = UI_ROW_BASE(ry, rh);     /* baseline: caps centred on the bar   */
     uint16_t fg, subc, rightc, chevc;
     if (selected) {
         ui_round_rect(6, ry + 1, LCD_WIDTH - 16, rh - 2, 4, LINEN_SEL_BG);
@@ -297,7 +376,7 @@ void ui_list_row(int y0, int r, const char *text, const char *sub,
             title_right = reserved;
         }
     } else if (chevron) {
-        title_right = LCD_WIDTH - 18 - 4;
+        title_right = UI_CHEV_X - 6;
     } else {
         title_right = LCD_WIDTH - 16;
     }
@@ -307,8 +386,9 @@ void ui_list_row(int y0, int r, const char *text, const char *sub,
     int base  = sub ? ry + 16 : rowmid;
     int sub_y = ry + rh - 4;                   /* artist baseline, near row bottom */
     /* Marquee vertical clip. Top = the selection bar's interior (ry+1), NOT
-     * y-ascent: the font ascent (14) reaches 1px ABOVE the bar, and the clear
-     * would paint a sel-coloured line there ("clips above"). Bottom = just above
+     * y-ascent: the font's nominal ascent (14) used to reach 1px ABOVE the bar
+     * and the clear painted a sel-coloured line there ("clips above"); the
+     * bar interior is the right bound regardless. Bottom = just above
      * the artist baseline's cap (sub_y-10) so the scroll tick's clear can't erase
      * the static artist line. Single-line rows clip to the bar bottom. */
     int mqy0 = ry + 1;
@@ -325,7 +405,7 @@ void ui_list_row(int y0, int r, const char *text, const char *sub,
         ui_text(LCD_WIDTH - 16 - right_w, rowmid, right, text_font_bold_12(),
                 rightc);
     } else if (chevron) {
-        ui_text(LCD_WIDTH - 18, rowmid, UI_GLYPH_RAQUO, FONT_ROW, chevc);
+        ui_chevron(UI_CHEV_X, UI_CHEV_Y(ry, rh), 0, chevc);
     }
 }
 

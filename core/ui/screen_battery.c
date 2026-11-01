@@ -105,8 +105,7 @@ void screen_battery_toast_render(void)
     const int PX = BATTWARN_TOAST_X, PY = BATTWARN_TOAST_Y;
     const int PW = BATTWARN_TOAST_W, PH = BATTWARN_TOAST_H;
 
-    /* Integer-stepped corners: the anti-aliased plate (fill_round_rect_aa)
-     * is a static in main.c. r=6 matches the design's plate radius. */
+    /* r=6 matches the design's plate radius (anti-aliased, like every plate). */
     ui_round_rect(PX, PY, PW, PH, 6, LINEN_PLATE);
 
     toast_battery(PX + 14, PY + 12);

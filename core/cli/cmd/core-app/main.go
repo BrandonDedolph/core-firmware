@@ -21,7 +21,10 @@
 //	              [--size 900x600] [--tab music|fix|summary]
 //	              [--theme system|linen|onyx] [--drawer]
 //	              [--dialog write|holding|remove|about|album|preview]
-//	                                  render one frame headless and exit
+//	              [--source DIR]
+//	                                  render one frame headless and exit;
+//	                                  with --source, the grid, covers and the
+//	                                  playing album come from that music folder
 //
 // --screenshot is the review channel: a `-H windowsgui` process cannot
 // show anyone anything from a shell, and this writes the exact frame
@@ -57,7 +60,7 @@ func main() {
 				"duplicates (the duplicate-album chooser), tidy (the Fix tab with nothing to fix)")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
 		tabName  = flag.String("tab", "", "Which tab --screenshot shows: music, fix, summary (also albums, library, details; default: the state's own)")
-		source   = flag.String("source", "", "Preset the music source folder")
+		source   = flag.String("source", "", "Preset the music source folder (with --screenshot: draw that folder's albums and covers)")
 		logFile  = flag.String("log", "", "Append startup diagnostics to this file")
 		noDetect = flag.Bool("no-detect", false,
 			"Do not poll for the iPod every 2 seconds; the window stays on whatever it last read")
@@ -87,6 +90,16 @@ func main() {
 		st, err := cannedState(*stateName)
 		if err != nil {
 			fail(*logFile, err)
+		}
+		// --source under --screenshot is a real music folder under the
+		// canned state: its albums, covers and one real tracklist (read,
+		// never written).
+		if *source != "" {
+			lib, err := app.ReadShotLibrary(*source)
+			if err != nil {
+				fail(*logFile, fmt.Errorf("--source: %w", err))
+			}
+			app.UseShotLibrary(&st, lib)
 		}
 		st.LogOpen = *drawer
 		switch *tabName {

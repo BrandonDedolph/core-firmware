@@ -120,11 +120,10 @@ type Backend interface {
 	// changed since it was moved.
 	UndoFix(ctx context.Context, journal string, emit func(Event)) (*organizer.UndoReport, error)
 
-	// Thumbnail decodes one album folder's cover for the grid: the
-	// device's own folder.art sidecar when there is one, the embedded
-	// front cover otherwise. It is called off the UI goroutine by the
-	// thumbnail cache, never from a layout.
-	Thumbnail(dir string) (image.Image, error)
+	// Thumbnail decodes one album folder's own cover (AlbumPicture), fit
+	// to px device pixels. It is called off the UI goroutine by the cover
+	// cache, never from a layout.
+	Thumbnail(dir string, px int) (image.Image, error)
 	// FetchThumb downloads one art candidate's ~200 px thumbnail. It is
 	// on the Backend so the Library tab's tests draw the candidate row
 	// with no network at all.
@@ -746,9 +745,11 @@ func (b *RealBackend) UndoFix(ctx context.Context, journal string, emit func(Eve
 	return librarian.Undo(ctx, journal, librarian.Options{Progress: libEvents(emit)})
 }
 
-// Thumbnail is the grid's decode: the device's own sidecar, else the
-// album's embedded front cover.
-func (b *RealBackend) Thumbnail(dir string) (image.Image, error) { return AlbumThumbnail(dir) }
+// Thumbnail is the covers' decode: the album's embedded front cover, else
+// its cover.jpg, at the size it will be drawn.
+func (b *RealBackend) Thumbnail(dir string, px int) (image.Image, error) {
+	return AlbumPicture(dir, px)
+}
 
 // FetchThumb downloads one candidate's thumbnail.
 //

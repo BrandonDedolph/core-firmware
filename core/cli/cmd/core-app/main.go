@@ -18,7 +18,7 @@
 //	core-app --log FILE               append startup diagnostics to FILE
 //	core-app --no-detect              do not poll for the iPod
 //	core-app --screenshot OUT.png [--state demo|library|empty|looking|notinstalled|menu|advanced|album|playing|preview]
-//	              [--size 900x600] [--tab albums|library|details]
+//	              [--size 900x600] [--tab music|fix|summary]
 //	              [--theme system|linen|onyx] [--drawer]
 //	              [--dialog write|holding|remove|about|album|preview]
 //	                                  render one frame headless and exit
@@ -55,7 +55,7 @@ func main() {
 				"album (the album sheet, a track playing), playing (the same, sheet closed: the footer's bar), "+
 				"preview (the sync preview)")
 		size     = flag.String("size", "900x600", "--screenshot size, WxH")
-		tabName  = flag.String("tab", "", "Which tab --screenshot shows: albums, library, details (default: the state's own)")
+		tabName  = flag.String("tab", "", "Which tab --screenshot shows: music, fix, summary (also albums, library, details; default: the state's own)")
 		source   = flag.String("source", "", "Preset the music source folder")
 		logFile  = flag.String("log", "", "Append startup diagnostics to this file")
 		noDetect = flag.Bool("no-detect", false,
@@ -90,14 +90,14 @@ func main() {
 		st.LogOpen = *drawer
 		switch *tabName {
 		case "":
-		case "albums":
+		case "albums", "music":
 			st.Tab = app.TabAlbums
-		case "library":
+		case "library", "fix":
 			st.Tab = app.TabLibrary
-		case "details":
+		case "details", "summary":
 			st.Tab = app.TabDetails
 		default:
-			fail(*logFile, fmt.Errorf("--tab %q: want albums, library or details", *tabName))
+			fail(*logFile, fmt.Errorf("--tab %q: want music, fix or summary (or albums, library, details)", *tabName))
 		}
 		// The two sheets are the demo with one open.
 		if s := strings.ToLower(*stateName); *dialog == "" && (s == "album" || s == "preview") {

@@ -183,12 +183,11 @@ type UI struct {
 	planSynced bool
 
 	dlg *dialogRequest // the dialog on screen; UI goroutine only
-	// sheet is the album sheet (album.go), nil when closed; covers is its
-	// larger cover cache and audio the player behind it. newTracks,
+	// sheet is the album sheet (album.go), nil when closed; audio is the
+	// player. newTracks,
 	// trackDone and trackErr are the sheet's results from other
 	// goroutines (ReadTracks, the player's OnEnd and OnError), under mu.
 	sheet     *albumSheet
-	covers    *thumbCache
 	audio     audio
 	newTracks *tracksResult
 	trackDone bool
@@ -200,6 +199,7 @@ type UI struct {
 	npWarn                                      string
 	npWarnAt                                    time.Time
 	npPlayBtn, npNextBtn, npStopBtn, npTitleBtn widget.Clickable
+	npCoverBtn                                  widget.Clickable
 	npSeek                                      gesture.Click
 	npBarW                                      int
 
@@ -357,15 +357,12 @@ func NewUI(o Options) *UI {
 	// sidecars off the UI goroutine; the candidate row fetches 200 px
 	// thumbnails through the Backend, so a test sees a fake and no
 	// network.
-	u.thumbs = newThumbCache(func(dir string) (image.Image, error) {
+	u.thumbs = newThumbCache(func(key string) (image.Image, error) {
 		if u.be == nil {
 			return nil, ErrNoThumb
 		}
-		return u.be.Thumbnail(dir)
-	}, u.invalidate)
-	// The album sheet's 160 dp cover: the grid's source at twice its size.
-	u.covers = newThumbCache(func(dir string) (image.Image, error) {
-		return albumCover(dir, 2*ThumbSize)
+		dir, px := splitCoverKey(key)
+		return u.be.Thumbnail(dir, px)
 	}, u.invalidate)
 	u.audio = o.Audio
 	if u.audio == nil {
@@ -1442,7 +1439,7 @@ func (u *UI) tabItem(gtx C, t Tab, idx int) D {
 	label := t.String()
 	if t == TabLibrary {
 		if n := u.fixCount(); n > 0 {
-			label += "  " + itoa(n)
+			label += " · " + itoa(n)
 		}
 	}
 	return u.tabClicks[idx].Layout(gtx, func(gtx C) D {

@@ -2,15 +2,14 @@ package app
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +37,8 @@ import (
 // the only concurrency in the drawing half: a tile asks for a picture, gets
 // a placeholder now and the picture on a later frame, and the decode happens
 // on a worker rather than on the goroutine that has to produce 60 frames a
-// second. And AlbumThumbnail is the decode itself, which is the device's own
-// sidecar when there is one and the embedded cover when there is not.
+// second. And AlbumPicture is the decode itself: the album's own embedded
+// cover (or its cover.jpg), at the size the tile is drawn at.
 
 // Tile geometry. The mockup's grid is eight columns in a 900 px window; the
 // columns are computed from the width so a wider window gets more of them and
@@ -259,96 +258,100 @@ func (c *thumbCache) Loads() int {
 
 // --- decoding an album's cover ------------------------------------------
 
-// ThumbSize is the size covers are decoded down to for the grid. It is the
-// device's own folder.art size, which means the sidecar is used as it is.
-const ThumbSize = coreart.ArtSize
-
 // ErrNoThumb reports that an album folder has no picture anywhere: no
-// sidecar, no FLAC, no embedded cover. It is an ordinary outcome — the tile
+// embedded cover and no cover file. It is an ordinary outcome — the tile
 // falls back to the coloured plate with the album's initial — so it is a
 // sentinel rather than a message.
 var ErrNoThumb = errors.New("app: this album has no cover picture")
 
-// AlbumThumbnail decodes one album folder's cover for the grid.
-//
-// The device's own sidecar comes first: folder.art is already a 120x120
-// bitmap of exactly this picture, it costs a 28 KB read and no JPEG decode,
-// and using it means the grid shows what the iPod shows. Failing that, the
-// album's art source (the first FLAC, which is the file the sidecars and the
-// index read their cover from) is decoded and scaled down.
-func AlbumThumbnail(dir string) (image.Image, error) { return AlbumCover(dir, ThumbSize) }
+// coverFiles are the picture files a folder may carry beside its tracks,
+// tried in this order (any case, .jpg, .jpeg or .png) when no track has an
+// embedded cover.
+var coverFiles = []string{"cover", "folder", "front"}
 
-// AlbumCover is AlbumThumbnail at another size: the same sidecar-else-
-// embedded source, an embedded picture scaled to fit size. The album sheet
-// asks for twice the grid's size, for its 160 dp cover on a high-DPI screen.
-func AlbumCover(dir string, size int) (image.Image, error) {
+// AlbumPicture decodes one album folder's own cover — the first track's
+// embedded front cover, else cover.jpg / folder.jpg / front.jpg in the
+// folder (or the album folder above a Disc N one) — scaled down to fit px
+// device pixels, the size it is about to be drawn at. Never the device's
+// folder.art sidecar: that is a 120 px RGB565 thumbnail made for the iPod's
+// screen, and scaled up into a tile it is the blurry cover the app used to
+// show. Called off the UI goroutine by the cover cache.
+func AlbumPicture(dir string, px int) (image.Image, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, ErrNoThumb
 	}
-	for _, name := range []string{coreart.ArtName, coreart.ThumbName} {
-		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
-			if img, err := DecodeCART(b); err == nil {
-				return img, nil
+	if first, err := coreart.FirstAudio(dir); err == nil && first != "" {
+		if pic, err := coreart.ReadCover(first); err == nil && pic != nil {
+			if img, err := coreart.FromPicture(pic); err == nil {
+				return Downscale(img, px), nil
 			}
 		}
 	}
-	first, err := coreart.FirstAudio(dir)
-	if err != nil || first == "" {
-		return nil, ErrNoThumb
-	}
-	pic, err := coreart.ReadCover(first)
-	if err != nil {
-		return nil, err
-	}
-	if pic == nil {
-		return nil, ErrNoThumb
-	}
-	img, err := coreart.FromPicture(pic)
-	if err != nil {
-		return nil, err
-	}
-	return Downscale(img, size), nil
-}
-
-// DecodeCART reads a CoreArt sidecar (folder.art / folder.thm) back into an
-// image. The container is the one core/ui/artcache.c validates: "CART", a
-// version, the two dimensions, then RGB565 pixels little-endian, row-major.
-//
-// The five-bit channels are expanded by replicating the high bits into the
-// low ones (v<<3 | v>>2), which is what the panel does and what makes a
-// round-trip through the sidecar look like the original rather than like a
-// picture that lost its whites.
-func DecodeCART(b []byte) (image.Image, error) {
-	if len(b) < coreart.HeaderLen || !bytes.Equal(b[:4], coreart.Magic[:]) {
-		return nil, fmt.Errorf("app: not a CoreArt sidecar")
-	}
-	ver := binary.LittleEndian.Uint16(b[4:6])
-	w := int(binary.LittleEndian.Uint16(b[6:8]))
-	h := int(binary.LittleEndian.Uint16(b[8:10]))
-	if ver != coreart.Version || w <= 0 || h <= 0 || w > coreart.MaxDim || h > coreart.MaxDim {
-		return nil, fmt.Errorf("app: CoreArt header says version %d, %dx%d", ver, w, h)
-	}
-	if len(b) < coreart.HeaderLen+2*w*h {
-		return nil, fmt.Errorf("app: CoreArt sidecar is %d bytes, %dx%d needs %d",
-			len(b), w, h, coreart.HeaderLen+2*w*h)
-	}
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	px := b[coreart.HeaderLen:]
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			v := binary.LittleEndian.Uint16(px[2*(y*w+x):])
-			r := uint8((v >> 11) & 0x1F)
-			g := uint8((v >> 5) & 0x3F)
-			bl := uint8(v & 0x1F)
-			img.SetNRGBA(x, y, color.NRGBA{
-				R: r<<3 | r>>2,
-				G: g<<2 | g>>4,
-				B: bl<<3 | bl>>2,
-				A: 0xFF,
-			})
+	for _, d := range []string{dir, albumRoot(dir)} {
+		if img := coverFile(d); img != nil {
+			return Downscale(img, px), nil
+		}
+		if d == albumRoot(dir) {
+			break
 		}
 	}
-	return img, nil
+	return nil, ErrNoThumb
+}
+
+// coverFile is the first of coverFiles in dir that decodes, or nil.
+func coverFile(dir string) image.Image {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, want := range coverFiles {
+		for _, e := range ents {
+			name := strings.ToLower(e.Name())
+			ext := filepath.Ext(name)
+			if e.IsDir() || strings.TrimSuffix(name, ext) != want ||
+				(ext != ".jpg" && ext != ".jpeg" && ext != ".png") {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			if img, _, err := image.Decode(bytes.NewReader(b)); err == nil {
+				return img
+			}
+		}
+	}
+	return nil
+}
+
+// coverPx is the size a cover is decoded at for a box of px device pixels:
+// px rounded up to a multiple of 32, so a window being resized asks for a
+// handful of sizes rather than one per pixel of width — each a fresh decode
+// of a 1500 px JPEG — and the drawn picture is only ever scaled down.
+func coverPx(px int) int {
+	if px < 32 {
+		px = 32
+	}
+	return (px + 31) / 32 * 32
+}
+
+// coverKey is the cover cache's key: the folder and the decode size.
+func coverKey(dir string, px int) string { return dir + "\x00" + strconv.Itoa(px) }
+
+// splitCoverKey undoes coverKey.
+func splitCoverKey(key string) (string, int) {
+	i := strings.LastIndex(key, "\x00")
+	if i < 0 {
+		return key, 0
+	}
+	n, _ := strconv.Atoi(key[i+1:])
+	return key[:i], n
+}
+
+// cover is the album's picture for a box of box device pixels, from the
+// cover cache: (op, true) once decoded, and a decode started otherwise.
+func (u *UI) cover(a Album, box int) (paint.ImageOp, bool) {
+	return u.thumbs.get(coverKey(a.Dir, coverPx(box)), a.Mod)
 }
 
 // Downscale fits img inside a size x size box, keeping its aspect ratio. A
@@ -505,7 +508,7 @@ func (u *UI) tileArt(gtx C, a Album) D {
 	defer clip.UniformRRect(image.Rectangle{Max: sz}, r).Push(gtx.Ops).Pop()
 
 	drawn := false
-	if img, ok := u.thumbs.get(a.Dir, a.Mod); ok {
+	if img, ok := u.cover(a, sz.X); ok {
 		if b := img.Size(); b.X > 0 && b.Y > 0 {
 			// Cover the square: scale by the larger ratio and let the
 			// clip take the overhang, the way a CSS background-size:

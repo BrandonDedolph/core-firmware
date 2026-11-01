@@ -403,11 +403,11 @@ shows it within two seconds.
   whether a newer Core is out, and how much space is free. Its one button says what it will do:
   *Sync 7 albums*, *Update to v0.2.2*, *Install Core*, or *Eject*. The window asks GitHub for the
   latest release once when it first finds the iPod, so an update is offered without you asking.
-- **Albums** is your music folder as covers, with the ones that are new or changed marked.
-- **Library** is where the music folder is set (the field and *Browse…*), and what is wrong with
+- **Music** is your music folder as covers, with the ones that are new or changed marked.
+- **Fix** is where the music folder is set (the field and *Browse…*), and what is wrong with
   it — filenames that do not match their tags, folders to organize, missing covers — with *Fix
   all* and *Undo*. Clicking the folder at the bottom of the window brings you here.
-- **iPod** is this iPod in five rows — Name (*Rename*), Firmware (*Update* / *Check*), Storage,
+- **Summary** is this iPod in five rows — Name (*Rename*), Firmware (*Update* / *Check*), Storage,
   Hardware, Backups (*Show folder*, *Back up now*) — and an *Advanced* section with the disk path,
   the partition entry, the device files and *Flash this image* for an image file of your own.
 - **The log** is the line at the bottom right of every screen: the last thing that happened.
@@ -424,19 +424,20 @@ can write it with `--untested-hardware`, if you mean to take that risk. *Sync an
 After any write the window reads the iPod again, so the header shows the new version at once.
 
 Click an album to open it: its cover, what the iPod has of it, and its tracklist. Click a track to
-listen to it on the computer — the album plays on from there, with back, pause, next and stop and a
-bar you can click to jump — and *Show folder on this PC* opens the folder. Closing the album leaves
-the music playing: the bottom left of the window shows what is on, with pause, next and ✕ (stop),
-and a click on its title opens the album again; the album's cover carries a small ▶. Space plays
-and pauses, and Ctrl+→ / Ctrl+← go to the next and previous track (not while you are typing in a
+listen to it on the computer, and the album plays on from there; the playing track shows the
+iPod's bouncing bars, and *Show folder on this PC* opens the folder. The player is the bottom left
+of the window, whether the album is open or not: the album's cover, the bars, the track and its
+artist, the time over a line you can click to jump, pause, next and ✕ (stop). A click on the cover
+or the title opens the album at that track, and the album's tile in the grid carries the bars too.
+Space plays and pauses, and Ctrl+→ / Ctrl+← go to the next and previous track (not while you are typing in a
 field). When the album ends the bar says so for a moment and goes away. A sync or a library fix
-does not stop the music; a track a fix has renamed is skipped. *Sync N albums* (and *Preview sync* on the iPod tab) first shows what the sync would copy —
+does not stop the music; a track a fix has renamed is skipped. *Sync N albums* (and *Preview sync* on the Summary tab) first shows what the sync would copy —
 each album, how many of its tracks and their size, and the total — and copies nothing until you
 press the sync button on it; when there is nothing to copy it says *Everything is on the iPod*.
 
 <p align="center"><img src="screens/core_app.png" alt="the core desktop app, Linen" width="640"></p>
 <p align="center"><img src="screens/core_app_onyx.png" alt="the core desktop app, Onyx" width="640"></p>
-<p align="center"><img src="screens/core_app_ipod.png" alt="the iPod tab" width="640"></p>
+<p align="center"><img src="screens/core_app_ipod.png" alt="the Summary tab" width="640"></p>
 
 **Connect.** Put the iPod in disk mode — Settings, Disk Mode on the device, or hold Select + Play
 at power-on — plug it in, and ask what is there:

@@ -154,38 +154,63 @@ func TestPlaybackAdvancesAndOutlivesTheSheet(t *testing.T) {
 	}
 }
 
-// The sheet's transport: pause, resume, next, back (which restarts a track
-// under way — the fake is always 5 s in) and ✕.
-func TestTransportButtons(t *testing.T) {
+// The footer is the one player: pause, resume, next, back (ctrl+←, which
+// restarts a track under way — the fake is always 5 s in) and ✕. The sheet
+// has no transport of its own.
+func TestTheFooterIsThePlayer(t *testing.T) {
 	u, fa := sheetUI(t)
 	a := Album{Dir: "/m/a", Device: "X - A", Title: "X - A", TrackList: threeTracks()}
 	u.openSheet(a)
 	u.playFrom(a, a.TrackList, 0, false)
+	u.closeSheet()
 	u.Layout(newTestContext(900, 600))
-	u.sheet.playBtn.Click()
+	u.npPlayBtn.Click()
 	u.Layout(newTestContext(900, 600))
 	if fa.State() != player.Paused || u.st.NowPlaying.Playing {
 		t.Fatalf("play/pause did not pause: %v", fa.State())
 	}
-	u.sheet.playBtn.Click()
+	u.npPlayBtn.Click()
 	u.Layout(newTestContext(900, 600))
 	if fa.State() != player.Playing || !u.st.NowPlaying.Playing {
 		t.Fatalf("play/pause did not resume: %v", fa.State())
 	}
-	u.sheet.nextBtn.Click()
+	u.npNextBtn.Click()
 	u.Layout(newTestContext(900, 600))
 	if u.st.NowPlaying.TrackIndex != 1 {
 		t.Fatalf("next: %+v", u.st.NowPlaying)
 	}
-	u.sheet.prevBtn.Click()
-	u.Layout(newTestContext(900, 600))
+	pressKey(u, key.NameLeftArrow, key.ModShortcut)
 	if u.st.NowPlaying.TrackIndex != 1 || len(fa.seeks) != 1 || fa.seeks[0] != 0 {
 		t.Errorf("back 5 s in: %+v, seeks %v — want a restart", u.st.NowPlaying, fa.seeks)
 	}
-	u.sheet.stopBtn.Click()
+	u.npCoverBtn.Click()
+	u.Layout(newTestContext(900, 600))
+	if u.sheet == nil || u.sheet.album.Device != a.Device {
+		t.Fatal("a click on the footer's cover did not open the album")
+	}
+	u.closeSheet()
+	u.npStopBtn.Click()
 	u.Layout(newTestContext(900, 600))
 	if u.st.NowPlaying != nil || fa.stops == 0 {
 		t.Errorf("✕: now playing %+v, stops %d", u.st.NowPlaying, fa.stops)
+	}
+}
+
+// The bars' heights are the firmware's: nowplaying_bar_h in
+// core/kernel/main.c, compiled and run at t = 0, 190 and 380 ms for the
+// phases 0, 250 and 500.
+func TestBarHeightsMatchTheFirmware(t *testing.T) {
+	want := map[int64][3]int{0: {3, 6, 7}, 190: {6, 8, 4}, 380: {9, 5, 4}}
+	for tm, w := range want {
+		for i, ph := range npPhases {
+			if got := npBarHeight(tm, ph); got != w[i] {
+				t.Errorf("t=%d phase %d: %d, want %d", tm, ph, got, w[i])
+			}
+		}
+	}
+	// One period on, the same.
+	if npBarHeight(190+760, 250) != 8 {
+		t.Error("not periodic in 760 ms")
 	}
 }
 

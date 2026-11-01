@@ -393,3 +393,79 @@ func TestThePlayingTileHasItsBadge(t *testing.T) {
 		t.Errorf("the next tile has %d ink pixels in its corner", n)
 	}
 }
+
+// TestTheRowBarsStandOnOneBaseline: in the album sheet the playing row's
+// number column holds the iPod's three bars — at the canned t = 0 their
+// heights are the firmware's 3, 6 and 7 ninths of a 12 dp box — and they
+// stand bottom-aligned, inside the row, in Surface on the ink bar.
+func TestTheRowBarsStandOnOneBaseline(t *testing.T) {
+	out := filepath.Join(snapshotDir(t), "bars-album-linen-900x600.png")
+	err := SnapshotDialog(DemoState(), ThemeLinen, "album", 900, 600, out)
+	if errors.Is(err, ErrNoHeadless) || errors.Is(err, ErrNoGPU) {
+		t.Skipf("no headless GPU surface on this machine: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := readPNG(t, out)
+	pal := LinenPalette()
+	top, bot := -1, -1
+	for y := 200; y < 500; y++ {
+		if near(img.At(600, y), pal.Ink, 4) {
+			if top < 0 {
+				top = y
+			}
+			bot = y
+		} else if top >= 0 {
+			break
+		}
+	}
+	left := -1
+	for x := 100; x < 600; x++ {
+		if near(img.At(x, (top+bot)/2), pal.Ink, 4) {
+			left = x
+			break
+		}
+	}
+	if top < 0 || left < 0 {
+		t.Fatal("no playing row")
+	}
+	// The number column: 4 dp in, 28 dp wide.
+	type run struct{ x0, x1, top, bot int }
+	var runs []run
+	for x := left + 4; x < left+32; x++ {
+		ct, cb := -1, -1
+		for y := top; y <= bot; y++ {
+			if near(img.At(x, y), pal.Surface, 24) {
+				if ct < 0 {
+					ct = y
+				}
+				cb = y
+			}
+		}
+		if ct < 0 {
+			continue
+		}
+		if n := len(runs); n > 0 && runs[n-1].x1 == x-1 && runs[n-1].top == ct && runs[n-1].bot == cb {
+			runs[n-1].x1 = x
+			continue
+		}
+		runs = append(runs, run{x, x, ct, cb})
+	}
+	if len(runs) != 3 {
+		t.Fatalf("want three bars in the number column, found %d: %+v", len(runs), runs)
+	}
+	wantH := []int{4, 8, 9} // 3, 6, 7 ninths of 12 px, rounded
+	for i, r := range runs {
+		if r.bot != runs[0].bot {
+			t.Errorf("bar %d ends at y=%d, bar 0 at y=%d: not bottom-aligned", i, r.bot, runs[0].bot)
+		}
+		if h := r.bot - r.top + 1; h != wantH[i] {
+			t.Errorf("bar %d is %d px, want %d", i, h, wantH[i])
+		}
+		if r.top < top || r.bot > bot {
+			t.Errorf("bar %d leaves the row", i)
+		}
+	}
+	t.Logf("row %d..%d, bars %+v", top, bot, runs)
+}

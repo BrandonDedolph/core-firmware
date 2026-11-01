@@ -82,7 +82,7 @@ func (u *UI) startSync(kind JobKind) {
 	tooOld := u.st.FirmwareTooOld()
 	u.start(kind, func(ctx context.Context, emit func(Event)) error {
 		if src == "" {
-			return fmt.Errorf("no music folder: choose it on the Library tab")
+			return fmt.Errorf("no music folder: choose it on the Fix tab")
 		}
 		if dst == "" {
 			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
@@ -159,7 +159,7 @@ func (u *UI) startSyncPreview() {
 	tooOld := u.st.FirmwareTooOld()
 	u.start(JobSync, func(ctx context.Context, emit func(Event)) error {
 		if src == "" {
-			return fmt.Errorf("no music folder: choose it on the Library tab")
+			return fmt.Errorf("no music folder: choose it on the Fix tab")
 		}
 		if dst == "" {
 			return fmt.Errorf("no iPod volume: plug the iPod in (disk mode: Select+Play) — this window finds it on its own")
@@ -555,7 +555,7 @@ func (u *UI) setSource(path string) {
 func (u *UI) startInspect(src string) {
 	src = strings.TrimSpace(src)
 	if src == "" {
-		u.st.Logf("scan: no music folder yet — choose one on the Library tab")
+		u.st.Logf("scan: no music folder yet — choose one on the Fix tab")
 		return
 	}
 	discs := u.st.DiscFolders

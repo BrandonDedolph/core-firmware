@@ -18,7 +18,7 @@ The first release of the app under its own version. The firmware is unchanged.
   for the latest firmware once when it first finds the iPod, so an update is offered without
   pressing Check — and after any write it reads the iPod again, so it no longer shows the old
   version until a replug. A newer app is mentioned in About and the ··· menu, and nowhere else.
-- **An iPod tab.** Name, firmware, storage, hardware and backups in five rows, each with the action
+- **A Summary tab.** Name, firmware, storage, hardware and backups in five rows, each with the action
   that belongs to it; the disk path, the partition entry, the device files and flashing an image
   of your own are under Advanced.
 - **The log is on every screen.** The last line sits at the bottom right of the window; click it,
@@ -36,13 +36,18 @@ The first release of the app under its own version. The firmware is unchanged.
 - **And to hear it.** Click a track and it plays through the computer's speakers, then the rest of
   the album after it, with back, pause, next and stop and a bar you can click to jump. FLAC and
   MP3, any sample rate. Pure Go on Windows (oto, mewkiz/flac, go-mp3).
-- **Now Playing.** The music outlives the album: closing it leaves it on, the bottom left of the
-  window shows the track with pause, next, the time, a thin progress line and ✕, and a click on
-  the title opens the album at that track. The playing album's cover carries a ▶ (❚❚ when
-  paused). Space plays and pauses, Ctrl+→ / Ctrl+← skip, except while typing in a field. Syncs
+- **Now Playing.** The music outlives the album: closing it leaves it on. The bottom left of the
+  window is the one player — the album's cover, the track, the time over a thin progress line,
+  pause, next and ✕ — and a click on the cover or the title opens the album at that track.
+- **The iPod's bouncing bars** mark what is playing — in the album's tracklist, on its tile in the
+  grid and in the player — with the firmware's own timing (three bars, 760 ms, phases 0/250/500).
+  Like the iPod's, they keep moving while paused.
+- **Sharp covers.** The grid, the album and the player draw each album's own picture (the embedded
+  cover, else cover.jpg), decoded at the size it is shown, instead of the iPod's 120 px thumbnail
+  scaled up. Space plays and pauses, Ctrl+→ / Ctrl+← skip, except while typing in a field. Syncs
   and library fixes leave it playing; a renamed track is skipped; the end of the album shows
   "ended" for three seconds.
-- **Text sits in the middle of its row.** Every tracklist row, the transport and the iPod tab's
+- **Text sits in the middle of its row.** Every tracklist row, the player and the Summary tab's
   labels centre their capitals on the row, where their letters used to ride 4–5 px high.
 - **A sync shows what it will copy first.** "Sync 7 albums" and Preview sync open a list of the
   albums the sync would copy — how many of each one's tracks, their size, the total — and copy
@@ -50,5 +55,8 @@ The first release of the app under its own version. The firmware is unchanged.
   "Everything is on the iPod".
 - **Cancel only where there is something to cancel.** A dialog that just says something (About,
   "Everything is on the iPod") has one button, and Esc or a click outside closes it.
+- **The tabs say what they are for: Music, Fix, Summary.** The album grid is Music, the library's
+  problems and the music-folder setting are Fix (its count reads "Fix · 13"), and the iPod's name,
+  firmware, storage, hardware and backups are Summary.
 - **Words.** Preview sync, Sync and remove, Choose an image…, Rescan, Use this cover; no file
   names, disk paths or register facts outside Advanced and the log.

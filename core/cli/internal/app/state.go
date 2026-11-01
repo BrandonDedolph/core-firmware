@@ -428,11 +428,11 @@ type Tab int
 // The tabs. Playlists is phase 3 and is deliberately not here: a tab
 // that opens an empty pane teaches people the app is unfinished.
 const (
-	// TabAlbums is the grid.
+	// TabAlbums is the grid, drawn as "Music".
 	TabAlbums Tab = iota
-	// TabLibrary is the "things to fix" list.
+	// TabLibrary is the "things to fix" list, drawn as "Fix".
 	TabLibrary
-	// TabDetails is the device facts, the firmware and the log.
+	// TabDetails is the device facts and the firmware, drawn as "Summary".
 	TabDetails
 )
 
@@ -440,11 +440,11 @@ const (
 func (t Tab) String() string {
 	switch t {
 	case TabLibrary:
-		return "Library"
+		return "Fix"
 	case TabDetails:
-		return "iPod"
+		return "Summary"
 	default:
-		return "Albums"
+		return "Music"
 	}
 }
 

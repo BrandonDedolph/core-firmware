@@ -160,7 +160,7 @@ func (f *fakeBackend) UndoFix(ctx context.Context, journal string, emit func(Eve
 	return f.undoReport, nil
 }
 
-func (f *fakeBackend) Thumbnail(dir string) (image.Image, error) {
+func (f *fakeBackend) Thumbnail(dir string, px int) (image.Image, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.thumbCalls = append(f.thumbCalls, dir)

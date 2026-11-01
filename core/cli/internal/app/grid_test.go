@@ -1,9 +1,12 @@
 package app
 
 import (
+	"gioui.org/unit"
+
 	"bytes"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -154,41 +157,11 @@ func TestThumbCacheHitMissAndInvalidate(t *testing.T) {
 	}
 }
 
-// TestAlbumThumbnailFromTheDeviceSidecar proves the grid shows what the iPod
-// shows: folder.art is already this album's cover at 120x120, so it is read
-// rather than the FLAC being decoded again.
-func TestAlbumThumbnailFromTheDeviceSidecar(t *testing.T) {
-	dir := t.TempDir()
-	src := image.NewNRGBA(image.Rect(0, 0, 64, 64))
-	fillRect(src, color.NRGBA{R: 0xC5, G: 0x69, B: 0x42, A: 0xFF})
-	if err := os.WriteFile(filepath.Join(dir, coreart.ArtName),
-		coreart.Render(src, coreart.ArtSize), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	img, err := AlbumThumbnail(dir)
-	if err != nil {
-		t.Fatalf("AlbumThumbnail: %v", err)
-	}
-	if b := img.Bounds(); b.Dx() != coreart.ArtSize || b.Dy() != coreart.ArtSize {
-		t.Fatalf("the sidecar decoded to %v, want %dx%d", b, coreart.ArtSize, coreart.ArtSize)
-	}
-	// RGB565 loses the bottom bits; the colour has to survive recognisably
-	// or the tile is not the album's cover.
-	r, g, bl, _ := img.At(32, 32).RGBA()
-	if abs8(r>>8, 0xC5) > 8 || abs8(g>>8, 0x69) > 8 || abs8(bl>>8, 0x42) > 8 {
-		t.Errorf("the sidecar's centre pixel came back %02x%02x%02x, want about C56942",
-			r>>8, g>>8, bl>>8)
-	}
-}
-
-// TestAlbumThumbnailFromTheEmbeddedCover is the other half: an album with no
-// sidecars yet (nothing has been synced) still has a picture, in its first
-// FLAC, which is the file the sidecars and the index read their cover from.
-func TestAlbumThumbnailFromTheEmbeddedCover(t *testing.T) {
-	dir := t.TempDir()
-	cover := image.NewNRGBA(image.Rect(0, 0, 300, 300))
-	fillRect(cover, color.NRGBA{R: 0x4D, G: 0x5A, B: 0x4A, A: 0xFF})
+// coverFLAC writes one FLAC with an embedded square cover of side n.
+func coverFLAC(t *testing.T, dir string, n int, c color.NRGBA) {
+	t.Helper()
+	cover := image.NewNRGBA(image.Rect(0, 0, n, n))
+	fillRect(cover, c)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, cover); err != nil {
 		t.Fatal(err)
@@ -201,39 +174,93 @@ func TestAlbumThumbnailFromTheEmbeddedCover(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "01 - Ruel - SPIDERS.flac"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
 
-	img, err := AlbumThumbnail(dir)
-	if err != nil {
-		t.Fatalf("AlbumThumbnail: %v", err)
+// A 1200 px embedded cover comes back at the size asked for — the tile's
+// device pixels — and not at the iPod sidecar's 120; and a folder.art beside
+// it is not read at all.
+func TestAlbumPictureIsTheRealCoverAtTheAskedSize(t *testing.T) {
+	dir := t.TempDir()
+	coverFLAC(t, dir, 1200, color.NRGBA{R: 0x4D, G: 0x5A, B: 0x4A, A: 0xFF})
+	side := image.NewNRGBA(image.Rect(0, 0, 64, 64))
+	fillRect(side, color.NRGBA{R: 0xFF, A: 0xFF})
+	if err := os.WriteFile(filepath.Join(dir, coreart.ArtName), coreart.Render(side, coreart.ArtSize), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if b := img.Bounds(); b.Dx() != ThumbSize || b.Dy() != ThumbSize {
-		t.Fatalf("the embedded cover came back %v, want %d square", b, ThumbSize)
+	for _, px := range []int{224, 480} {
+		img, err := AlbumPicture(dir, px)
+		if err != nil {
+			t.Fatalf("AlbumPicture(%d): %v", px, err)
+		}
+		if b := img.Bounds(); b.Dx() != px || b.Dy() != px {
+			t.Fatalf("asked for %d px, got %v", px, b)
+		}
+		r, g, bl, _ := img.At(px/2, px/2).RGBA()
+		if abs8(r>>8, 0x4D) > 6 || abs8(g>>8, 0x5A) > 6 || abs8(bl>>8, 0x4A) > 6 {
+			t.Errorf("centre %02x%02x%02x: not the embedded cover (the sidecar is red)", r>>8, g>>8, bl>>8)
+		}
 	}
-	r, g, bl, _ := img.At(60, 60).RGBA()
-	if abs8(r>>8, 0x4D) > 6 || abs8(g>>8, 0x5A) > 6 || abs8(bl>>8, 0x4A) > 6 {
-		t.Errorf("the cover's centre pixel came back %02x%02x%02x, want about 4D5A4A",
-			r>>8, g>>8, bl>>8)
+	// The sidecar alone is no cover for the app.
+	only := t.TempDir()
+	_ = os.WriteFile(filepath.Join(only, coreart.ArtName), coreart.Render(side, coreart.ArtSize), 0o644)
+	if _, err := AlbumPicture(only, 128); err == nil {
+		t.Error("a folder with only the iPod's folder.art reported a cover")
 	}
-
-	// And an album with neither is not an error to shout about: the tile
-	// falls back to its coloured plate.
-	if _, err := AlbumThumbnail(t.TempDir()); err == nil {
+	if _, err := AlbumPicture(t.TempDir(), 128); err == nil {
 		t.Error("an empty folder should report that it has no cover")
 	}
 }
 
-// TestDecodeCARTRejectsRubbish: the sidecar is a file on the user's disk and
-// anything can be sitting under that name.
-func TestDecodeCARTRejectsRubbish(t *testing.T) {
-	for name, b := range map[string][]byte{
-		"empty":       nil,
-		"short":       []byte("CART"),
-		"wrong magic": append([]byte("JUNK"), make([]byte, 64)...),
-		"truncated":   coreart.Render(image.NewNRGBA(image.Rect(0, 0, 8, 8)), 28)[:100:100],
-	} {
-		if _, err := DecodeCART(b); err == nil {
-			t.Errorf("DecodeCART accepted the %s case", name)
-		}
+// No embedded picture: the folder's cover.jpg, and from a Disc N folder the
+// album folder's.
+func TestAlbumPictureFallsBackToCoverJPG(t *testing.T) {
+	root := t.TempDir()
+	disc := filepath.Join(root, "Disc 1")
+	_ = os.MkdirAll(disc, 0o755)
+	data := flac.BuildFile(flac.StreamInfo{SampleRate: 44100, TotalSamples: 44100}, nil, nil)
+	_ = os.WriteFile(filepath.Join(disc, "01.flac"), data, 0o644)
+	cover := image.NewNRGBA(image.Rect(0, 0, 800, 800))
+	fillRect(cover, color.NRGBA{R: 0x20, G: 0x40, B: 0xC0, A: 0xFF})
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, cover, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Cover.JPG"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	img, err := AlbumPicture(disc, 160)
+	if err != nil {
+		t.Fatalf("AlbumPicture: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != 160 {
+		t.Errorf("got %v, want 160 px", b)
+	}
+	r, _, bl, _ := img.At(80, 80).RGBA()
+	if abs8(r>>8, 0x20) > 10 || abs8(bl>>8, 0xC0) > 10 {
+		t.Errorf("centre %02x..%02x: not cover.jpg", r>>8, bl>>8)
+	}
+}
+
+// A tile asks for its own device-pixel size (rounded up to 32), so a 2×
+// screen gets a sharp cover rather than a 120 px one stretched.
+func TestTilesAskForTheirDevicePixels(t *testing.T) {
+	f := &fakeBackend{}
+	u := newTestUI(f)
+	u.st.Albums = demoAlbums()
+	gtx := newTestContext(1800, 1200)
+	gtx.Metric = unit.Metric{PxPerDp: 2, PxPerSp: 2}
+	u.Layout(gtx)
+	_, tile := gridMetrics(1800-2*28, 2)
+	want := coverKey(u.st.Albums[0].Dir, coverPx(tile))
+	u.thumbs.mu.Lock()
+	_, ok := u.thumbs.items[want]
+	keys := len(u.thumbs.items)
+	u.thumbs.mu.Unlock()
+	if !ok {
+		t.Errorf("no cover request for %q (tile %d px); %d requests", want, tile, keys)
+	}
+	if coverPx(tile) < tile || coverPx(tile) <= 120 {
+		t.Errorf("decode size %d for a %d px tile", coverPx(tile), tile)
 	}
 }
 

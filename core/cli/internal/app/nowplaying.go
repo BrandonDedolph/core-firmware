@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"image"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -300,7 +301,7 @@ func (u *UI) nowPlayingEvents(gtx C) {
 	if u.npStopBtn.Clicked(gtx) {
 		u.stopPlaying()
 	}
-	if u.npTitleBtn.Clicked(gtx) {
+	if u.npTitleBtn.Clicked(gtx) || u.npCoverBtn.Clicked(gtx) {
 		if np := u.st.NowPlaying; np != nil {
 			a := np.Album
 			if np.AlbumIndex >= 0 && np.AlbumIndex < len(u.st.Albums) {
@@ -333,9 +334,11 @@ func (u *UI) timeText() string {
 	return s
 }
 
-// nowPlayingBar is the footer's left half while a track is loaded: ▶/❚❚,
-// ⏭, "The Great Curve — Talking Heads" over a 2 px progress line, the time,
-// and a small ✕. A click on the words opens the album.
+// nowPlayingBar is the footer's left half while a track is loaded — the one
+// player in the window: the album's cover (28 dp, the tile's picture), the
+// iPod's bouncing bars, "The Great Curve — Talking Heads" with the time and
+// a 2 px progress line under them, ▶/❚❚, ⏭ and a small ✕. A click on the
+// cover or the words opens the album at the playing track.
 func (u *UI) nowPlayingBar(gtx C) D {
 	np := u.st.NowPlaying
 	t := np.Album.TrackList[np.TrackIndex]
@@ -344,22 +347,40 @@ func (u *UI) nowPlayingBar(gtx C) D {
 		toggle = glyphPlay
 	}
 	h := gtx.Dp(28)
+	// The words and the line under them, as one group, centred on the
+	// 28 dp row: the capitals' middle in an 18 dp band, 3 dp, the line,
+	// and the rest below.
+	lineH, gap := gtx.Dp(2), gtx.Dp(3)
+	textH := gtx.Dp(18)
+	rest := h - textH - gap - lineH
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npPlayBtn, toggle, 28) }),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npNextBtn, glyphNext, 28) }),
+		layout.Rigid(func(gtx C) D {
+			return u.npCoverBtn.Layout(gtx, func(gtx C) D {
+				sz := image.Pt(h, h)
+				gtx.Constraints = layout.Exact(sz)
+				d := u.miniCover(gtx, np.Album, sz)
+				st := clip.Rect{Max: sz}.Push(gtx.Ops)
+				pointer.CursorPointer.Add(gtx.Ops)
+				st.Pop()
+				return d
+			})
+		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 		layout.Flexed(1, func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			// The words and the line under them, as one group, centred on
-			// the buttons: the capitals' middle in an 18 dp band, 3 dp, the
-			// line, and the rest of the 28 dp below.
-			lineH, gap := gtx.Dp(2), gtx.Dp(3)
-			textH := gtx.Dp(18)
-			rest := h - textH - gap - lineH
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {
 					return layout.Flex{}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							// The bars stand on the title's baseline.
+							box := gtx.Dp(12)
+							base := int(math.Round(float64((float32(textH) +
+								nunitoCap*12*gtx.Metric.PxPerSp) / 2)))
+							st := op.Offset(image.Pt(0, base-box)).Push(gtx.Ops)
+							npBars(gtx, 12, u.pal.Ink, u.barsTime(gtx), !np.Playing)
+							st.Pop()
+							return D{Size: image.Pt(box+gtx.Dp(8), textH)}
+						}),
 						layout.Flexed(1, func(gtx C) D {
 							return u.npTitleBtn.Layout(gtx, func(gtx C) D {
 								d := layout.Flex{}.Layout(gtx,
@@ -404,21 +425,42 @@ func (u *UI) nowPlayingBar(gtx C) D {
 				layout.Rigid(func(gtx C) D { return D{Size: image.Pt(0, rest)} }),
 			)
 		}),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npPlayBtn, toggle, 28) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npNextBtn, glyphNext, 28) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npStopBtn, glyphStop, 20) }),
 	)
 }
 
-// playingBadge is the ▶ (or ❚❚) chip in the playing album's tile, bottom
-// right: the NEW chip's size and look — Ink with a Surface glyph.
+// miniCover is the album's picture in a small square, rounded 3 dp: the
+// grid's own cache (the tile's source), else the tile's initial block.
+func (u *UI) miniCover(gtx C, a Album, sz image.Point) D {
+	defer clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(3)).Push(gtx.Ops).Pop()
+	if img, ok := u.cover(a, sz.X); ok {
+		if b := img.Size(); b.X > 0 && b.Y > 0 {
+			sc := float32(sz.X) / float32(b.X)
+			if sy := float32(sz.Y) / float32(b.Y); sy > sc {
+				sc = sy
+			}
+			st := scaleOp(gtx, sc)
+			img.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			st.Pop()
+			return D{Size: sz}
+		}
+	}
+	u.plainTile(gtx, a, sz)
+	return D{Size: sz}
+}
+
+// playingBadge is the chip in the playing album's tile, bottom right: the
+// NEW chip's height and look — Ink — holding the bars in Surface.
 func (u *UI) playingBadge(gtx C, a Album, sz image.Point) {
 	np := u.st.NowPlaying
 	if np == nil || np.Ended || np.Album.Device != a.Device {
 		return
-	}
-	g := glyphPlay
-	if !np.Playing {
-		g = glyphPause
 	}
 	gtx.Constraints = layout.Exact(sz)
 	layout.SE.Layout(gtx, func(gtx C) D {
@@ -437,7 +479,9 @@ func (u *UI) playingBadge(gtx C, a Album, sz image.Point) {
 			paint.FillShape(gtx.Ops, u.pal.Ink, clip.UniformRRect(image.Rectangle{Max: chip}, r).Op(gtx.Ops))
 			gc := gtx
 			gc.Constraints = layout.Exact(chip)
-			layout.Center.Layout(gc, func(gtx C) D { return u.glyph(gtx, g, 7, u.pal.Surface) })
+			layout.Center.Layout(gc, func(gtx C) D {
+				return npBars(gtx, 9, u.pal.Surface, u.barsTime(gtx), !np.Playing)
+			})
 			return D{Size: chip}
 		})
 	})

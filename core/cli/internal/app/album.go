@@ -3,7 +3,6 @@ package app
 import (
 	"image"
 	"image/color"
-	"strings"
 	"time"
 
 	"gioui.org/f32"
@@ -55,14 +54,10 @@ type albumSheet struct {
 	loaded bool
 	err    string
 
-	rows                      []widget.Clickable
-	list                      widget.List
-	closeBtn, scrim, block    widget.Clickable
-	folderBtn                 widget.Clickable
-	prevBtn, playBtn, nextBtn widget.Clickable
-	stopBtn                   widget.Clickable
-	seek                      gesture.Click
-	barW                      int
+	rows                   []widget.Clickable
+	list                   widget.List
+	closeBtn, scrim, block widget.Clickable
+	folderBtn              widget.Clickable
 }
 
 // tracksResult is ReadTracks's answer for one folder, crossing back from
@@ -73,12 +68,8 @@ type tracksResult struct {
 	err    error
 }
 
-// readTracks and albumCover are ReadTracks and AlbumCover, variables for
-// the tests.
-var (
-	readTracks = ReadTracks
-	albumCover = AlbumCover
-)
+// readTracks is ReadTracks, a variable for the tests.
+var readTracks = ReadTracks
 
 // openSheet opens the sheet on one album. Its tracklist is the playing
 // album's when this is it, the album's own when it carries one (a canned
@@ -180,30 +171,6 @@ func (u *UI) sheetEvents(gtx C) {
 	for i := range s.rows {
 		if s.rows[i].Clicked(gtx) && i < len(s.tracks) {
 			u.playFrom(s.album, s.tracks, i, false)
-		}
-	}
-	if u.sheetPlaying() < 0 {
-		return
-	}
-	if s.playBtn.Clicked(gtx) {
-		u.togglePlay()
-	}
-	if s.prevBtn.Clicked(gtx) {
-		u.previous()
-	}
-	if s.nextBtn.Clicked(gtx) {
-		u.next()
-	}
-	if s.stopBtn.Clicked(gtx) {
-		u.stopPlaying()
-	}
-	for {
-		ev, ok := s.seek.Update(gtx.Source)
-		if !ok {
-			break
-		}
-		if ev.Kind == gesture.KindClick && s.barW > 0 {
-			u.seekTo(float64(ev.Position.X) / float64(s.barW))
 		}
 	}
 }
@@ -376,7 +343,7 @@ func (u *UI) link(gtx C, click *widget.Clickable, label string, size unit.Sp) D 
 // sheetCoverArt is the cover at 160 dp, or the tile's initial block.
 func (u *UI) sheetCoverArt(gtx C, a Album, sz image.Point) D {
 	defer clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(6)).Push(gtx.Ops).Pop()
-	if img, ok := u.covers.get(a.Dir, a.Mod); ok {
+	if img, ok := u.cover(a, sz.X); ok {
 		if b := img.Size(); b.X > 0 && b.Y > 0 {
 			sc := float32(sz.X) / float32(b.X)
 			if sy := float32(sz.Y) / float32(b.Y); sy > sc {
@@ -507,18 +474,18 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 				layout.Rigid(func(gtx C) D {
 					cs := image.Pt(gtx.Dp(28), h)
 					gtx.Constraints = layout.Exact(cs)
-					mark := func(g glyph) D {
+					switch {
+					case loaded:
+						// The iPod's bouncing bars, on the row's middle.
+						return layout.E.Layout(gtx, func(gtx C) D {
+							return u.rowBars(gtx, num, paused)
+						})
+					case hovered && playable:
 						return layout.E.Layout(gtx, func(gtx C) D {
 							return layout.Inset{Right: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
-								return u.glyph(gtx, g, 9, num)
+								return u.glyph(gtx, glyphPlay, 9, num)
 							})
 						})
-					}
-					switch {
-					case loaded && paused:
-						return mark(glyphPause)
-					case loaded || (hovered && playable):
-						return mark(glyphPlay)
 					}
 					if t.Number <= 0 {
 						return D{Size: cs}
@@ -553,88 +520,38 @@ func (u *UI) trackRow(gtx C, i int, rule bool) D {
 	})
 }
 
-// sheetFoot is the transport (while this album is the one playing), the
-// warning when a track would not play, or a hint; and Close.
+// sheetFoot is the warning when a track would not play, or a hint, and
+// Close. There is no transport here: the footer's Now Playing bar is the
+// one player.
 func (u *UI) sheetFoot(gtx C) D {
 	s := u.sheet
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
-	playing := u.sheetPlaying() >= 0
-	return layout.Flex{Alignment: layout.End}.Layout(gtx,
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
-			var rows []layout.FlexChild
-			if playing {
-				rows = append(rows, layout.Rigid(u.transportRow))
+			// The whole width, whatever it holds: Close stays at the right.
+			var d D
+			switch {
+			case u.warning() != "":
+				d = u.wrapN(12, u.pal.Accent, u.warning(), 2)(gtx)
+			case !player.Available:
+				d = u.text(12, u.pal.Muted2, "Playback is not available in this build.")(gtx)
+			case s.loaded && len(s.tracks) > 0 && u.sheetPlaying() < 0:
+				d = u.text(12, u.pal.Muted2, "Click a track to listen to it here.")(gtx)
 			}
-			if w := u.warning(); w != "" {
-				rows = append(rows, layout.Rigid(func(gtx C) D {
-					return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, u.wrapN(12, u.pal.Accent, w, 2))
-				}))
-			}
-			if playing {
-				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx C) D { return u.progressBar(gtx, gtx.Dp(4), &s.seek, &s.barW) }))
-			}
-			if len(rows) == 0 && !player.Available {
-				rows = append(rows, layout.Rigid(u.text(12, u.pal.Muted2, "Playback is not available in this build.")))
-			}
-			if len(rows) == 0 && player.Available && s.loaded && len(s.tracks) > 0 {
-				rows = append(rows, layout.Rigid(u.text(12, u.pal.Muted2, "Click a track to listen to it here.")))
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+			d.Size.X = gtx.Constraints.Max.X
+			return d
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx C) D { return u.button(gtx, btn{&s.closeBtn, "Close", false, true}) }),
 	)
 }
 
-// transportRow is ⏮ ▶/❚❚ ⏭ ✕, then "03 · THE GREAT CURVE  1:23 / 6:26".
-func (u *UI) transportRow(gtx C) D {
-	s := u.sheet
-	np := u.st.NowPlaying
-	t := np.Album.TrackList[np.TrackIndex]
-	toggle := glyphPause
-	if !np.Playing {
-		toggle = glyphPlay
-	}
-	h := gtx.Dp(28)
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.prevBtn, glyphPrev, 28) }),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.playBtn, toggle, 28) }),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.nextBtn, glyphNext, 28) }),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &s.stopBtn, glyphStop, 28) }),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-		layout.Flexed(1, func(gtx C) D {
-			name := strings.ToUpper(t.Title)
-			if t.Number > 0 {
-				name = twoDigits(t.Number) + " · " + name
-			}
-			return layout.Flex{}.Layout(gtx,
-				layout.Flexed(1, func(gtx C) D {
-					l := material.Label(u.th, unit.Sp(12.5), name)
-					l.Font.Weight = font.Bold
-					l.Color = u.pal.Ink
-					l.Truncator = "…"
-					return rowText(gtx, l, h)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-				layout.Rigid(func(gtx C) D {
-					l := material.Label(u.th, unit.Sp(12), u.timeText())
-					l.Color = u.pal.Muted
-					return rowText(gtx, l, h)
-				}),
-			)
-		}),
-	)
-}
-
-func twoDigits(n int) string {
-	if n < 10 {
-		return "0" + itoa(n)
-	}
-	return itoa(n)
+// rowBars is the playing row's bars in its number column: the firmware's
+// 9 px box in a 9 px gutter of a 21 px row, here 12 dp in a 28 dp row.
+func (u *UI) rowBars(gtx C, col color.NRGBA, paused bool) D {
+	return layout.Inset{Right: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
+		return npBars(gtx, 12, col, u.barsTime(gtx), paused)
+	})
 }
 
 // progressBar is a thin bar h px tall: Trk, with the played part in Ink. A

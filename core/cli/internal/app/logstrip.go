@@ -7,7 +7,6 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/io/key"
-	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -16,18 +15,16 @@ import (
 	"gioui.org/widget/material"
 )
 
-// The log, on every screen: a one-line strip at the right of the footer
-// that says the last thing that happened, and a drawer that rises from the
-// footer with the whole transcript. Before this the log lived on one tab,
-// which the Looking and Install screens do not have — so an install error
-// was unreadable on the one screen it happened on.
+// The log: a drawer that rises from the footer with the whole transcript,
+// on every screen. It opens from "···" → Show the log, from Ctrl+L (Cmd+L on
+// a Mac), and from a failed job's status line in the header. It used to
+// announce itself as a one-line strip in the footer; the owner called that
+// noise ("why does the song file name in the lower right go to the log?"),
+// and a log is a thing you go to, not a thing that scrolls under the player.
 
-// stripSize is the strip's type size: Go Mono, small.
-const stripSize = 10.5
-
-// stripText is the strip's line: the running job's latest progress, or the
-// last line of the log.
-func (u *UI) stripText() string {
+// lastLogLine is the last thing the log says — the running job's latest
+// progress while one runs — for the tests that pin what a job wrote.
+func (u *UI) lastLogLine() string {
 	if u.st.Busy() {
 		return u.st.StatusLine()
 	}
@@ -39,54 +36,7 @@ func (u *UI) stripText() string {
 	return "the log is empty"
 }
 
-// tailFit keeps the END of s within n runes, with an ellipsis in front: the
-// newest words of a log line are the ones worth reading.
-func tailFit(s string, n int) string {
-	r := []rune(s)
-	if n < 2 || len(r) <= n {
-		if n < 2 && len(r) > n {
-			return ""
-		}
-		return s
-	}
-	return "…" + string(r[len(r)-(n-1):])
-}
-
-// logStrip is the footer's right half: one click target that opens the
-// drawer.
-func (u *UI) logStrip(gtx C) D {
-	return u.logStripBtn.Layout(gtx, func(gtx C) D {
-		gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		return layout.Stack{}.Layout(gtx,
-			layout.Expanded(func(gtx C) D {
-				defer clip.Rect{Max: gtx.Constraints.Min}.Push(gtx.Ops).Pop()
-				pointer.CursorPointer.Add(gtx.Ops)
-				return D{Size: gtx.Constraints.Min}
-			}),
-			layout.Stacked(func(gtx C) D {
-				gtx.Constraints.Min.X = gtx.Constraints.Max.X
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx C) D {
-						// Go Mono's advance is 0.6 em, so the width
-						// says exactly how many runes fit.
-						adv := 0.6 * float32(gtx.Sp(unit.Sp(stripSize)))
-						n := int(float32(gtx.Constraints.Max.X) / adv)
-						l := material.Label(u.th, unit.Sp(stripSize), tailFit(u.stripText(), n))
-						l.Font = Mono
-						l.Color = u.pal.MutedD
-						l.MaxLines = 1
-						return layout.E.Layout(gtx, l.Layout)
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx C) D { return u.chevron(gtx, !u.st.LogOpen) }),
-				)
-			}),
-		)
-	})
-}
-
-// chevron is a small filled triangle: pointing up (open me) or down (close
-// me), 8 dp wide, MutedD.
+// chevron is the drawer header's ▾ (and ▴), two strokes of ink.
 func (u *UI) chevron(gtx C, up bool) D {
 	w, h := float32(gtx.Dp(8)), float32(gtx.Dp(5))
 	var p clip.Path
@@ -105,11 +55,14 @@ func (u *UI) chevron(gtx C, up bool) D {
 	return D{Size: image.Pt(gtx.Dp(8), gtx.Dp(5))}
 }
 
-// logEvents is the strip's and the drawer's half of the frame. ctrl+L (cmd+L
-// on a Mac) toggles the drawer from anywhere.
+// logEvents is the drawer's half of the frame: Ctrl+L toggles it from
+// anywhere, a failed status line opens it, ▾ closes it, Copy and Clear.
 func (u *UI) logEvents(gtx C) {
-	if u.logStripBtn.Clicked(gtx) || u.logCloseBtn.Clicked(gtx) {
-		u.st.LogOpen = !u.st.LogOpen
+	if u.logCloseBtn.Clicked(gtx) {
+		u.st.LogOpen = false
+	}
+	if u.statusBtn.Clicked(gtx) {
+		u.st.LogOpen = true
 	}
 	for {
 		ev, ok := gtx.Event(key.Filter{Name: "L", Required: key.ModShortcut})

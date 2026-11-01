@@ -293,9 +293,12 @@ type UI struct {
 	// The log strip and drawer (logstrip.go). footH is the footer's
 	// height in the last frame — the drawer sits on it. logFrames counts
 	// the drawer's layouts, for the test that it is not on the iPod tab.
-	logStripBtn, logCloseBtn, clearLogBtn, drawerBlock widget.Clickable
-	footH                                              int
-	logFrames                                          int
+	logCloseBtn, clearLogBtn, drawerBlock widget.Clickable
+	// statusBtn is the header's status line while a job has failed: the
+	// one place a failure is announced, so it is also the way into the log.
+	statusBtn widget.Clickable
+	footH     int
+	logFrames int
 	// newBackups is a job's read of the backup folder, for drain;
 	// newNotice is a result for the header's line 2 (State.Notice).
 	newBackups *Backups
@@ -1176,9 +1179,22 @@ func (u *UI) deviceBlock(gtx C) D {
 	status, statusCol := u.statusLine()
 	// 1 dp above and below: the bar keeps its height, and the two lines
 	// sit on the buttons' middle.
-	return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
-		return u.deviceLines(gtx, name, model, nameCol, weight, status, statusCol)
-	})
+	lines := func(gtx C) D {
+		return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, func(gtx C) D {
+			return u.deviceLines(gtx, name, model, nameCol, weight, status, statusCol)
+		})
+	}
+	if j := u.st.Job; j != nil && j.Failed && j.Kind != JobCheck {
+		// A failure is announced here and explained in the log: the
+		// status line is the way in.
+		return u.statusBtn.Layout(gtx, func(gtx C) D {
+			dims := lines(gtx)
+			defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+			pointer.CursorPointer.Add(gtx.Ops)
+			return dims
+		})
+	}
+	return lines(gtx)
 }
 
 // deviceLines is the device block's two lines.
@@ -1267,7 +1283,7 @@ func (u *UI) statusLine() (string, color.NRGBA) {
 			}
 			return s, u.pal.MutedD
 		case j.Failed:
-			return u.st.StatusLine(), u.pal.Accent
+			return u.st.StatusLine() + "  ·  see the log", u.pal.Accent
 		}
 	}
 	if u.st.Notice != "" && u.now().Sub(u.st.NoticeAt) < NoticeFor {
@@ -1559,29 +1575,38 @@ func (u *UI) footer(gtx C) D {
 				Layout(gtx, func(gtx C) D {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					half := gtx.Constraints.Max.X / 2
+					// The footer is the music folder and, while a track is
+					// loaded, the player: the player takes the left half and
+					// the folder moves to the right. The log is not here any
+					// more — it is behind "···" (Show the log, Ctrl+L) and a
+					// failed job's status line in the header.
+					folder := func(gtx C) D {
+						if u.st.Phase() != PhaseReady {
+							// No Fix tab to go to.
+							return u.line(11, u.pal.Muted, u.footerSource())(gtx)
+						}
+						return u.folderLink.Layout(gtx, func(gtx C) D {
+							dims := u.line(11, u.pal.Muted, u.footerSource())(gtx)
+							defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+							pointer.CursorPointer.Add(gtx.Ops)
+							return dims
+						})
+					}
+					np := u.st.NowPlaying
+					playing := np != nil && np.TrackIndex < len(np.Album.TrackList)
+					if !playing {
+						return folder(gtx)
+					}
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 						layout.Rigid(func(gtx C) D {
 							gtx.Constraints.Max.X = half - gtx.Dp(12)
-							if np := u.st.NowPlaying; np != nil && np.TrackIndex < len(np.Album.TrackList) {
-								// While a track is loaded the left half is
-								// Now Playing; the music folder is on the
-								// Library tab.
-								gtx.Constraints.Min.X = gtx.Constraints.Max.X
-								return u.nowPlayingBar(gtx)
-							}
-							if u.st.Phase() != PhaseReady {
-								// No Library tab to go to.
-								return u.line(11, u.pal.Muted, u.footerSource())(gtx)
-							}
-							return u.folderLink.Layout(gtx, func(gtx C) D {
-								dims := u.line(11, u.pal.Muted, u.footerSource())(gtx)
-								defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
-								pointer.CursorPointer.Add(gtx.Ops)
-								return dims
-							})
+							gtx.Constraints.Min.X = gtx.Constraints.Max.X
+							return u.nowPlayingBar(gtx)
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-						layout.Flexed(1, u.logStrip),
+						layout.Flexed(1, func(gtx C) D {
+							return layout.E.Layout(gtx, folder)
+						}),
 					)
 				})
 		}),

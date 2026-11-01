@@ -424,10 +424,11 @@ shows it within two seconds.
 - **Summary** is this iPod in five rows — Name (*Rename*), Firmware (*Update* / *Check*), Storage,
   Hardware, Backups (*Show folder*, *Back up now*) — and an *Advanced* section with the disk path,
   the partition entry, the device files and *Flash this image* for an image file of your own.
-- **The log** is the line at the bottom right of every screen: the last thing that happened.
-  Click it (or press Ctrl+L) to open the whole log, with *Copy* and *Clear*.
+- **The log** is behind **···** → *Show the log* (or Ctrl+L): a drawer with everything the window
+  did, with *Copy* and *Clear*. When a job fails, its status line in the header says so and opens
+  the log when you click it.
 - **···** holds the rest: back up the firmware, flash an image file, read the iPod again, check for
-  updates, copy the log, open the music folder, the theme (System, Linen, Onyx — System follows
+  updates, show or copy the log, open the music folder, the theme (System, Linen, Onyx — System follows
   Windows' dark-mode setting) and About.
 
 Writing firmware — Install, Update, or an image of your own — is confirmed in one dialog that says

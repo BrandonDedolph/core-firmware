@@ -21,8 +21,9 @@ The first release of the app under its own version. The firmware is unchanged.
 - **A Summary tab.** Name, firmware, storage, hardware and backups in five rows, each with the action
   that belongs to it; the disk path, the partition entry, the device files and flashing an image
   of your own are under Advanced.
-- **The log is on every screen.** The last line sits at the bottom right of the window; click it,
-  or press Ctrl+L, for the whole log, with Copy and Clear.
+- **The log is a drawer on every screen**, behind ··· → Show the log or Ctrl+L, with Copy and
+  Clear; a failed job's status line in the header opens it too. The footer is the music folder and,
+  while a track plays, the player.
 - **A write says which iPod.** Install, Update and flashing an image show the iPod's name, model,
   serial, disk number and the size of the write, and are confirmed by holding the button for two
   seconds. Hardware Core has not been tested on is refused by the app; `core flash

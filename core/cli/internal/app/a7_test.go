@@ -49,7 +49,7 @@ func TestBackupNoticeInTheHeader(t *testing.T) {
 	settle(u)
 }
 
-// After an eject the strip (the last log line) and the header agree.
+// After an eject the log's last line and the header agree.
 func TestEjectStripAndHeaderAgree(t *testing.T) {
 	f := &fakeBackend{}
 	u := newTestUI(f)
@@ -58,7 +58,7 @@ func TestEjectStripAndHeaderAgree(t *testing.T) {
 	if s, _ := u.statusLine(); s != "Ejected — safe to unplug" {
 		t.Errorf("header = %q", s)
 	}
-	if s := u.stripText(); !strings.Contains(s, "safe to unplug") {
-		t.Errorf("strip = %q", s)
+	if s := u.lastLogLine(); !strings.Contains(s, "safe to unplug") {
+		t.Errorf("log = %q", s)
 	}
 }

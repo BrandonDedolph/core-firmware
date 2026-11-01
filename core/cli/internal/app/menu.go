@@ -33,6 +33,7 @@ const (
 	menuFlashFile
 	menuReread
 	menuCheck
+	menuShowLog
 	menuCopyLog
 	menuOpenMusic
 	menuGetApp
@@ -46,6 +47,7 @@ var menuLabels = [menuCount]string{
 	menuFlashFile: "Flash an image file…",
 	menuReread:    "Read the iPod again",
 	menuCheck:     "Check for updates",
+	menuShowLog:   "Show the log",
 	menuCopyLog:   "Copy the log",
 	menuOpenMusic: "Open the music folder",
 	menuGetApp:    "Get the newer app…",
@@ -57,7 +59,7 @@ var menuLabels = [menuCount]string{
 var menuGroups = [][]int{
 	{menuBackup, menuFlashFile},
 	{menuReread, menuCheck},
-	{menuCopyLog, menuOpenMusic},
+	{menuShowLog, menuCopyLog, menuOpenMusic},
 	nil, // the theme
 	{menuGetApp, menuAbout},
 }
@@ -139,6 +141,8 @@ func (u *UI) menuDo(gtx C, i int) {
 		u.startRefresh()
 	case menuCheck:
 		u.startCheck()
+	case menuShowLog:
+		u.st.LogOpen = !u.st.LogOpen
 	case menuCopyLog:
 		u.copyLog(gtx)
 	case menuOpenMusic:
@@ -266,7 +270,11 @@ func (u *UI) menuLayer(gtx C) D {
 						continue
 					}
 					rows = append(rows, layout.Rigid(func(gtx C) D {
-						return u.menuRow(gtx, &u.menuClicks[i], menuLabels[i], u.menuEnabled(i), false, false)
+						label := menuLabels[i]
+						if i == menuShowLog && u.st.LogOpen {
+							label = "Hide the log"
+						}
+						return u.menuRow(gtx, &u.menuClicks[i], label, u.menuEnabled(i), false, false)
 					}))
 				}
 			}

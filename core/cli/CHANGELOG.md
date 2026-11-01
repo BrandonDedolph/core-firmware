@@ -40,6 +40,8 @@ The first release of the app under its own version. The firmware is unchanged.
 - **Now Playing.** The music outlives the album: closing it leaves it on. The bottom left of the
   window is the one player — the album's cover, the track, the time over a thin progress line,
   pause, next and ✕ — and a click on the cover or the title opens the album at that track.
+- **Volume.** The player has its own volume: a speaker that mutes and a slider, the mouse wheel
+  over the player, Ctrl+↑ / Ctrl+↓. It is the app's level, not the system's, and it is remembered.
 - **The iPod's bouncing bars** mark what is playing — in the album's tracklist, on its tile in the
   grid and in the player — with the firmware's own timing (three bars, 760 ms, phases 0/250/500).
   Like the iPod's, they keep moving while paused.

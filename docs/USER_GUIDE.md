@@ -445,7 +445,9 @@ of the window, whether the album is open or not: the album's cover, the bars, th
 artist, the time over a line you can click to jump, pause, next and ✕ (stop). A click on the cover
 or the title opens the album at that track, and the album's tile in the grid carries the bars too.
 Space plays and pauses, and Ctrl+→ / Ctrl+← go to the next and previous track (not while you are typing in a
-field). When the album ends the bar says so for a moment and goes away. A sync or a library fix
+field). The speaker and slider beside the buttons set the app's own volume — not Windows' — and
+remember it; the mouse wheel over the player or Ctrl+↑ / Ctrl+↓ nudge it, and a click on the
+speaker mutes. When the album ends the bar says so for a moment and goes away. A sync or a library fix
 does not stop the music; a track a fix has renamed is skipped. *Sync N albums* (and *Preview sync* on the Summary tab) first shows what the sync would copy —
 each album, how many of its tracks and their size, and the total — and copies nothing until you
 press the sync button on it; when there is nothing to copy it says *Everything is on the iPod*.

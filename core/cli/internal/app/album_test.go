@@ -28,6 +28,7 @@ type fakeAudio struct {
 	playErr error
 	errFor  map[string]error
 	pos     time.Duration
+	vols    []float64
 	onEnd   func()
 	onError func(error)
 }
@@ -62,7 +63,16 @@ func (f *fakeAudio) Position() (time.Duration, time.Duration) {
 	}
 	return f.pos, time.Minute
 }
-func (f *fakeAudio) State() player.State    { f.mu.Lock(); defer f.mu.Unlock(); return f.state }
+func (f *fakeAudio) State() player.State { f.mu.Lock(); defer f.mu.Unlock(); return f.state }
+func (f *fakeAudio) SetVolume(v float64) { f.mu.Lock(); f.vols = append(f.vols, v); f.mu.Unlock() }
+func (f *fakeAudio) Volume() float64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.vols) == 0 {
+		return 1
+	}
+	return f.vols[len(f.vols)-1]
+}
 func (f *fakeAudio) OnEnd(fn func())        { f.onEnd = fn }
 func (f *fakeAudio) OnError(fn func(error)) { f.onError = fn }
 

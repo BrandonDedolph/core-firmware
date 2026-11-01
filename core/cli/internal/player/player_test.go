@@ -145,6 +145,7 @@ type fakeVoice struct {
 	playing bool
 	closed  bool
 	got     []byte
+	vol     []float64
 	started chan struct{}
 	once    sync.Once
 }
@@ -188,11 +189,12 @@ func (v *fakeVoice) Play() {
 	}()
 }
 
-func (v *fakeVoice) Pause()            { v.mu.Lock(); v.playing = false; v.mu.Unlock() }
-func (v *fakeVoice) IsPlaying() bool   { v.mu.Lock(); defer v.mu.Unlock(); return v.playing }
-func (v *fakeVoice) BufferedSize() int { return 0 }
-func (v *fakeVoice) Err() error        { return nil }
-func (v *fakeVoice) Close() error      { v.mu.Lock(); v.closed = true; v.mu.Unlock(); return nil }
+func (v *fakeVoice) Pause()              { v.mu.Lock(); v.playing = false; v.mu.Unlock() }
+func (v *fakeVoice) IsPlaying() bool     { v.mu.Lock(); defer v.mu.Unlock(); return v.playing }
+func (v *fakeVoice) BufferedSize() int   { return 0 }
+func (v *fakeVoice) SetVolume(x float64) { v.mu.Lock(); v.vol = append(v.vol, x); v.mu.Unlock() }
+func (v *fakeVoice) Err() error          { return nil }
+func (v *fakeVoice) Close() error        { v.mu.Lock(); v.closed = true; v.mu.Unlock(); return nil }
 
 // writeFLAC encodes frames of verbatim samples: chans[c][i].
 func writeFLAC(t *testing.T, path string, rate, bits int, chans [][]int32) {
@@ -364,5 +366,55 @@ func TestTheDefaultPlayerMatchesTheBuild(t *testing.T) {
 	}
 	if err := New().Play("x.flac"); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("Play in a noaudio build: %v, want ErrUnavailable", err)
+	}
+}
+
+// SetVolume reaches the stream that is playing, and a new stream (a track
+// change or a seek) starts at the level already set.
+func TestVolumeReachesTheStreamAndOutlivesIt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v.flac")
+	writeFLAC(t, path, 44100, 16, [][]int32{make([]int32, 44100)})
+	dev := &fakeDevice{voices: make(chan *fakeVoice, 4)}
+	p := newWith(dev)
+	if p.Volume() != 1 {
+		t.Fatalf("a new player's level is %v, want 1", p.Volume())
+	}
+	p.SetVolume(0.4)
+	if err := p.Play(path); err != nil {
+		t.Fatal(err)
+	}
+	v := <-dev.voices
+	p.SetVolume(1.7) // clamped
+	v.mu.Lock()
+	got := append([]float64(nil), v.vol...)
+	v.mu.Unlock()
+	if len(got) != 2 || got[0] != 0.4 || got[1] != 1 {
+		t.Fatalf("the stream's levels %v, want [0.4 1]", got)
+	}
+	p.SetVolume(0.25)
+	if err := p.Seek(0); err != nil {
+		t.Fatal(err)
+	}
+	v2 := <-dev.voices
+	v2.mu.Lock()
+	first := append([]float64(nil), v2.vol...)
+	v2.mu.Unlock()
+	if len(first) == 0 || first[0] != 0.25 {
+		t.Errorf("the stream after a seek started at %v, want 0.25", first)
+	}
+	p.Stop()
+}
+
+// The noaudio stub has no device and still keeps the level.
+func TestTheStubKeepsTheVolume(t *testing.T) {
+	p := New()
+	p.SetVolume(0.3)
+	if p.Volume() != 0.3 {
+		t.Errorf("level %v, want 0.3", p.Volume())
+	}
+	p.SetVolume(-1)
+	if p.Volume() != 0 {
+		t.Errorf("level %v, want 0 (clamped)", p.Volume())
 	}
 }

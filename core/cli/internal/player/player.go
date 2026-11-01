@@ -71,6 +71,9 @@ type voice interface {
 	IsPlaying() bool
 	// BufferedSize is the bytes read from the stream not yet played.
 	BufferedSize() int
+	// SetVolume scales this stream's samples, 0..1 (oto's Player does it
+	// in its mixer, on the running stream).
+	SetVolume(v float64)
 	Err() error
 	Close() error
 }
@@ -80,22 +83,25 @@ type voice interface {
 type Player struct {
 	open func() (device, error)
 
-	mu      sync.Mutex
-	dev     device
-	devErr  error
-	cur     *session
-	state   State
+	mu     sync.Mutex
+	dev    device
+	devErr error
+	cur    *session
+	state  State
+	// volume is this app's level, 0..1: a scale on its own output, not
+	// the system's volume. Every new stream starts at it.
+	volume  float64
 	onEnd   func()
 	onError func(error)
 }
 
 // New is a player on this build's audio output. Nothing is opened until the
 // first Play.
-func New() *Player { return &Player{open: openDevice} }
+func New() *Player { return &Player{open: openDevice, volume: 1} }
 
 // newWith is a player on a given device, for the tests.
 func newWith(d device) *Player {
-	return &Player{open: func() (device, error) { return d, nil }}
+	return &Player{open: func() (device, error) { return d, nil }, volume: 1}
 }
 
 // OnEnd sets what runs when a track plays to its end (not when it is
@@ -136,9 +142,36 @@ func (p *Player) start(path string, at time.Duration, st State) error {
 	s := newSession(p, path, at)
 	p.cur, p.state = s, st
 	s.voice = p.dev.newVoice(s)
+	// A track change — or a seek, which is a fresh stream — keeps the level.
+	s.voice.SetVolume(p.volume)
 	go s.decode()
 	go s.watch()
 	return nil
+}
+
+// SetVolume sets this app's playback level, 0 (silent) to 1 (as decoded),
+// on the stream that is playing and every one after it. It is not the
+// system's volume: it scales this app's output only. Works with no device
+// open (the noaudio build keeps the number).
+func (p *Player) SetVolume(v float64) {
+	if v < 0 {
+		v = 0
+	} else if v > 1 {
+		v = 1
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.volume = v
+	if p.cur != nil {
+		p.cur.voice.SetVolume(v)
+	}
+}
+
+// Volume is the level SetVolume last set (1 until then).
+func (p *Player) Volume() float64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.volume
 }
 
 // Pause holds the track where it is.

@@ -44,6 +44,8 @@ type audio interface {
 	State() player.State
 	OnEnd(func())
 	OnError(func(error))
+	SetVolume(v float64)
+	Volume() float64
 }
 
 // albumSheet is the open sheet. UI goroutine only.

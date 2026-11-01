@@ -290,6 +290,8 @@ func (u *UI) playKeys(gtx C) {
 			key.Filter{Name: key.NameSpace},
 			key.Filter{Name: key.NameRightArrow, Required: key.ModShortcut},
 			key.Filter{Name: key.NameLeftArrow, Required: key.ModShortcut},
+			key.Filter{Name: key.NameUpArrow, Required: key.ModShortcut},
+			key.Filter{Name: key.NameDownArrow, Required: key.ModShortcut},
 		)
 		if !ok {
 			return
@@ -305,12 +307,17 @@ func (u *UI) playKeys(gtx C) {
 			u.next()
 		case key.NameLeftArrow:
 			u.previous()
+		case key.NameUpArrow:
+			u.nudgeVolume(+1)
+		case key.NameDownArrow:
+			u.nudgeVolume(-1)
 		}
 	}
 }
 
 // nowPlayingEvents is the footer bar's clicks.
 func (u *UI) nowPlayingEvents(gtx C) {
+	u.volumeEvents(gtx)
 	if u.npPlayBtn.Clicked(gtx) {
 		u.togglePlay()
 	}
@@ -448,7 +455,9 @@ func (u *UI) nowPlayingBar(gtx C) D {
 		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npPlayBtn, toggle, 28) }),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npNextBtn, glyphNext, 28) }),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(u.volumeControl),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx C) D { return u.iconButton(gtx, &u.npStopBtn, glyphStop, 20) }),
 	)
 }

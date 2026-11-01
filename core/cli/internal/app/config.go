@@ -35,6 +35,9 @@ type Config struct {
 	// than this on its shorter side is listed for replacing. 0 means
 	// librarian.DefaultMinArtPx (600); a negative value turns it off.
 	MinArtPx int `json:"min_art_px,omitempty"`
+	// Volume is the app's playback level, 0–100; absent is 100. It is the
+	// app's own output, not the system's volume, and a mute is not saved.
+	Volume *int `json:"volume,omitempty"`
 }
 
 // NameFor is the friendly name remembered for one iPod, or "".

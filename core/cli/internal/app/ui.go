@@ -201,8 +201,14 @@ type UI struct {
 	npWarnAt                                    time.Time
 	npPlayBtn, npNextBtn, npStopBtn, npTitleBtn widget.Clickable
 	npCoverBtn                                  widget.Clickable
-	npSeek                                      gesture.Click
-	npBarW                                      int
+	// vol is the volume control (volume.go): the level, its slider, the
+	// speaker glyph's mute, and the tag the wheel over the player goes to.
+	vol        volState
+	volSlider  widget.Float
+	volMuteBtn widget.Clickable
+	volWheel   int
+	npSeek     gesture.Click
+	npBarW     int
 
 	// pending is the one-job-at-a-time queue: things to start on a
 	// frame where nothing is running (see later()). UI goroutine only.
@@ -380,6 +386,7 @@ func NewUI(o Options) *UI {
 	if u.audio == nil {
 		u.audio = player.New()
 	}
+	u.initVolume()
 	u.audio.OnEnd(func() {
 		u.mu.Lock()
 		u.trackDone = true
@@ -748,6 +755,7 @@ func (u *UI) Layout(gtx C) D {
 	u.drain()
 	u.syncNowPlaying(gtx)
 	u.playKeys(gtx)
+	u.saveVolumeLater(gtx)
 	if u.st.NowPlaying != nil && u.dlg == nil {
 		u.nowPlayingEvents(gtx)
 	}
@@ -1586,7 +1594,7 @@ func (u *UI) footer(gtx C) D {
 			return layout.Inset{Top: pad, Bottom: pad, Left: unit.Dp(14), Right: unit.Dp(14)}.
 				Layout(gtx, func(gtx C) D {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					half := gtx.Constraints.Max.X / 2
+					third := gtx.Constraints.Max.X / 3
 					// The footer is the music folder and, while a track is
 					// loaded, the player: the player takes the left half and
 					// the folder moves to the right. The log is not here any
@@ -1609,15 +1617,22 @@ func (u *UI) footer(gtx C) D {
 					if !playing {
 						return folder(gtx)
 					}
+					// The player takes what the folder leaves; the folder
+					// keeps at most a third.
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx C) D {
-							gtx.Constraints.Max.X = half - gtx.Dp(12)
-							gtx.Constraints.Min.X = gtx.Constraints.Max.X
-							return u.nowPlayingBar(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 						layout.Flexed(1, func(gtx C) D {
-							return layout.E.Layout(gtx, folder)
+							gtx.Constraints.Min.X = gtx.Constraints.Max.X
+							// The wheel anywhere over the player is the
+							// volume (wheelArea, over the bar, passing
+							// clicks through to the buttons).
+							d := u.nowPlayingBar(gtx)
+							u.wheelArea(gtx, d.Size)
+							return d
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+						layout.Rigid(func(gtx C) D {
+							gtx.Constraints.Max.X = third
+							return folder(gtx)
 						}),
 					)
 				})

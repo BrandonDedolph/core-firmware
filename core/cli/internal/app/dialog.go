@@ -72,10 +72,6 @@ func (u *UI) dialog(gtx C) D {
 					}
 					gap(10)
 				}
-				if d.warn != "" {
-					add(u.wrap(12, u.pal.Accent, d.warn))
-					gap(6)
-				}
 				if d.prompt != "" {
 					add(u.text(12.5, u.pal.Ink, d.prompt))
 				}
@@ -183,7 +179,9 @@ func (u *UI) cardLine(gtx C, r cardRow) D {
 func (u *UI) listLine(gtx C, r cardRow) D {
 	return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-			layout.Flexed(1, u.line(12.5, u.pal.Ink, r.label)),
+			// Two lines rather than a clip: "a file, in <album>" is
+			// long, and its end is the part that says where it is.
+			layout.Flexed(1, u.wrapN(12.5, u.pal.Ink, r.label, 2)),
 			layout.Rigid(func(gtx C) D {
 				if r.value == "" {
 					return D{}

@@ -131,18 +131,25 @@ drive the pass:
 ## Dialogs
 
 - **Write (Flash / Update / Install).** Title says the verb and version.
-  Identity card: name · model · serial · "Disk N of M on this PC · size" ·
-  what is written (bytes; "the partition is backed up first and read back
-  after"; "nothing on the music volume changes"). Recovery sentence. Buttons:
-  Cancel · **Hold to write…** (press-and-hold 2 s with a fill that grows
-  across the button; releasing early resets). The flasher's typed-path
-  prompt is answered by the app with the path it already knows **after** the
-  hold completes, and only when `Device.Tested`; for untested hardware the
-  dialog keeps the typed-path field as today. The parse of the flasher
+  Identity card: name · model · serial · "Disk N (as Disk Management
+  numbers it) · size" · what is written (bytes; "the partition is backed up
+  first and read back after"; "nothing on the music volume changes").
+  Recovery sentence. Buttons: Cancel · **Hold to write…** (press-and-hold 2 s
+  with a fill that grows across the button; releasing early resets). The
+  flasher's typed-path prompt is answered by the app with the path it
+  already knows **after** the hold completes. The parse of the flasher
   prompt (`devicePathFromPrompt`) stays as the guard that the path the app
-  will type is the one the flasher asked for.
-- **Sync and remove.** Lists the albums that would be deleted (name, size)
-  and the button reads "Delete N albums and sync". No typed word.
+  will type is the one the flasher asked for. *Revised in review:* hardware
+  Core has not been tested on is **refused by the app** — no dialog, no
+  typed path. The flasher already refuses it before it asks
+  (`gateHardware`) unless `--untested-hardware` is given, the app never
+  gives it, and the refusal names `core flash --untested-hardware` /
+  `core install --untested-hardware` as the way to take that risk.
+- **Sync and remove.** Lists what would be deleted, one row per path the
+  prune removes, labelled by kind (album folder · a file inside an album
+  that stays · a playlist), with sizes; the button reads "Delete N albums
+  and sync" when every entry is an album folder and "Delete N items and
+  sync" otherwise. No typed word.
 - **Fix the library.** As today.
 
 ## After-job behaviour
@@ -168,7 +175,7 @@ both themes into the PR description for review. Review is visual first.
 | **A3 Words** | all renames; stale messages; jargon off the front (Install pane, tab note, art rows); Install-from-file no longer fires on pick | grep finds no "Refresh", "Dry run", "prune", "Flash file" in user-facing strings |
 | **A4 iPod tab** | rows; Storage from the volume; Backups row (Apple backup + partition backups, Show folder, Back up now); Advanced disclosure with the old facts and the image flash | Details tab gone; `details_tab.go` becomes `ipod_tab.go` |
 | **A5 Log strip** | strip + drawer on every screen; Looking and NotInstalled redrawn around the mark; log pane leaves the iPod tab | an install error is readable on the NotInstalled screen |
-| **A6 Gates** | identity card + hold-to-write; typed path only for untested hardware; Sync-and-remove dialog lists albums | a write on tested hardware needs no typing; untested still does |
+| **A6 Gates** | identity card + hold-to-write; untested hardware refused (CLI's `--untested-hardware` only); Sync-and-remove dialog lists what it deletes | a write on tested hardware needs no typing; untested is refused with the CLI flag named |
 | **A7 Ship** | one music-folder entry point; footer click → Library; docs/screens/core_app.png (+ an Onyx shot) and the guide re-shot; README; release v0.2.2 | `core-app` in both themes in the README |
 
 ## Not in this pass

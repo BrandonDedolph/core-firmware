@@ -128,6 +128,14 @@ func (u *UI) ipodRows() []ipodRow {
 	if d.Serial != "" {
 		hw.sub = "serial " + d.Serial
 	}
+	if !d.Tested {
+		// The app does not write firmware to it (ErrUntested); say so
+		// here rather than only when a write is refused.
+		if hw.sub != "" {
+			hw.sub += " · "
+		}
+		hw.sub += "the app will not write firmware to it; the command line can, with --untested-hardware"
+	}
 	rows = append(rows, hw)
 
 	b := ipodRow{label: "Backups", value: "No Apple firmware backup here"}

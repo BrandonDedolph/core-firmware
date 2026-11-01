@@ -49,7 +49,7 @@ func installUI(t *testing.T) (*UI, *fakeBackend, string) {
 	volume := t.TempDir()
 	f := &fakeBackend{
 		dev: Device{
-			Found: true, Path: testPath, Serial: "TESTSERIAL", Volume: volume,
+			Found: true, Path: testPath, Serial: "TESTSERIAL", Volume: volume, Tested: true,
 			Installed: appleFirmware(),
 		},
 		installed: map[string]fwpart.Installed{testPath: appleFirmware()},
@@ -74,8 +74,8 @@ func TestInstallButtonWritesAndReachesReady(t *testing.T) {
 	if req == nil {
 		t.Fatal("Install never asked for a confirmation")
 	}
-	if req.want != testPath {
-		t.Errorf("the dialog wants %q typed, want the device path", req.want)
+	if !req.hold || req.holdAnswer != testPath {
+		t.Errorf("the install dialog is not the hold for %s: hold=%v answer=%q", testPath, req.hold, req.holdAnswer)
 	}
 	if !strings.Contains(req.plan, "installed: Apple firmware") {
 		t.Errorf("the dialog does not carry what is being replaced:\n%s", req.plan)

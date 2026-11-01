@@ -254,7 +254,10 @@ func (u *UI) themeRows(gtx C) D {
 		i, t := i, t
 		label := t.String()
 		if t == ThemeSystem {
-			label = "System — " + ThemeSystem.Resolve().String() + " now"
+			if u.systemNow == "" {
+				u.systemNow = ThemeSystem.Resolve()
+			}
+			label = "System — " + u.systemNow.String() + " now"
 		}
 		rows = append(rows, layout.Rigid(func(gtx C) D {
 			return u.menuRow(gtx, &u.themeClicks[i], label, true, true, u.theme == t)

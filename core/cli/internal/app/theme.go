@@ -250,6 +250,16 @@ func setMaterial(th *material.Theme, pal Palette) {
 	}
 }
 
+// FocusGained re-reads the system theme when the window comes back to the
+// front, so a dark-mode switch made in Windows' settings shows the next time
+// the window is used, without a restart. Only for System: a named choice is
+// the user's and stays.
+func (u *UI) FocusGained() {
+	if u.theme == ThemeSystem {
+		u.applyTheme(ThemeSystem)
+	}
+}
+
 // applyTheme switches the window's palette. The shaper is kept — it is
 // the expensive half and does not depend on colour — and the next frame
 // draws in the new tokens, because every widget reads u.pal per frame.

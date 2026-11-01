@@ -127,7 +127,7 @@ func (u *UI) startSync(kind JobKind) {
 		for _, p := range plan.Prune {
 			emit(Event{Kind: EventLog, Text: "would remove " + p})
 		}
-		answer, err = u.ask(ctx, removalDialog(plan, statSize))
+		answer, err = u.ask(ctx, removalDialog(plan, pathInfo))
 		if err != nil {
 			return err
 		}
@@ -174,6 +174,9 @@ func (u *UI) startUpdate() {
 	installed := installedTag(u.st.Device.Firmware)
 	g := u.gate("Update this iPod to Core " + rel.Tag + "?")
 	u.start(JobUpdate, func(ctx context.Context, emit func(Event)) error {
+		if !g.dev.Tested {
+			return ErrUntested
+		}
 		if !rel.Checked || rel.Tag == "" {
 			return fmt.Errorf("no release known yet: use ··· → Check for updates first")
 		}
@@ -211,6 +214,9 @@ func (u *UI) startFlash(file string) {
 	u.start(JobFlash, func(ctx context.Context, emit func(Event)) error {
 		if file == "" {
 			return fmt.Errorf("no image: type a path to a .ipod or .bin file, or use ··· → Flash an image file…")
+		}
+		if !g.dev.Tested {
+			return ErrUntested
 		}
 		if err := u.flashFile(ctx, file, g, emit); err != nil {
 			return err
@@ -286,6 +292,9 @@ func (u *UI) startInstall(file string) {
 	rel := u.st.Release
 	g := u.gate("")
 	u.start(JobInstall, func(ctx context.Context, emit func(Event)) error {
+		if !g.dev.Tested {
+			return ErrUntested
+		}
 		image := file
 		if image == "" {
 			if !rel.Checked || rel.Tag == "" {

@@ -11,7 +11,7 @@ import (
 // DialogKinds are the dialogs `core-app --screenshot --dialog KIND` can
 // put on screen, for review. They are drawn and nothing else: a canned
 // dialog has no job behind it, so nothing can be confirmed through one.
-var DialogKinds = []string{"write", "holding", "untested", "remove", "about"}
+var DialogKinds = []string{"write", "holding", "remove", "about"}
 
 // cannedDialog builds one of DialogKinds against the state's device.
 func cannedDialog(u *UI, kind string) error {
@@ -26,27 +26,23 @@ func cannedDialog(u *UI, kind string) error {
 		if kind == "holding" {
 			u.holdFrozen = 0.45
 		}
-	case "untested":
-		g.dev.Tested = false
-		req, err := writeDialog(g, g.dev.Path, 443_392, strings.TrimSpace(flashPlanSample))
-		if err != nil {
-			return err
-		}
-		u.dlg = req
-		u.confirmEd.SetText(`\\.\PhysicalDrive`)
 	case "remove":
+		// A mixed list, the way a real one comes out of the syncer: two
+		// album folders that are gone from the source, a stray file in
+		// an album that stays, and a playlist nobody names any more.
 		plan := &syncer.Plan{PruneBytes: 1_288_490_189, Prune: []string{
-			`D:\Music\Old Band - First Album\01. Intro.flac`,
-			`D:\Music\Old Band - First Album\folder.art`,
-			`D:\Music\Someone Else - Live at the Hall\01. Opening.flac`,
-			`D:\Music\Someone Else - Live at the Hall\02. Encore.flac`,
-			`D:\Music\The Leftovers - Demos\01. Demo.flac`,
+			`D:\Music\Old Band - First Album`,
+			`D:\Music\Someone Else - Live at the Hall`,
+			`D:\Music\Talking Heads - Remain in Light\09 - The Overload (demo).flac`,
+			`D:\Music\Playlists\Road trip 2019.m3u8`,
 		}}
-		sizes := map[string]int64{
-			plan.Prune[0]: 412_000_000, plan.Prune[2]: 330_000_000,
-			plan.Prune[3]: 320_000_000, plan.Prune[4]: 226_490_189,
+		info := map[string]int64{
+			plan.Prune[0]: 412_000_000, plan.Prune[1]: 830_000_000,
+			plan.Prune[2]: 46_489_000, plan.Prune[3]: 1_189,
 		}
-		u.dlg = removalDialog(plan, func(p string) int64 { return sizes[p] })
+		u.dlg = removalDialog(plan, func(p string) (int64, bool) {
+			return info[p], !strings.Contains(p, ".")
+		})
 	case "about":
 		u.showAbout()
 		return nil

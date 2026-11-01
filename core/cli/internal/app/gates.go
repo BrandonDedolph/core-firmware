@@ -2,16 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/devicefs"
 	"github.com/BrandonDedolph/ipod_theme/core/cli/internal/syncer"
 )
 
@@ -21,10 +21,10 @@ import (
 // one dialog that says WHICH iPod, in words a person can check against the
 // thing in their hand — name, model, serial, which disk on this PC, how much
 // is written — and then asks for a deliberate gesture: a two-second
-// press-and-hold. On hardware Core has booted on (Device.Tested), the hold
-// IS the confirmation, and the app answers the flasher's typed-path prompt
-// with the path it already identified — after checking that the flasher is
-// asking about that same path. On anything else the typed path stays.
+// press-and-hold. The hold IS the confirmation: the app answers the
+// flasher's typed-path prompt with the path it already identified — after
+// checking that the flasher is asking about that same path. Hardware Core
+// has not been tested on is not written from the app at all (ErrUntested).
 //
 // Sync and remove lists the albums it would delete and says how many on its
 // button. No typed word: the list is the confirmation.
@@ -75,36 +75,32 @@ func identityCard(d Device, imageBytes int64) []cardRow {
 	return rows
 }
 
-// diskNumRE is the OS's number at the end of a disk path: PhysicalDrive2,
-// /dev/disk4.
-var diskNumRE = regexp.MustCompile(`(\d+)$`)
+// physicalDriveRE is Windows' disk number in a \\.\PhysicalDriveN path.
+var physicalDriveRE = regexp.MustCompile(`(?i)PhysicalDrive(\d+)$`)
 
-// diskLine is "disk 2 of 3 on this PC · 74.5 GB", with the OS's own disk
-// number (the one Disk Management shows).
+// diskLine is "Disk 2 (as Disk Management numbers it) · 74.5 GB" on Windows
+// — PhysicalDriveN is 0-based, the same number Disk Management shows, so
+// that is the name a person can check it against — and the device path
+// elsewhere (/dev/sdb, /dev/disk4).
 func diskLine(d Device) string {
 	size := ""
 	if d.Size > 0 {
 		v, unit := humanBinary(d.Size)
 		size = " · " + v + " " + unit
 	}
-	m := diskNumRE.FindStringSubmatch(d.Path)
-	if m == nil {
-		return "this disk" + size
+	if m := physicalDriveRE.FindStringSubmatch(d.Path); m != nil {
+		return "Disk " + m[1] + " (as Disk Management numbers it)" + size
 	}
-	n, _ := strconv.Atoi(m[1])
-	if d.DiskCount > n {
-		return fmt.Sprintf("disk %d of %d on this PC%s", n, d.DiskCount, size)
+	if d.Path != "" {
+		return d.Path + size
 	}
-	return fmt.Sprintf("disk %d%s", n, size)
+	return "this disk" + size
 }
 
 // writeNote is the sentence under the card.
 const writeNote = "Nothing on the music volume changes. If anything goes wrong, hold Select+Menu, " +
 	"then Select+Play at the Apple logo: that is disk mode, it is in ROM, and this window " +
 	"will find the iPod again."
-
-// untestedWarn is the line an untested iPod gets above its typed field.
-const untestedWarn = "This hardware has not been tested with Core. Type the disk path to continue."
 
 // confirmWrite is the flasher's Confirm for one write. It runs on the job
 // goroutine; everything it needs from the model is in g.
@@ -126,37 +122,47 @@ func (u *UI) confirmWrite(ctx context.Context, plan *strings.Builder, g writeGat
 		if err != nil {
 			return "", err
 		}
-		return u.ask(ctx, req)
+		answer, err := u.ask(ctx, req)
+		if err == nil && answer == CancelAnswer {
+			return "", errors.New("cancelled: nothing was written")
+		}
+		return answer, err
 	}
 }
 
+// ErrUntested is the app's answer to a firmware write on hardware Core has
+// not been tested on. The flasher refuses such a write before it asks
+// (flasher.gateHardware) unless --untested-hardware is given, and the app
+// never gives it: the command line is the one place to take that risk.
+var ErrUntested = errors.New("this iPod is not hardware Core has been tested on, so the app will not " +
+	"write firmware to it — the command line can, with --untested-hardware " +
+	"(core flash --untested-hardware <image>, or core install --untested-hardware)")
+
 // writeDialog is the request confirmWrite raises: the identity card, the
-// note, the plan behind its link, and the gate — the hold on tested
-// hardware (refused outright if the flasher is asking about a path other
-// than the one this window identified), the typed path everywhere else.
+// note, the plan behind its link, and the gate — the two-second hold,
+// which answers with the path this window identified. It is refused
+// outright if the flasher is asking about a different path, and for
+// hardware Core has not been tested on (ErrUntested).
 func writeDialog(g writeGate, want string, size int64, plan string) (*dialogRequest, error) {
+	if !g.dev.Tested {
+		return nil, ErrUntested
+	}
+	if want != g.dev.Path {
+		return nil, fmt.Errorf("the flasher asked to write %s, but this window identified the iPod as %s — refusing",
+			want, g.dev.Path)
+	}
 	req := &dialogRequest{
-		title: g.title,
-		card:  identityCard(g.dev, size),
-		note:  writeNote,
-		plan:  plan,
+		title:      g.title,
+		card:       identityCard(g.dev, size),
+		note:       writeNote,
+		plan:       plan,
+		hold:       true,
+		holdAnswer: g.dev.Path,
+		okLabel:    "Hold to write…",
 	}
 	if runtime.GOOS == "windows" && !g.dev.Elevated && g.cli != "" {
 		req.note += " Windows will ask for permission to run " + fileBase(g.cli) + ", which does the write."
 	}
-	if g.dev.Tested {
-		if want != g.dev.Path {
-			return nil, fmt.Errorf("the flasher asked to write %s, but this window identified the iPod as %s — refusing",
-				want, g.dev.Path)
-		}
-		req.hold, req.holdAnswer = true, g.dev.Path
-		req.okLabel = "Hold to write…"
-		return req, nil
-	}
-	req.warn = untestedWarn
-	req.prompt = "Type the disk path  " + want + "  to continue:"
-	req.want = want
-	req.okLabel = "Write it"
 	return req, nil
 }
 
@@ -180,43 +186,42 @@ func (u *UI) holdTick(pressed bool, now time.Time) (float32, bool) {
 	return f, false
 }
 
-// removalDialog is Sync and remove's second step: the albums that would be
-// deleted, their sizes, the total, and a button that says how many.
-// size reads one file's size (statSize; a test passes its own).
-func removalDialog(plan *syncer.Plan, size func(string) int64) *dialogRequest {
-	type album struct {
-		name  string
-		bytes int64
-	}
-	groups := map[string]*album{}
-	var order []string
-	for _, p := range plan.Prune {
-		name := albumOf(p)
-		a := groups[name]
-		if a == nil {
-			a = &album{name: name}
-			groups[name] = a
-			order = append(order, name)
-		}
-		a.bytes += size(p)
-	}
-	sort.Strings(order)
+// removalDialog is Sync and remove's second step: what would be deleted, one
+// row per path the prune will remove, labelled by what it is — an album
+// folder, a file inside an album that stays, or a playlist — with its size,
+// the total, and a button that counts what it deletes: "Delete 3 albums and
+// sync" when every entry is an album folder, "Delete 4 items and sync"
+// otherwise. info reads one path's size and whether it is a directory
+// (pathInfo; a test passes its own).
+func removalDialog(plan *syncer.Plan, info func(string) (int64, bool)) *dialogRequest {
 	const maxRows = 12
 	var rows []cardRow
-	for i, name := range order {
-		if i == maxRows {
-			rows = append(rows, cardRow{fmt.Sprintf("… and %d more", len(order)-maxRows), ""})
-			break
+	albums := true
+	for i, p := range plan.Prune {
+		size, dir := info(p)
+		label, isAlbum := pruneLabel(p, dir)
+		if !isAlbum {
+			albums = false
+		}
+		if i >= maxRows {
+			continue
 		}
 		v := ""
-		if b := groups[name].bytes; b > 0 {
-			n, unit := humanBinary(b)
+		if size > 0 {
+			n, unit := humanBinary(size)
 			v = n + " " + unit
 		}
-		rows = append(rows, cardRow{name, v})
+		rows = append(rows, cardRow{label, v})
 	}
-	n := len(order)
-	total := fmt.Sprintf("%d album%s", n, plural(n))
+	if n := len(plan.Prune); n > maxRows {
+		rows = append(rows, cardRow{fmt.Sprintf("… and %d more", n-maxRows), ""})
+	}
+	n := len(plan.Prune)
+	noun := fmt.Sprintf("%d item%s", n, plural(n))
+	if albums {
+		noun = fmt.Sprintf("%d album%s", n, plural(n))
+	}
+	total := noun
 	if plan.PruneBytes > 0 {
 		v, unit := humanBinary(plan.PruneBytes)
 		total += " · " + v + " " + unit
@@ -226,37 +231,45 @@ func removalDialog(plan *syncer.Plan, size func(string) int64) *dialogRequest {
 		items:   rows,
 		total:   total + " will be deleted from the iPod",
 		note:    "These are on the iPod but not in your music folder. The sync runs right after.",
-		okLabel: fmt.Sprintf("Delete %d album%s and sync", n, plural(n)),
+		okLabel: "Delete " + noun + " and sync",
 	}
 }
 
-// albumOf is the album folder a pruned path belongs to: the component after
-// Music, or "Loose files" for something directly in Music.
-func albumOf(p string) string {
+// pruneLabel says what one pruned path is, relative to Music: an album
+// folder (the name itself), a file inside an album that stays ("01.flac,
+// in Album"), a playlist ("x.m3u8, a playlist"), or a loose file in Music.
+// isAlbum is true only for an album folder.
+func pruneLabel(p string, dir bool) (label string, isAlbum bool) {
 	parts := strings.FieldsFunc(filepath.ToSlash(p), func(r rune) bool { return r == '/' || r == '\\' })
+	rel := parts
 	for i, s := range parts {
-		if strings.EqualFold(s, "Music") && i+1 < len(parts) {
-			if i+2 < len(parts) || !looseExt[strings.ToLower(filepath.Ext(parts[i+1]))] {
-				return parts[i+1]
-			}
-			return "Loose files"
+		if strings.EqualFold(s, "Music") {
+			rel = parts[i+1:]
 		}
 	}
-	if len(parts) >= 2 {
-		return parts[len(parts)-2]
+	switch {
+	case len(rel) == 0:
+		return p, false
+	case len(rel) >= 2 && strings.EqualFold(rel[0], devicefs.PlaylistDir):
+		return rel[len(rel)-1] + ", a playlist", false
+	case len(rel) == 1 && dir:
+		return rel[0], true
+	case len(rel) == 1:
+		return rel[0] + ", a file in Music", false
+	default:
+		return rel[len(rel)-1] + ", in " + rel[0], false
 	}
-	return "Loose files"
 }
 
-// looseExt are the file types that can sit directly in Music/ — anything
-// else there is an album folder.
-var looseExt = map[string]bool{".flac": true, ".mp3": true, ".m4a": true, ".art": true,
-	".thm": true, ".jpg": true, ".png": true, ".m3u": true, ".m3u8": true, ".txt": true}
-
-// statSize is a file's size, or 0.
-func statSize(p string) int64 {
-	if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-		return fi.Size()
+// pathInfo is a pruned path's size (a directory's files, as the syncer
+// counts them) and whether it is a directory.
+func pathInfo(p string) (int64, bool) {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return 0, false
 	}
-	return 0
+	if fi.IsDir() {
+		return syncer.TreeSize(p), true
+	}
+	return fi.Size(), false
 }

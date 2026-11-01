@@ -14,7 +14,7 @@ import (
 // change. Every write now ends by reading the device back.
 func TestUpdateReadsTheNewFirmwareBack(t *testing.T) {
 	f := &fakeBackend{
-		dev: Device{Found: true, Path: `\\.\PhysicalDrive2`, Volume: `D:\`,
+		dev: Device{Found: true, Path: `\\.\PhysicalDrive2`, Tested: true, Volume: `D:\`,
 			Firmware: "v0.2.0 (build x)"},
 		rel:           Release{Checked: true, Tag: "v0.2.1"},
 		downloaded:    "/cache/core.ipod",
@@ -46,7 +46,7 @@ func TestUpdateReadsTheNewFirmwareBack(t *testing.T) {
 
 func TestFlashReadsTheNewFirmwareBack(t *testing.T) {
 	f := &fakeBackend{
-		dev:           Device{Found: true, Path: `\\.\PhysicalDrive2`, Firmware: "v0.2.0"},
+		dev:           Device{Found: true, Path: `\\.\PhysicalDrive2`, Tested: true, Firmware: "v0.2.0"},
 		flashPrompt:   flasher.ConfirmPrompt(`\\.\PhysicalDrive2`),
 		flashFirmware: "v0.2.1",
 	}

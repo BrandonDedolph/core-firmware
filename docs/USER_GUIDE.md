@@ -418,8 +418,8 @@ shows it within two seconds.
 Writing firmware — Install, Update, or an image of your own — is confirmed in one dialog that says
 which iPod will be written: its name, model, serial, which disk on this PC and how much is
 written. On the iPod Video 5.5G 80 GB, the hardware Core has been tested on, you confirm by
-**holding the button for two seconds**; on anything else you type the disk path, as the command
-line asks. *Sync and remove* lists the albums it would delete and says how many on its button.
+**holding the button for two seconds**. Any other iPod is refused by the window; the command line
+can write it with `--untested-hardware`, if you mean to take that risk. *Sync and remove* lists the albums it would delete and says how many on its button.
 After any write the window reads the iPod again, so the header shows the new version at once.
 
 <p align="center"><img src="screens/core_app.png" alt="the core desktop app, Linen" width="640"></p>

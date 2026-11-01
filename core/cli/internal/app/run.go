@@ -65,10 +65,16 @@ func runWindow(o Options) error {
 
 	var ops op.Ops
 	title := "Core"
+	focused := false
 	for {
 		switch e := w.Event().(type) {
 		case gio.DestroyEvent:
 			return e.Err
+		case gio.ConfigEvent:
+			if e.Config.Focused && !focused {
+				u.FocusGained()
+			}
+			focused = e.Config.Focused
 		case gio.FrameEvent:
 			gtx := gio.NewContext(&ops, e)
 			u.Layout(gtx)

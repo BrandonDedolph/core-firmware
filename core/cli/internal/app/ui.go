@@ -114,11 +114,10 @@ type dialogRequest struct {
 	info, prose bool
 	// card is the write dialog's identity card; items and total are the
 	// removal list; note is the Muted sentence under them; plan is the
-	// flasher's plan behind "Show the plan"; warn is the warning line.
+	// flasher's plan behind "Show the plan".
 	card, items []cardRow
 	total       string
 	note, plan  string
-	warn        string
 	// hold makes the confirming button a press-and-hold (HoldDuration)
 	// that answers holdAnswer when it completes.
 	hold       bool
@@ -249,7 +248,10 @@ type UI struct {
 	// holdFrozen pins the hold fill for a canned screenshot, which has
 	// no pointer to hold it with. Zero everywhere else.
 	holdFrozen float32
-	now        func() time.Time
+	// systemNow is what System resolves to, read once when the menu
+	// opens (it is a registry read on Windows; not one per frame).
+	systemNow Theme
+	now       func() time.Time
 	// The iPod tab's own: Show folder, and the Advanced disclosure.
 	backupDirBtn widget.Clickable
 	advancedBtn  widget.Clickable
@@ -279,7 +281,10 @@ type UI struct {
 
 // NewUI builds the window's state.
 func NewUI(o Options) *UI {
-	choice := o.Config.Theme
+	// config.json is hand-editable: "dark" or "Light" are read the way the
+	// flag reads them, and anything unknown is System, so a radio in the
+	// menu is always on.
+	choice, _ := ParseTheme(string(o.Config.Theme))
 	if o.Theme != nil {
 		choice = *o.Theme
 	}
@@ -473,6 +478,8 @@ func (u *UI) drain() {
 		u.st.FlashFile = path
 		u.flashEd.SetText(path)
 		u.st.Tab = TabDetails
+		u.st.Advanced = true
+		u.revealAdvanced()
 	case path != "" && pathFor == JobInstall:
 		// Picking a file is choosing it, not installing it: the button
 		// becomes "Install from <name>" and that click runs the install
@@ -568,22 +575,24 @@ func (u *UI) afterJob(e Event) {
 		// volume's; a sync just changed both.
 		u.later(u.startRefresh)
 	case JobRefresh:
-		// Once per launch, the first time an iPod is there: ask GitHub
-		// whether there is something newer, so Update appears without
-		// anybody pressing Check.
+		// The two read-only passes over the music folder first: they fill
+		// the grid and the Library tab, and the Runner takes one job at
+		// a time, so a check queued ahead of them would hold the grid
+		// empty for as long as GitHub takes to answer (30 s, black-holed).
+		if src := u.st.Source; src != "" {
+			if u.st.Report == nil {
+				u.later(func() { u.startInspect(src) })
+			}
+			if len(u.st.Albums) == 0 && u.st.Device.Volume != "" {
+				u.later(func() { u.startSync(JobDryRun) })
+			}
+		}
+		// Then, once per launch, the first time an iPod is there: ask
+		// GitHub whether there is something newer, so Update appears
+		// without anybody pressing Check.
 		if !u.autoChecked && u.st.Device.Found {
 			u.autoChecked = true
 			u.later(u.startCheck)
-		}
-		if u.st.Source == "" {
-			return
-		}
-		if u.st.Report == nil {
-			src := u.st.Source
-			u.later(func() { u.startInspect(src) })
-		}
-		if len(u.st.Albums) == 0 && u.st.Device.Volume != "" {
-			u.later(func() { u.startSync(JobDryRun) })
 		}
 	}
 }
@@ -645,6 +654,10 @@ func (u *UI) Layout(gtx C) D {
 		u.events(gtx)
 	}
 
+	if !u.st.MenuOpen {
+		// The menu's "System — Onyx now" is read once per opening.
+		u.systemNow = ""
+	}
 	paint.Fill(gtx.Ops, u.pal.Surface)
 	return layout.Stack{}.Layout(gtx,
 		layout.Stacked(func(gtx C) D {
@@ -877,7 +890,7 @@ func (u *UI) dialogEvents(gtx C) {
 		}
 	}
 	if u.dlgCancel.Clicked(gtx) {
-		u.answer("")
+		u.cancel()
 		return
 	}
 	if u.planToggle.Clicked(gtx) {
@@ -899,7 +912,7 @@ func (u *UI) dialogEvents(gtx C) {
 		f, done := u.holdTick(pressed, u.now())
 		u.holdFrac = f
 		if done {
-			u.answer(u.dlg.holdAnswer)
+			u.reply(u.dlg.holdAnswer)
 			return
 		}
 		if pressed {
@@ -908,19 +921,37 @@ func (u *UI) dialogEvents(gtx C) {
 		return
 	}
 	if u.dlgOK.Clicked(gtx) {
-		u.answer(strings.TrimSpace(u.confirmEd.Text()))
+		u.ok()
 	}
 }
 
-func (u *UI) answer(text string) {
+// CancelAnswer is the reply a dialog's Cancel sends — and the only one that
+// means "no". Every job that asks reads "" as cancel.
+const CancelAnswer = ""
+
+// cancel is the Cancel button: always CancelAnswer, whatever the dialog.
+// (It used to share one function with OK, which turned an empty answer
+// into "yes" for a dialog with nothing to type — so Cancel on a dialog with
+// nothing to type said yes.)
+func (u *UI) cancel() { u.reply(CancelAnswer) }
+
+// ok is the confirming button. A dialog with a typed field answers what was
+// typed; a plain one answers "yes".
+func (u *UI) ok() {
 	if u.dlg == nil {
 		return
 	}
-	if u.dlg.want == "" && text == "" {
-		// A plain Yes/Cancel dialog: OK means yes, and the flasher's
-		// Confirm contract is "return the typed device path", so the
-		// literal answer is what the caller asked for.
-		text = "yes"
+	if u.dlg.want != "" {
+		u.reply(strings.TrimSpace(u.confirmEd.Text()))
+		return
+	}
+	u.reply("yes")
+}
+
+// reply sends one answer and closes the dialog.
+func (u *UI) reply(text string) {
+	if u.dlg == nil {
+		return
 	}
 	select {
 	case u.dlg.reply <- text:

@@ -284,7 +284,7 @@ func TestUpdateWithoutACheckRefuses(t *testing.T) {
 
 func TestUpdateDownloadsThenFlashes(t *testing.T) {
 	f := &fakeBackend{
-		dev:         Device{Found: true, Path: `\\.\PhysicalDrive2`},
+		dev:         Device{Found: true, Path: `\\.\PhysicalDrive2`, Tested: true},
 		rel:         Release{Checked: true, Tag: "v0.1.3"},
 		downloaded:  "/cache/core.ipod",
 		flashPrompt: flasher.ConfirmPrompt(`\\.\PhysicalDrive2`),

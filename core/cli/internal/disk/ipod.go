@@ -71,9 +71,6 @@ type IPod struct {
 	Tested bool
 	// UntestedReason explains a false Tested.
 	UntestedReason string
-	// DiskCount is how many disks the enumeration that found this iPod
-	// saw, so a confirmation can say "disk 2 of 3 on this PC".
-	DiskCount int
 }
 
 // Describe is the line `core info` and the multi-device error print.
@@ -136,7 +133,6 @@ func FindIPods() ([]IPod, error) {
 		p, ok := identify(d, h)
 		h.Close()
 		if ok {
-			p.DiskCount = len(disks)
 			found = append(found, p)
 		}
 	}

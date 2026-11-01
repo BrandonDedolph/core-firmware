@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,26 +82,31 @@ func TestHoldRefusesAPromptForAnotherDisk(t *testing.T) {
 	}
 }
 
-// Untested hardware keeps the typed path, the warning, and no hold.
-func TestUntestedHardwareNeedsTheTypedPath(t *testing.T) {
+// Hardware Core has not been tested on is refused by the app — the dialog
+// is never raised and nothing reaches the flasher; the command line's
+// --untested-hardware is the one way to write it.
+func TestUntestedHardwareIsRefused(t *testing.T) {
 	g := writeGate{title: "t", dev: Device{Path: `\\.\PhysicalDrive2`, Tested: false}}
-	req, err := writeDialog(g, `\\.\PhysicalDrive2`, 0, "plan")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := writeDialog(g, `\\.\PhysicalDrive2`, 0, "plan"); err != ErrUntested {
+		t.Fatalf("writeDialog on untested hardware: %v", err)
 	}
-	if req.hold || req.want != `\\.\PhysicalDrive2` || req.warn != untestedWarn || req.okLabel != "Write it" {
-		t.Errorf("untested: %+v", req)
+	f := &fakeBackend{
+		dev:         Device{Found: true, Path: `\\.\PhysicalDrive2`, Tested: false},
+		flashPrompt: flasher.ConfirmPrompt(`\\.\PhysicalDrive2`),
 	}
-	// The typed path is what goes back.
-	u := NewUI(Options{})
-	u.SetState(DemoState())
-	u.dlg = req
-	req.reply = make(chan string, 1)
-	u.confirmEd.SetText(`\\.\PhysicalDrive2`)
-	u.dlgOK.Click()
-	u.Layout(newTestContext(900, 600))
-	if got := <-req.reply; got != `\\.\PhysicalDrive2` {
-		t.Errorf("answer = %q", got)
+	u := newTestUI(f)
+	u.st.Device = f.dev
+	seen := catchAsk(u, func(r *dialogRequest) string { return r.holdAnswer })
+	u.startFlash("/img/core.ipod")
+	settle(u)
+	if req := <-seen; req != nil {
+		t.Errorf("a dialog was raised for untested hardware: %+v", req)
+	}
+	if len(f.flashCalls) != 0 {
+		t.Errorf("the flasher was called: %q", f.flashCalls)
+	}
+	if u.st.Job == nil || !u.st.Job.Failed || !strings.Contains(u.st.Job.Text, "--untested-hardware") {
+		t.Errorf("the refusal does not name the CLI's flag: %+v", u.st.Job)
 	}
 }
 
@@ -150,14 +157,14 @@ func TestHoldDialogIgnoresAClick(t *testing.T) {
 
 func TestRemovalDialog(t *testing.T) {
 	plan := &syncer.Plan{PruneBytes: 3 << 30, Prune: []string{
-		`D:\Music\A - One\01.flac`, `D:\Music\A - One\folder.art`,
-		`D:\Music\B - Two\01.flac`, `D:\Music\C - Three\01.flac`,
+		`D:\Music\A - One`, `D:\Music\B - Two`, `D:\Music\C - Three`,
 	}}
-	req := removalDialog(plan, func(string) int64 { return 1 << 30 })
+	dirs := func(string) (int64, bool) { return 1 << 30, true }
+	req := removalDialog(plan, dirs)
 	if req.okLabel != "Delete 3 albums and sync" {
 		t.Errorf("label = %q", req.okLabel)
 	}
-	if len(req.items) != 3 || req.items[0].label != "A - One" || req.items[0].value != "2.0 GB" {
+	if len(req.items) != 3 || req.items[0].label != "A - One" || req.items[0].value != "1.0 GB" {
 		t.Errorf("items = %+v", req.items)
 	}
 	if req.total != "3 albums · 3.0 GB will be deleted from the iPod" {
@@ -166,17 +173,64 @@ func TestRemovalDialog(t *testing.T) {
 	if req.want != "" {
 		t.Errorf("the removal dialog asks for a typed word: %q", req.want)
 	}
-	one := removalDialog(&syncer.Plan{Prune: []string{`Music/X - Y/1.flac`}}, func(string) int64 { return 0 })
+	one := removalDialog(&syncer.Plan{Prune: []string{`Music/X - Y`}}, dirs)
 	if one.okLabel != "Delete 1 album and sync" {
 		t.Errorf("one album: %q", one.okLabel)
 	}
 	var many []string
 	for i := 0; i < 20; i++ {
-		many = append(many, "Music/Album "+itoa(100+i)+"/1.flac")
+		many = append(many, "Music/Album "+itoa(100+i))
 	}
-	m := removalDialog(&syncer.Plan{Prune: many}, func(string) int64 { return 0 })
-	if len(m.items) != 13 || m.items[12].label != "… and 8 more" {
-		t.Errorf("20 albums: %d rows, last %+v", len(m.items), m.items[len(m.items)-1])
+	m := removalDialog(&syncer.Plan{Prune: many}, dirs)
+	if len(m.items) != 13 || m.items[12].label != "… and 8 more" || m.okLabel != "Delete 20 albums and sync" {
+		t.Errorf("20 albums: %d rows, last %+v, %q", len(m.items), m.items[len(m.items)-1], m.okLabel)
+	}
+}
+
+// A mixed prune — an album folder, a stray file inside an album that
+// stays, a playlist, a loose file in Music — is labelled by kind and counted
+// as items, one per path the prune will delete.
+func TestRemovalDialogMixed(t *testing.T) {
+	plan := &syncer.Plan{PruneBytes: 500 << 20, Prune: []string{
+		`D:\Music\Old Band - First Album`,
+		`D:\Music\Talking Heads - Remain in Light\09 - demo.flac`,
+		`D:\Music\Playlists\Road trip.m3u8`,
+		`D:\Music\stray.flac`,
+	}}
+	req := removalDialog(plan, func(p string) (int64, bool) {
+		return 100 << 20, !strings.Contains(p, ".")
+	})
+	want := []string{
+		"Old Band - First Album",
+		"09 - demo.flac, in Talking Heads - Remain in Light",
+		"Road trip.m3u8, a playlist",
+		"stray.flac, a file in Music",
+	}
+	for i, w := range want {
+		if req.items[i].label != w {
+			t.Errorf("row %d = %q, want %q", i, req.items[i].label, w)
+		}
+	}
+	if req.okLabel != "Delete 4 items and sync" || !strings.HasPrefix(req.total, "4 items · 500 MB") {
+		t.Errorf("label %q, total %q", req.okLabel, req.total)
+	}
+}
+
+// The real size reader counts a directory's files (syncer.TreeSize), which
+// is what a vanished album is in the prune list.
+func TestPathInfoSizesADirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.flac"), make([]byte, 1000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.flac"), make([]byte, 24), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, isDir := pathInfo(dir); n != 1024 || !isDir {
+		t.Errorf("pathInfo(dir) = %d, %v", n, isDir)
+	}
+	if n, isDir := pathInfo(filepath.Join(dir, "a.flac")); n != 1000 || isDir {
+		t.Errorf("pathInfo(file) = %d, %v", n, isDir)
 	}
 }
 
@@ -211,8 +265,9 @@ func TestSyncAndRemoveListsAndDeletes(t *testing.T) {
 	u.startSync(JobSyncPrune)
 	settle(u)
 	<-done
-	if second == nil || second.okLabel != "Delete 1 album and sync" || len(second.items) != 1 ||
-		second.items[0].label != "Old - Band" {
+	// The fake's paths do not exist, so they are files inside an album.
+	if second == nil || second.okLabel != "Delete 2 items and sync" || len(second.items) != 2 ||
+		second.items[0].label != "01. a.flac, in Old - Band" {
 		t.Fatalf("second dialog = %+v", second)
 	}
 	if len(f.syncCalls) != 2 || !f.syncCalls[1].Prune || !f.syncCalls[1].Yes {
@@ -226,7 +281,7 @@ func TestIdentityCardForTheDemo(t *testing.T) {
 		{"Name", "Brandon's iPod"},
 		{"Model", "iPod Video 5.5G, 80 GB"},
 		{"Serial", "000A2700168F1E3C"},
-		{"Disk", "disk 2 of 3 on this PC · 74.5 GB"},
+		{"Disk", "Disk 2 (as Disk Management numbers it) · 74.5 GB"},
 		{"Writes", "433 KB of firmware · the partition is backed up first and read back after"},
 	}
 	if len(card) != len(want) {
@@ -238,8 +293,8 @@ func TestIdentityCardForTheDemo(t *testing.T) {
 		}
 	}
 	d := DemoState().Device
-	d.DiskCount = 0
-	if got := diskLine(d); got != "disk 2 · 74.5 GB" {
-		t.Errorf("unknown count: %q", got)
+	d.Path = "/dev/sdb"
+	if got := diskLine(d); got != "/dev/sdb · 74.5 GB" {
+		t.Errorf("a Linux disk: %q", got)
 	}
 }

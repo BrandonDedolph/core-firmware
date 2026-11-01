@@ -175,10 +175,7 @@ type Device struct {
 	// volume, not derived from the disk's size, which also counts the
 	// firmware partition and the FAT. Both zero when nothing has read
 	// them.
-	Free, Capacity int64
-	// DiskCount is how many disks the enumeration saw (disk.IPod), for
-	// the write dialog's "disk 2 of 3 on this PC"; 0 when unknown.
-	DiskCount             int
+	Free, Capacity        int64
 	Firmware              string
 	OSOSOK                bool
 	OSOSNote              string

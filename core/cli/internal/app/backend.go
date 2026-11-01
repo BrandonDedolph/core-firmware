@@ -212,7 +212,6 @@ func (b *RealBackend) Refresh(ctx context.Context) (Device, Library, error) {
 		d.Size = p.Disk.SizeBytes
 		d.SectorSize = p.SectorSize
 		d.Tested = p.Tested
-		d.DiskCount = p.DiskCount
 		if inst, err := b.Classify(ctx, p); err == nil {
 			d.Installed = inst
 		} else if d.Err == "" {

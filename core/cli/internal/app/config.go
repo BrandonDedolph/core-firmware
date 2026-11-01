@@ -31,6 +31,10 @@ type Config struct {
 	// Theme is the palette choice: "" (System — Onyx when Windows is
 	// set to dark apps, Linen otherwise), "linen" or "onyx".
 	Theme Theme `json:"theme,omitempty"`
+	// MinArtPx is the Fix tab's low-resolution line: a cover smaller
+	// than this on its shorter side is listed for replacing. 0 means
+	// librarian.DefaultMinArtPx (600); a negative value turns it off.
+	MinArtPx int `json:"min_art_px,omitempty"`
 }
 
 // NameFor is the friendly name remembered for one iPod, or "".

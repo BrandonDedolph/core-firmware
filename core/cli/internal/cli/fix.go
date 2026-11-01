@@ -38,6 +38,7 @@ func newFixCmd() *cobra.Command {
 		asJSON      bool
 		discFolders bool
 		minScore    float64
+		minArt      int
 		journalDir  string
 		undo        string
 	)
@@ -48,8 +49,12 @@ func newFixCmd() *cobra.Command {
 		Long: `Reads a source tree once and says what is wrong with it:
 
   missing art     albums whose first track carries no cover picture
+  low-res art     albums whose cover is under --min-art px on its
+                  shorter side (600 by default)
   misnamed        files in the right folder under the wrong name
   unorganized     files that belong in another folder
+  duplicates      two album folders with the same songs — listed,
+                  never changed here (keep one in the app's Fix tab)
   needs attention files nobody can name from their tags — never guessed
 
 and what fixing it costs: the iPod finds a track by the hash of its
@@ -62,13 +67,17 @@ and the covers, which are fetched, embedded in every track of the
 album, baked into folder.art + folder.thm and dropped beside the
 tracks as cover.jpg. A cover is only accepted unasked when it scored
 --min-score or better (artist and album match once "(Deluxe)" and the
-like are stripped); anything weaker is listed and skipped.
+like are stripped); anything weaker is listed and skipped. A low-res
+cover is only replaced by one that is larger on its shorter side; the
+candidates are downloaded to measure them.
 
 --names, --organize and --art each narrow the job to that one part;
 with none of them, all three are meant.
 
-Undo puts names and folders back. It does not remove embedded art —
-the old file is not kept, so there is nothing to put back.`,
+Undo puts names and folders back, and a replaced low-res cover (the
+old picture is kept beside the journal). It does not remove art added
+to an album that had none — the old file is not kept, so there is
+nothing to put back.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if undo != "" {
@@ -94,6 +103,7 @@ the old file is not kept, so there is nothing to put back.`,
 				DryRun:      dryRun,
 				JSON:        asJSON,
 				MinScore:    minScore,
+				MinArt:      minArt,
 				JournalDir:  journalDir,
 			})
 		},
@@ -110,6 +120,8 @@ the old file is not kept, so there is nothing to put back.`,
 		"Also split a flat album whose tags carry several discs into Disc N subfolders (off by default)")
 	cmd.Flags().Float64Var(&minScore, "min-score", librarian.DefaultMinScore,
 		"The match score --yes accepts a cover at")
+	cmd.Flags().IntVar(&minArt, "min-art", librarian.DefaultMinArtPx,
+		"A cover smaller than this many pixels on its shorter side is low-res (0 turns the check off)")
 	cmd.Flags().StringVar(&journalDir, "journal-dir", "",
 		"Where undo journals live (default <user config dir>/core/journal)")
 	cmd.Flags().StringVar(&undo, "undo", "", "Replay a journal backwards, putting every name back")
@@ -126,7 +138,10 @@ type fixOptions struct {
 	DiscFolders bool
 	JSON        bool
 	MinScore    float64
-	JournalDir  string
+	// MinArt is librarian.Options.MinArtPx, with 0 meaning OFF here (the
+	// flag's default is the real number, so 0 can only be typed).
+	MinArt     int
+	JournalDir string
 }
 
 // fixJSON is what --json prints: one object with whatever the run produced, so
@@ -143,6 +158,10 @@ func runFix(cmd *cobra.Command, o fixOptions) error {
 		JournalDir:  o.JournalDir,
 		DryRun:      o.DryRun,
 		DiscFolders: o.DiscFolders,
+		MinArtPx:    o.MinArt,
+	}
+	if o.MinArt == 0 {
+		lo.MinArtPx = -1
 	}
 	if !o.JSON {
 		// Only the fix job's log lines. The progress events are for a
@@ -169,14 +188,14 @@ func runFix(cmd *cobra.Command, o fixOptions) error {
 	}
 
 	ch := librarian.Choices{FixNames: o.Names, Organize: o.Organize, DiscFolders: o.DiscFolders}
-	if o.Art && o.AskArt && len(rep.MissingArt) > 0 {
+	if wanted := len(rep.MissingArt) + len(rep.LowResArt); o.Art && o.AskArt && wanted > 0 {
 		client, err := newLibrarianArtClient()
 		if err != nil {
 			return err
 		}
 		lo.Art = client
 		if !o.JSON {
-			fmt.Fprintf(out, "\nLooking for %d cover(s):\n", len(rep.MissingArt))
+			fmt.Fprintf(out, "\nLooking for %d cover(s):\n", wanted)
 		}
 		cands, err := librarian.Candidates(cmd.Context(), rep, client, lo)
 		if err != nil {
@@ -184,9 +203,22 @@ func runFix(cmd *cobra.Command, o fixOptions) error {
 		}
 		res.Candidates = cands
 		if !o.JSON {
-			printCandidates(out, rep, cands, o.MinScore)
+			printCandidates(out, rep, cands, o.MinScore, false)
 		}
 		ch.Art = librarian.AcceptAbove(cands, o.MinScore)
+	} else if o.Art && wanted > 0 {
+		// No lookup was asked for, but an album whose own folder holds a
+		// usable cover file needs none: --dry-run says what --yes would
+		// do with it, and --names/--organize never get here.
+		local := librarian.LocalCandidates(rep)
+		if len(local) > 0 {
+			if !o.JSON {
+				fmt.Fprintf(out, "\nCovers already in the album folders (%d):\n", len(local))
+				printCandidates(out, rep, local, o.MinScore, true)
+			}
+			res.Candidates = local
+			ch.Art = librarian.AcceptAbove(local, o.MinScore)
+		}
 	}
 
 	if !o.Apply {
@@ -210,6 +242,10 @@ func runFix(cmd *cobra.Command, o fixOptions) error {
 	if result != nil {
 		printFixResult(out, result)
 	}
+	if n := len(rep.Duplicates); n > 0 {
+		fmt.Fprintf(out, "%d duplicate album(s) left alone: which copy to keep is your call "+
+			"(the app's Fix tab moves the other to %s).\n", n, librarian.TrashName)
+	}
 	return err
 }
 
@@ -227,6 +263,16 @@ func printFixReport(w io.Writer, r *librarian.Report, o fixOptions) {
 		if len(r.MissingArt) > 0 {
 			fmt.Fprintln(w)
 		}
+		if r.MinArtPx > 0 {
+			fmt.Fprintf(w, "Low-res art (%d) — under %d px, replaced only by a larger cover\n",
+				len(r.LowResArt), r.MinArtPx)
+			for _, a := range r.LowResArt {
+				fmt.Fprintf(w, "  %-52s %9s  %d track(s)\n", truncate(string(a.Key), 52), a.Size(), a.Tracks)
+			}
+			if len(r.LowResArt) > 0 {
+				fmt.Fprintln(w)
+			}
+		}
 	}
 	if o.Names {
 		printMoveTable(w, r.Root, "Misnamed", r.Misnamed)
@@ -234,6 +280,17 @@ func printFixReport(w io.Writer, r *librarian.Report, o fixOptions) {
 	if o.Organize {
 		printMoveTable(w, r.Root, "Unorganized", r.Unorganized)
 		printDiscSplit(w, r, o)
+	}
+
+	fmt.Fprintf(w, "Duplicate albums (%d) — never changed by core fix\n", len(r.Duplicates))
+	for _, g := range r.Duplicates {
+		fmt.Fprintf(w, "  %s\n", g.Why)
+		for _, a := range []librarian.DupAlbum{g.A, g.B} {
+			fmt.Fprintf(w, "    %-50s %d track(s), %s\n", truncate(string(a.Key), 50), a.Tracks, humanBytes(a.Bytes))
+		}
+	}
+	if len(r.Duplicates) > 0 {
+		fmt.Fprintln(w)
 	}
 
 	fmt.Fprintf(w, "Needs attention (%d) — nothing here is ever guessed\n", len(r.NeedsAttention))
@@ -312,9 +369,19 @@ func printMoveTable(w io.Writer, root, title string, moves []organizer.Move) {
 	}
 }
 
-func printCandidates(w io.Writer, r *librarian.Report, cands map[librarian.AlbumKey][]artfetch.Candidate, min float64) {
-	for _, a := range r.MissingArt {
+// printCandidates is the lookup's table; onlyFound leaves out the albums
+// nothing was offered for (the folder-file listing, where no lookup ran).
+func printCandidates(w io.Writer, r *librarian.Report, cands map[librarian.AlbumKey][]artfetch.Candidate,
+	min float64, onlyFound bool) {
+	albums := append([]librarian.AlbumRef(nil), r.MissingArt...)
+	for _, a := range r.LowResArt {
+		albums = append(albums, a.AlbumRef)
+	}
+	for _, a := range albums {
 		list := cands[a.Key]
+		if len(list) == 0 && onlyFound {
+			continue
+		}
 		if len(list) == 0 {
 			fmt.Fprintf(w, "  %-40s no match\n", truncate(string(a.Key), 40))
 			continue
@@ -324,7 +391,11 @@ func printCandidates(w io.Writer, r *librarian.Report, cands map[librarian.Album
 		if top.Score+1e-9 >= min {
 			mark = "take"
 		}
-		fmt.Fprintf(w, "  %-40s %s  [%s]\n", truncate(string(a.Key), 40), top, mark)
+		size := ""
+		if low, ok := r.LowRes(a.Key); ok && top.Width > 0 {
+			size = fmt.Sprintf("  %s → %d×%d", low.Size(), top.Width, top.Height)
+		}
+		fmt.Fprintf(w, "  %-40s %s  [%s]%s\n", truncate(string(a.Key), 40), top, mark, size)
 	}
 }
 
@@ -335,6 +406,9 @@ func printFixResult(w io.Writer, res *librarian.Result) {
 	}
 	fmt.Fprintf(w, "\n%s: %d renamed, %d re-foldered, %d album(s) of art embedded, %d skipped\n",
 		did, res.Renamed, res.Moved, res.ArtWritten, res.Skipped)
+	for _, rp := range res.Replaced {
+		fmt.Fprintf(w, "  %s: %s\n", rp.Album, rp)
+	}
 	for _, f := range res.Failures {
 		fmt.Fprintf(w, "  failed: %s — %s\n", f.Album, f.Reason)
 	}
@@ -356,8 +430,8 @@ func runFixUndo(cmd *cobra.Command, journal, journalDir string) error {
 			fmt.Fprintf(out, "  skipped %s: %s\n", s.Op.To, s.Reason)
 		}
 		if rep.Undone > 0 {
-			fmt.Fprintf(out, "Embedded cover art is not removed by an undo: the original file is "+
-				"not kept, so there is nothing to put back.\n")
+			fmt.Fprintf(out, "Cover art added to an album that had none is not removed by an undo: the "+
+				"original file is not kept, so there is nothing to put back. A replaced low-res cover is put back.\n")
 		}
 	}
 	return err

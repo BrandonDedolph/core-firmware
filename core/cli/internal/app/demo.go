@@ -300,6 +300,68 @@ func LibraryState() State {
 	}
 	st.Logf("--- scan the library ---")
 	st.Logf("14:06:12  101 album(s), 928 track(s): 3 need art, 4 misnamed, 5 to re-folder, 2 need attention")
+	addLowResAndDuplicates(&st)
+	return st
+}
+
+// addLowResAndDuplicates puts the two later rows into the canned report: two
+// small covers with a 1200 px match each (the Steely Dan one is the real
+// library's 500 px cover), and the duplicate the owner found — SWAG, whose 21
+// tracks were also Disc 2 of SWAG II.
+func addLowResAndDuplicates(st *State) {
+	rep := st.Report
+	root := rep.Root
+	st.FixLowRes = true
+	rep.MinArtPx = librarian.DefaultMinArtPx
+	for _, a := range []struct {
+		folder, artist, album string
+		px, tracks            int
+	}{
+		{"The Royal Scam (Remastered) - Steely Dan", "Steely Dan", "The Royal Scam (Remastered)", 500, 9},
+		{"Believe - Justin Bieber", "Justin Bieber", "Believe", 300, 13},
+	} {
+		dir := filepath.Join(root, a.folder)
+		first := filepath.Join(dir, "01.flac")
+		rep.LowResArt = append(rep.LowResArt, librarian.ArtRef{
+			AlbumRef: librarian.AlbumRef{Key: librarian.AlbumKey(a.folder), Dir: dir, Artist: a.artist,
+				Album: a.album, FirstFLAC: first, Tracks: a.tracks},
+			Width: a.px, Height: a.px, Source: first,
+		})
+		c := artfetch.Candidate{Provider: "itunes", Artist: a.artist, Album: a.album, Score: 1.0,
+			ThumbURL: "https://example.invalid/" + a.album + "-100.jpg", Width: 1200, Height: 1200}
+		st.ArtCands[librarian.AlbumKey(a.folder)] = []artfetch.Candidate{c}
+		st.ArtChoices[librarian.AlbumKey(a.folder)] = librarian.Accept(c)
+	}
+	swag := filepath.Join(root, "SWAG - Justin Bieber")
+	two := filepath.Join(root, "SWAG II - Justin Bieber")
+	rep.Duplicates = []librarian.DuplicateGroup{{
+		A: librarian.DupAlbum{AlbumRef: librarian.AlbumRef{Key: "SWAG - Justin Bieber", Dir: swag,
+			Artist: "Justin Bieber", Album: "SWAG", FirstFLAC: filepath.Join(swag, "01.flac"), Tracks: 21},
+			Bytes: 322_000_000},
+		B: librarian.DupAlbum{AlbumRef: librarian.AlbumRef{Key: "SWAG II - Justin Bieber", Dir: two,
+			Artist: "Justin Bieber", Album: "SWAG II", FirstFLAC: filepath.Join(two, "Disc 1", "01.flac"), Tracks: 44},
+			Bytes: 676_000_000, Extra: 23, Disc: "Disc 2"},
+		Matching: 21,
+		Why:      "SWAG's 21 tracks are all in SWAG II (as Disc 2)",
+	}}
+	st.Logf("14:06:12  2 with small art, 1 duplicate album: SWAG's 21 tracks are all in SWAG II (as Disc 2)")
+}
+
+// LowResState is the Fix tab on its low-resolution row: each small cover
+// beside the 1200 px one found for it.
+func LowResState() State {
+	st := LibraryState()
+	st.Category = CatLowRes
+	return st
+}
+
+// DuplicatesState is the duplicate chooser with SWAG's Keep pressed once:
+// keeping the smaller album would delete SWAG II's other 23 songs, so the
+// button asks again.
+func DuplicatesState() State {
+	st := LibraryState()
+	st.Category = CatDuplicates
+	st.DupArmed = "SWAG - Justin Bieber"
 	return st
 }
 

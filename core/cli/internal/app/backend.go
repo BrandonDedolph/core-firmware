@@ -128,6 +128,12 @@ type Backend interface {
 	// on the Backend so the Library tab's tests draw the candidate row
 	// with no network at all.
 	FetchThumb(ctx context.Context, url string) (image.Image, error)
+
+	// RemoveDuplicate keeps one album of a duplicate group and moves the
+	// other album's folder to the trash beside the music folder,
+	// journaled, so UndoFix brings it back.
+	RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
+		emit func(Event)) (*librarian.Result, error)
 }
 
 // RealBackend is the production wiring. Its fields are the two paths
@@ -146,6 +152,8 @@ type RealBackend struct {
 	GOOS string
 	// HTTP is the client FetchThumb uses; nil means a default one.
 	HTTP *http.Client
+	// MinArtPx is config.json's min_art_px, handed to every Inspect.
+	MinArtPx int
 
 	// art is the shared artfetch client, built once: its cache and its
 	// one-request-a-second MusicBrainz limiter have to be shared across
@@ -718,6 +726,7 @@ func (b *RealBackend) Inspect(ctx context.Context, src string, discFolders bool,
 	return librarian.Inspect(ctx, src, librarian.Options{
 		Progress:    libEvents(emit),
 		DiscFolders: discFolders,
+		MinArtPx:    b.MinArtPx,
 	})
 }
 
@@ -846,4 +855,10 @@ func scanBackups(dir, serial string) (time.Time, int) {
 		}
 	}
 	return apple, n
+}
+
+// RemoveDuplicate is librarian.RemoveDuplicate with the window's progress.
+func (b *RealBackend) RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
+	emit func(Event)) (*librarian.Result, error) {
+	return librarian.RemoveDuplicate(ctx, rep, keep, drop, librarian.Options{Progress: libEvents(emit)})
 }

@@ -406,7 +406,21 @@ shows it within two seconds.
 - **Music** is your music folder as covers, with the ones that are new or changed marked.
 - **Fix** is where the music folder is set (the field and *Browse…*), and what is wrong with
   it — filenames that do not match their tags, folders to organize, missing covers — with *Fix
-  all* and *Undo*. Clicking the folder at the bottom of the window brings you here.
+  all* and *Undo*. Clicking the folder at the bottom of the window brings you here. Two more
+  checks live here:
+  - **Low-resolution cover art** lists albums whose cover is smaller than 600 px on its short side,
+    with the cover they have beside a larger one: the cover.jpg already in the album folder when it
+    is bigger, otherwise one found on iTunes (1200 px) or the Cover Art Archive. *Use this cover* or
+    *Skip* each one; untick the row to leave them all. Only a larger cover is ever used, every track
+    of the album gets it, the next sync copies those tracks again, and *Undo* puts the old cover
+    back. (A cover file in the folder is also used, without asking the internet, for an album that
+    has no cover at all.) The 600 can be changed with `"min_art_px"` in config.json.
+  - **Duplicate albums** are two album folders with the same songs in them, so the iPod has them
+    twice — say an album that is also Disc 2 of its deluxe edition. Each pair is shown side by side
+    with the reason; *Keep this one* moves the other folder to a `.core-trash` folder next to your
+    music folder (not the Recycle Bin), and *Undo* moves it back. If the other album has songs the
+    one you keep does not, the button warns and asks a second time. Empty `.core-trash` yourself
+    when you are sure. *Fix all* never touches duplicates.
 - **Summary** is this iPod in five rows — Name (*Rename*), Firmware (*Update* / *Check*), Storage,
   Hardware, Backups (*Show folder*, *Back up now*) — and an *Advanced* section with the disk path,
   the partition entry, the device files and *Flash this image* for an image file of your own.

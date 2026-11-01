@@ -258,7 +258,7 @@ type UI struct {
 	folderLink   widget.Clickable
 	focusSource  bool
 	tileClicks   []*widget.Clickable
-	catClicks    [5]widget.Clickable
+	catClicks    [7]widget.Clickable
 	artTake      []*widget.Clickable
 	artSkip      []*widget.Clickable
 	fixAllBtn    widget.Clickable
@@ -306,6 +306,14 @@ type UI struct {
 	menuScrim   widget.Clickable
 	menuClicks  [menuCount]widget.Clickable
 	themeClicks [3]widget.Clickable
+	// The Fix tab's low-resolution row: its tick, and one Use/Skip
+	// pair per album; the duplicate chooser's Keep pair per group.
+	lowResTick       widget.Bool
+	lowTake, lowSkip []*widget.Clickable
+	dupKeep          [][2]*widget.Clickable
+	// lowCovers is each low-resolution album's current cover, read from
+	// its art source (not the sidecar, which is the iPod's 120 px copy).
+	lowCovers *thumbCache
 	// topH is the top bar's height in the last frame: where the menu
 	// hangs from.
 	topH int
@@ -394,6 +402,8 @@ func NewUI(o Options) *UI {
 	// changes the shape of an album rather than repairing it.
 	u.st.FixNames, u.st.Organize = true, true
 	u.namesTick.Value, u.organizeTick.Value = true, true
+	u.st.FixLowRes, u.lowResTick.Value = true, true
+	u.lowCovers = newThumbCache(embeddedCover, u.invalidate)
 
 	u.sourceEd.SingleLine, u.sourceEd.Submit = true, true
 	u.flashEd.SingleLine, u.flashEd.Submit = true, true
@@ -450,6 +460,7 @@ func (u *UI) SetState(st State) {
 	u.namesTick.Value = st.FixNames
 	u.organizeTick.Value = st.Organize
 	u.discTick.Value = st.DiscFolders
+	u.lowResTick.Value = st.FixLowRes
 	if st.Advanced {
 		u.revealAdvanced()
 	}
@@ -570,6 +581,7 @@ func (u *UI) drain() {
 		// a punishment. A key that is gone (a cover arrived, the album
 		// moved) is dropped with its decision.
 		u.st.ArtCands, u.st.ArtChoices = keepArt(report, u.st.ArtCands, u.st.ArtChoices)
+		u.takeLocalCovers(report)
 		if u.st.Category.Count(report) == 0 {
 			u.st.Category = firstCategory(report)
 		}
@@ -600,7 +612,7 @@ func (u *UI) drain() {
 	}
 	if fixed != nil {
 		u.st.Journal = fixed.Journal
-		if fixed.Renamed+fixed.Moved+fixed.ArtWritten > 0 {
+		if fixed.Renamed+fixed.Moved+fixed.ArtWritten+fixed.Trashed > 0 {
 			u.st.LibraryChanged = true
 		}
 		// The report describes a tree that no longer exists: scan
@@ -2119,6 +2131,9 @@ func keepArt(rep *librarian.Report, cands map[librarian.AlbumKey][]artfetch.Cand
 	}
 	live := map[librarian.AlbumKey]bool{}
 	for _, a := range rep.MissingArt {
+		live[a.Key] = true
+	}
+	for _, a := range rep.LowResArt {
 		live[a.Key] = true
 	}
 	var kc map[librarian.AlbumKey][]artfetch.Candidate

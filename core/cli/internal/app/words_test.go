@@ -147,7 +147,9 @@ func TestShortName(t *testing.T) {
 }
 
 // The tabs are named for what they are for (the owner's decision in the
-// app pass): Music, Fix, Summary — and the Fix count reads "Fix · 13".
+// app pass): Music, Fix, Summary — and the Fix count reads "Fix · 16" (the
+// canned report: 13 from the first checks plus two small covers and one
+// duplicate pair).
 func TestTabNames(t *testing.T) {
 	want := map[Tab]string{TabAlbums: "Music", TabLibrary: "Fix", TabDetails: "Summary"}
 	for tab, name := range want {
@@ -157,7 +159,7 @@ func TestTabNames(t *testing.T) {
 	}
 	u := NewUI(Options{})
 	u.SetState(LibraryState())
-	if n := u.fixCount(); n != 13 {
+	if n := u.fixCount(); n != 16 {
 		t.Fatalf("the canned report counts %d", n)
 	}
 }

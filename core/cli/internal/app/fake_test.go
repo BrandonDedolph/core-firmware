@@ -108,6 +108,9 @@ type fakeBackend struct {
 	thumbCalls []string
 	thumbErr   error
 	fetchCalls []string
+
+	// keepCalls is every RemoveDuplicate: {keep, drop}.
+	keepCalls [][2]librarian.AlbumKey
 }
 
 func (f *fakeBackend) Inspect(ctx context.Context, src string, discFolders bool,
@@ -466,4 +469,13 @@ func (f *fakeBackend) Backups(ctx context.Context, serial string) (time.Time, in
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.backupsApple, f.backupsN, f.backupsDir
+}
+
+// RemoveDuplicate records the keep and answers with a journal.
+func (f *fakeBackend) RemoveDuplicate(ctx context.Context, rep *librarian.Report, keep, drop librarian.AlbumKey,
+	emit func(Event)) (*librarian.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keepCalls = append(f.keepCalls, [2]librarian.AlbumKey{keep, drop})
+	return &librarian.Result{Journal: "/journal/keep-fix.json", Trashed: 1}, nil
 }

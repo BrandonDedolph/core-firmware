@@ -60,3 +60,14 @@ The first release of the app under its own version. The firmware is unchanged.
   firmware, storage, hardware and backups are Summary.
 - **Words.** Preview sync, Sync and remove, Choose an image…, Rescan, Use this cover; no file
   names, disk paths or register facts outside Advanced and the log.
+- **Small covers are found and replaced.** The Fix tab lists albums whose cover is under 600 px
+  (`min_art_px` in config.json, `core fix --min-art`) and shows each one's cover beside a larger
+  one: the album folder's own cover.jpg when it is bigger, else iTunes at 1200 px, then the Cover
+  Art Archive. A cover is only used when it is larger, *Use this cover* / *Skip* decides, and Undo
+  puts the old one back. A folder's cover file is also used, with no lookup, for an album that has
+  no cover in its files.
+- **Duplicate albums are caught.** Two album folders with the same songs — matched by title,
+  artist and length, a Disc 2 counting as part of its album — are listed side by side with why
+  ("SWAG's 21 tracks are all in SWAG II (as Disc 2)"). *Keep this one* moves the other folder to
+  `.core-trash` beside your music folder, where Undo brings it back; keeping the smaller album when
+  the other has songs it does not asks twice. `core fix` lists them and never changes them.

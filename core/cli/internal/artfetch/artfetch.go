@@ -123,6 +123,23 @@ type Candidate struct {
 	// Rank is the provider's own confidence, normalised to 0..1. It
 	// only matters when nothing matched by name; see Score.
 	Rank float64
+	// Width and Height are the picture's real size once it has been
+	// fetched (librarian fetches the candidates for a cover it would
+	// REPLACE, to prove the new one is larger); zero means not yet known.
+	// A provider's own claim ("1200x1200bb") is not a size.
+	Width  int `json:",omitempty"`
+	Height int `json:",omitempty"`
+}
+
+// ImageSize is the pixel size of a JPEG or PNG, read from its header alone.
+// It is what the librarian measures a cover with, on both sides of a
+// replacement, so "300×300 → 1200×1200" is the same arithmetic everywhere.
+func ImageSize(data []byte) (width, height int, err error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: %v", ErrNotAnImage, err)
+	}
+	return cfg.Width, cfg.Height, nil
 }
 
 // String is the one line the CLI and the log print.

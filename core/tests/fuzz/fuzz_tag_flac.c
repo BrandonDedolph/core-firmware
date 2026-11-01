@@ -22,10 +22,12 @@
  * documented release, so a stashed picture that escapes it is a finding.
  *
  * KNOWN, upstream: dr_flac's little-endian u32 read shifts a byte into the
- * sign bit of an int (UB for a byte >= 0x80). dr_flac is vendored verbatim,
- * so it is built with -fno-sanitize=shift-base and nothing else relaxed —
- * tests/fuzz/meson.build has the details, regress/tag_flac/
- * xfail-drflac-le32-shift the input.
+ * sign bit of an int (UB for a byte >= 0x80), and its CUESHEET reader writes
+ * a u64 through a 4-byte-aligned pointer. dr_flac is vendored verbatim, so it
+ * is built with -fno-sanitize=shift-base,alignment and nothing else relaxed —
+ * tests/fuzz/meson.build has the details, regress/tag_flac/xfail-drflac-*
+ * the inputs. Both sit behind dr_flac's onMeta gate, which the device's
+ * streaming decoder never opens.
  */
 
 #include "fuzz.h"

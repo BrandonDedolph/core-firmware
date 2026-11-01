@@ -72,9 +72,19 @@ endif
 #   regress/tag_flac/xfail-drflac-le32-shift is the input; delete this flag
 #   once a re-vendored dr_flac.h has the cast, and that input will hold it.
 #
-# Same reasoning, and the same flag, as the pvmp3 precedent in
+#   alignment — the CUESHEET reader (dr_flac.h, "Pass 2") packs its
+#   drflac_cuesheet_track_index records at the on-disk 12-byte stride after
+#   a 36-byte track header and then writes `pTrackIndex->offset` (a u64)
+#   through a pointer that is only 4-byte aligned. Harmless on x86; a real
+#   misaligned access on an ARM7TDMI — but behind the same onMeta gate, so
+#   the device's decoder never parses a CUESHEET. Upstream's to fix (pack
+#   to sizeof, or memcpy the u64). Input:
+#   regress/tag_flac/xfail-drflac-cuesheet-misaligned.
+#
+# Same reasoning, and the same mechanism, as the pvmp3 precedent in
 # codecs/meson.build. Everything else UBSan checks stays on for dr_flac.
-fuzz_vendored_args = vendored_codec_warning_suppress + ['-fno-sanitize=shift-base']
+fuzz_vendored_args = vendored_codec_warning_suppress + [
+  '-fno-sanitize=shift-base', '-fno-sanitize=alignment']
 
 fuzz_flags = ['-fsanitize=fuzzer,address,undefined',
               '-fno-sanitize-recover=undefined', '-fno-omit-frame-pointer']

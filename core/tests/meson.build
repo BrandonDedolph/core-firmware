@@ -527,7 +527,8 @@ if target == 'sim'
   # exactly once, on the last plate, in both 12- and 24-hour mode.
   settime_test = executable(
     'settime_test',
-    sources: ['ui/settime_test.c', '../ui/settime.c', '../kernel/datetime.c'],
+    sources: ['ui/settime_test.c', '../ui/settime.c', '../kernel/datetime.c',
+              '../ui/wheel.c'],
     include_directories: include_directories('../ui', '.'),
     override_options: test_opts,
   )

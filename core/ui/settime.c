@@ -70,10 +70,11 @@ int settime_field_count(const settime_t *t)
 
 int settime_adjust(settime_t *t, int delta)
 {
-    if (delta > SETTIME_DELTA_MAX) {
-        delta = SETTIME_DELTA_MAX;
-    } else if (delta < -SETTIME_DELTA_MAX) {
-        delta = -SETTIME_DELTA_MAX;
+    int cap = (t->field == ST_YEAR) ? SETTIME_YEAR_DELTA_MAX : SETTIME_DELTA_MAX;
+    if (delta > cap) {
+        delta = cap;
+    } else if (delta < -cap) {
+        delta = -cap;
     }
     if (delta == 0) {
         return 0;

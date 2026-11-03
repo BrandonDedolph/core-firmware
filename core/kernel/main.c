@@ -9524,15 +9524,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                      * Quantise to whole detents: a single slow detent nudges the
                      * volume by exactly ±1, and spinning faster (more detents per
                      * event) accelerates so you can still sweep the whole range. */
-                    int units = ev.wheel_delta / CW_WHEEL_SENSITIVITY;
-                    if (units == 0) {                    /* sub-detent motion: ±1  */
-                        units = (ev.wheel_delta > 0) ? 1 : -1;
-                    }
-                    int sign = (units < 0) ? -1 : 1;
-                    int mag  = (units < 0) ? -units : units;
-                    int step = (mag <= 1) ? sign : sign * mag * 2;  /* 1->1, 2->4, 3->6 */
-                    if (step >  12) step =  12;
-                    if (step < -12) step = -12;
+                    /* The rule now lives in ui/wheel.c (wheel_value_step) and
+                     * every value wheel shares it: 1 detent = 1, faster
+                     * sweeps (2 -> 4, 3 -> 6), capped at 12. */
+                    int step = wheel_value_step(ev.wheel_delta,
+                                                WHEEL_VALUE_STEP_MAX);
                     /* The Volume Limit is applied by the same helper the
                      * Settings slider uses — one rule, two wheels. No click
                      * either way: this is a slider, not navigation. */
@@ -9598,7 +9594,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                  */
                 if (g_set_screen == SETTINGS_SETTIME) {
                     if (ev.wheel_delta) {
-                        settime_adjust(&g_settime, ev.wheel_delta);
+                        /* Detents, not raw ticks: one slow detent is one
+                         * minute / hour / day (it was ~4). */
+                        settime_adjust(&g_settime,
+                                       wheel_value_step(ev.wheel_delta,
+                                                        WHEEL_VALUE_STEP_MAX));
                         dirty = 1;
                     }
                     if (ev.buttons & WHEEL_BTN_SELECT) {
@@ -9655,9 +9655,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * changes which row SELECT lands on. */
                 if (ev.wheel_delta) {
                     if (g_set_editing && slider) {         /* adjust the value  */
-                        int dd = ev.wheel_delta;
-                        if (dd >  4) dd =  4;
-                        if (dd < -4) dd = -4;
+                        /* Detents, not raw ticks: this was the raw delta
+                         * clamped to +/-4, so ONE slow detent (~4 ticks)
+                         * moved every slider by four and no single value
+                         * was reachable. The volume wheel's rule now. */
+                        int dd = wheel_value_step(ev.wheel_delta,
+                                                  WHEEL_VALUE_STEP_MAX);
                         /* Only a value that MOVED earns an apply and a disk
                          * write: a wheel pinned at a rail (volume 100,
                          * brightness 32) is not a change — settings_adjust

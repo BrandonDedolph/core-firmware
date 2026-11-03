@@ -92,6 +92,35 @@ int main(void)
     xfail_ctx c = { "wheel", 0, 0, 0 };
     list_t l;
 
+    /* ---- value wheels: slow = exactly 1, faster = more, capped ---------- */
+    {
+        const int D = CW_WHEEL_SENSITIVITY;      /* ticks in one detent */
+        xpect(&c, "value: one slow detent is exactly one step, both ways",
+              wheel_value_step(D, WHEEL_VALUE_STEP_MAX) == 1 &&
+              wheel_value_step(-D, WHEEL_VALUE_STEP_MAX) == -1);
+        xpect(&c, "value: part of a detent (or a detent and a bit) is one step",
+              wheel_value_step(1, 12) == 1 && wheel_value_step(-3, 12) == -1 &&
+              wheel_value_step(D + D / 2, 12) == 1 &&
+              wheel_value_step(-(D + 1), 12) == -1);
+        xpect(&c, "value: no motion, no step", wheel_value_step(0, 12) == 0);
+        xpect(&c, "value: faster turns step by more (2 -> 4, 3 -> 6, 5 -> 10)",
+              wheel_value_step(2 * D, 12) == 4 && wheel_value_step(3 * D, 12) == 6 &&
+              wheel_value_step(-5 * D, 12) == -10);
+        int mono = 1, prev = 0;
+        for (int n = 1; n <= 20; n++) {
+            int st = wheel_value_step(n * D, WHEEL_VALUE_STEP_MAX);
+            int floor_n = n < WHEEL_VALUE_STEP_MAX ? n : WHEEL_VALUE_STEP_MAX;
+            mono &= st >= prev && st >= floor_n && st <= WHEEL_VALUE_STEP_MAX;
+            prev = st;
+        }
+        xpect(&c, "value: never slower than the detents turned, never past the cap",
+              mono);
+        xpect(&c, "value: a flick is capped (and a caller's lower cap is honoured)",
+              wheel_value_step(40 * D, WHEEL_VALUE_STEP_MAX) == WHEEL_VALUE_STEP_MAX &&
+              wheel_value_step(-40 * D, 4) == -4 && wheel_value_step(3 * D, 1) == 1);
+        xpect(&c, "value: a cap of 0 moves nothing", wheel_value_step(D, 0) == 0);
+    }
+
     for (int i = 0; i < 26 * 4; i++) g_az[i] = (char)('A' + i / 4);
     g_az[26 * 4] = '\0';
 

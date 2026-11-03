@@ -449,7 +449,7 @@ def do_stamp(target: str, epoch, utc_offset, dst=None) -> int:
         os.fsync(f.fileno())
 
     sign = "+" if off_min >= 0 else "-"
-    print(f"stamped {path}: slot {dst} seq {(newest[0] + 1) & 0xFFFFFFFF}, "
+    print(f"stamped {path}: slot {other} seq {(newest[0] + 1) & 0xFFFFFFFF}, "
           f"epoch {epoch} ({sign}{abs(off_min) // 60:02d}:"
           f"{abs(off_min) % 60:02d})")
     print("The device takes the stamp at its next boot.")

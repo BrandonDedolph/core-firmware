@@ -5,8 +5,41 @@ the boot screen and Settings → About show the one the device runs.
 The desktop app and the `core` CLI have their own repository, releases and changelog:
 [core-desktop-app/CHANGELOG.md](https://github.com/BrandonDedolph/core-desktop-app/blob/main/CHANGELOG.md).
 
-## Unreleased
+## v0.3.0 — 2026-11-03
 
+Since v0.2.2. The settings pages behave like the volume wheel, the clock knows about daylight
+saving, lists line up, and four parser fixes came out of fuzzing every reader of the disk.
+
+- **A Daylight Saving setting.** Settings → Date & Time has a fourth row, *Daylight Saving:
+  On / Off* (On by default). The iPod now keeps standard time inside and adds the hour on the
+  display between the second Sunday of March and the first Sunday of November, the US rule;
+  turning the row Off shows standard time. The clock the desktop app stamps at each sync carries
+  whether the computer was on daylight time, so the device no longer drifts an hour at the
+  change-over. A stamp from an app older than the one released with this firmware carries no
+  such flag; the device then takes the offset as given, which is right in winter and an hour
+  fast in summer until the app is updated.
+- **A slow turn of the wheel is one step, everywhere.** Every value in Settings (Volume, Volume
+  Limit, Bass, Treble, Balance, Brightness) and the Set Date & Time editor moved four at a time
+  on a slow detent, so 10:01 or −1 dB could not be reached. They now follow the volume wheel's
+  rule: one slow detent is one step, a fast spin more, capped.
+- **Theme shows itself before you choose it.** Moving the cursor on Settings → Theme repaints the
+  page in the theme under it; Select keeps it, anything else off the list puts the saved theme
+  back. Nothing is written until Select.
+- **A list opens on the value in force.** Theme and Clicker open with the cursor on the chosen
+  row, scrolled into view, rather than on the first row.
+- **Figures sit centred on their row.** The track number in a tracklist and every right-hand
+  value in a list — a run time, a count — were set on the title's baseline and hung a pixel or
+  two low. Each face now centres its own figures on the bar.
+- **The boot log names its own build.** Two lines in `CORELOG.BIN` at every boot: the version
+  and build id right after the kernel comes up, and the song and album counts with the load time
+  once the library is in. The desktop app's boot check reads the first, so it can say which
+  firmware a boot ran instead of inferring it.
+- **Four parser fixes, found by fuzzing every reader of the disk.** An MP3 cut off within four
+  bytes of the end of its Xing frame seeked into the silent frame; a FLAC with a second
+  STREAMINFO whose rate was 0 reported the first block's duration beside a zero rate; a FLAC
+  refused for having no STREAMINFO still came back carrying the tags of the file just refused;
+  and a refused FLAC leaked the picture it had stashed (host side only). The harnesses and their
+  regression inputs are in the tree and run in CI.
 - The desktop app and the `core` CLI moved to their own repository,
   [core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app); their last release
   from this one was app-v0.3.0.

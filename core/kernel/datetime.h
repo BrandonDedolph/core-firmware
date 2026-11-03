@@ -128,6 +128,42 @@ int datetime_fmt_time(char *buf, int buf_sz, const datetime_t *d, int use_24h);
  * Same buffer rule; needs DATETIME_DATE_MAX. */
 int datetime_fmt_date(char *buf, int buf_sz, const datetime_t *d);
 
+/*
+ * DAYLIGHT SAVING (Settings > Date & Time > Daylight Saving, the US rule).
+ *
+ * The device keeps STANDARD time: the RTC holds UTC and the stored offset
+ * (settings_t.utc_off_min) is the zone's STANDARD offset, so UTC + offset is
+ * standard local time and never jumps. What the user sees is
+ *
+ *     display = standard + 1 h   when Daylight Saving is On and the standard
+ *                                instant is inside the window below,
+ *     display = standard         otherwise.
+ *
+ * The window, in STANDARD local time: from 02:00 on the second Sunday of
+ * March up to (not including) 01:00 on the first Sunday of November — 01:00
+ * standard is the instant 02:00 daylight time falls back to 01:00. So turning
+ * the setting on or off never moves the stored time, only the display.
+ *
+ * clock_dst_active() takes a STANDARD civil time; 1 inside the window, 0
+ * outside it or for a date out of 2000..2099. Pure.
+ */
+int clock_dst_active(int year, int month, int day, int hour, int minute);
+
+/* Standard local epoch -> the epoch the user is shown (+3600 inside the
+ * window with `dst_on`). An epoch out of range comes back unchanged. */
+uint32_t clock_dst_display(uint32_t std_local, int dst_on);
+
+/*
+ * The inverse, for a time the user TYPED (Set Date & Time): wall-clock epoch
+ * -> standard epoch. With `dst_on`, a wall time whose hour-earlier reading is
+ * inside the window is daylight time and comes back an hour earlier;
+ * otherwise it is standard already. The fall-back hour (01:00-01:59 on the
+ * first Sunday of November happens twice) takes the DAYLIGHT reading; the
+ * spring-forward hour that never happens (02:00-02:59 on the second Sunday of
+ * March) is read as standard, and so displays an hour later.
+ */
+uint32_t clock_dst_standard_from_wall(uint32_t wall_local, int dst_on);
+
 /* "Jan".."Dec" / "January".."December" / "Sunday".."Saturday"; "" when the
  * index is out of range, so a caller can always draw the result. */
 const char *datetime_month_abbr(int month);

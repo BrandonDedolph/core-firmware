@@ -68,8 +68,45 @@ typedef struct {
     uint32_t host_epoch;      /* UTC seconds the host stamped; 0 = never   */
     int      host_off_min;    /* the host's UTC offset then, minutes       */
     uint32_t applied_epoch;   /* the host_epoch last acted on; 0 = never   */
-    int      utc_off_min;     /* the device's display offset               */
+    int      utc_off_min;     /* the device's STANDARD offset (see below)  */
+    int      host_dst;        /* TIMESYNC_HOST_DST_* (timesync_host_dst)   */
 } timesync_state_t;
+
+/*
+ * DAYLIGHT SAVING. Since the Daylight Saving setting (kernel/datetime.h) the
+ * device's stored offset is the zone's STANDARD offset and the display adds
+ * the hour itself. The host's offset is its CURRENT one, so a host in
+ * daylight time sends standard + 60. The stamp therefore carries one more
+ * byte — CORECFG.DAT payload byte 55, which was reserved and zero, so every
+ * record written before it reads as UNKNOWN:
+ *
+ *   bits 0-1  0 unknown (an older host tool), 1 the host was on standard
+ *             time, 2 the host was on daylight time, 3 reserved (= unknown)
+ *   bits 2-7  host_epoch & 0x3F — a tag binding the flag to the stamp it was
+ *             written with. Host tools copy the record verbatim, so a tool
+ *             that does not know this byte would otherwise leave an earlier
+ *             tool's flag beside its own new epoch; a tag that does not match
+ *             reads as UNKNOWN.
+ *
+ * On UNKNOWN the host's offset is stored as it is (the behaviour before this
+ * byte existed); on DST it is stored less 60 minutes.
+ */
+enum {
+    TIMESYNC_HOST_DST_UNKNOWN = 0,
+    TIMESYNC_HOST_DST_STD     = 1,
+    TIMESYNC_HOST_DST_DST     = 2
+};
+#define TIMESYNC_DST_TAG(epoch) ((unsigned)((epoch) & 0x3Fu) << 2)
+/* The byte a host writes: state | tag. */
+#define TIMESYNC_DST_BYTE(epoch, state) \
+    ((uint8_t)(TIMESYNC_DST_TAG(epoch) | ((unsigned)(state) & 3u)))
+
+/* Byte 55 -> TIMESYNC_HOST_DST_*, checking its tag against `host_epoch`. */
+int timesync_host_dst(uint32_t host_epoch, unsigned raw);
+
+/* The standard offset a stamp implies: host_off_min, less 60 when the host
+ * said it was on daylight time; clamped to the real-world range. */
+int timesync_std_offset(const timesync_state_t *st);
 
 /*
  * The decision, first rule that fires:
@@ -96,7 +133,7 @@ timesync_action_t timesync_decide(const timesync_state_t *st, int writable,
 
 /*
  * Record `action` in the state: on SET and on STALE alike, applied_epoch takes
- * host_epoch (the mark) and utc_off_min takes host_off_min. NONE changes
+ * host_epoch (the mark) and utc_off_min takes timesync_std_offset(). NONE changes
  * nothing. Returns 1 when a field actually moved, i.e. when the caller has
  * something to save.
  *

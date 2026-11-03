@@ -1230,8 +1230,10 @@ static int strip_sleep_token(int right_x, int y, uint16_t ink)
  * The clock, as the UI reads it
  * ------------------------------------------------------------------------- */
 
-/* The device's LOCAL epoch right now (the software clock plus the stored UTC
- * offset). 1 when a time is known, 0 when it is not. */
+/* The device's LOCAL epoch right now, as the user is shown it: the software
+ * clock plus the stored (STANDARD) offset, plus the daylight hour when
+ * Daylight Saving is On and it is in force (kernel/datetime.h). 1 when a time
+ * is known, 0 when it is not. */
 static int clock_local_epoch(uint32_t *local)
 {
     uint32_t utc;
@@ -1251,6 +1253,7 @@ static int clock_local_epoch(uint32_t *local)
         }
         *local = utc - back;
     }
+    *local = clock_dst_display(*local, g_settings.dst_on);
     return 1;
 }
 
@@ -8173,6 +8176,8 @@ _Noreturn static void run_ui(fat32_t *fs)
         timesync_state_t ts = {
             g_settings.host_epoch, g_settings.host_off_min,
             g_settings.applied_epoch, g_settings.utc_off_min,
+            timesync_host_dst(g_settings.host_epoch,
+                              (unsigned)g_settings.host_dst_raw),
         };
         timesync_action_t act = timesync_decide(&ts, config_writable(),
                                                 rtc_rc == 1, rtc_epoch);
@@ -9608,7 +9613,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                              * device's stored offset comes back off here. */
                             datetime_t civil;
                             settime_civil(&g_settime, &civil);
-                            uint32_t local = datetime_to_epoch(&civil);
+                            /* The editor shows WALL time; the device keeps
+                             * standard (Daylight Saving, kernel/datetime.h). */
+                            uint32_t local = clock_dst_standard_from_wall(
+                                                 datetime_to_epoch(&civil),
+                                                 g_settings.dst_on);
                             uint32_t utc   = 0;
                             /* The editor clamps the YEAR to 2001..2099; the
                              * zone can still push the UTC epoch off either end
@@ -9794,10 +9803,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                             uint32_t host_epoch = g_settings.host_epoch;
                             int      host_off   = g_settings.host_off_min;
                             int      disp_off   = g_settings.utc_off_min;
+                            int      host_dst   = g_settings.host_dst_raw;
                             settings_defaults(&g_settings);
                             g_settings.host_epoch   = host_epoch;
                             g_settings.host_off_min = host_off;
                             g_settings.utc_off_min  = disp_off;
+                            g_settings.host_dst_raw = host_dst;
                             settings_apply();
                             sleep_timer_apply();           /* defaults() zeroed
                                                             * the row: disarm  */

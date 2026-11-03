@@ -300,3 +300,60 @@ const char *datetime_wday_name(int wday)
 {
     return (wday < 0 || wday > 6) ? "" : WDAY_NAME[wday];
 }
+
+/* ---- daylight saving (the US rule; see datetime.h) ----------------------- */
+
+/* Day of the month of the first Sunday of `month`, or 0 out of range. */
+static int first_sunday(int year, int month)
+{
+    int wd = datetime_wday(year, month, 1);
+    return (wd < 0) ? 0 : 1 + (7 - wd) % 7;
+}
+
+int clock_dst_active(int year, int month, int day, int hour, int minute)
+{
+    if (year < 2000 || year > 2099 || month < 1 || month > 12) {
+        return 0;
+    }
+    if (month > 3 && month < 11) {
+        return 1;
+    }
+    if (month != 3 && month != 11) {
+        return 0;
+    }
+    /* Minutes into the month, compared with the edge in the same units. */
+    int t = ((day - 1) * 24 + hour) * 60 + minute;
+    if (month == 3) {
+        int d = first_sunday(year, 3) + 7;            /* second Sunday */
+        return t >= ((d - 1) * 24 + 2) * 60;          /* from 02:00 std */
+    }
+    int d = first_sunday(year, 11);                   /* first Sunday  */
+    return t < ((d - 1) * 24 + 1) * 60;               /* until 01:00 std */
+}
+
+static int dst_at(uint32_t std_local)
+{
+    datetime_t c;
+    return datetime_from_epoch(std_local, &c) &&
+           clock_dst_active(c.year, c.month, c.day, c.hour, c.min);
+}
+
+uint32_t clock_dst_display(uint32_t std_local, int dst_on)
+{
+    if (dst_on && dst_at(std_local)) {
+        datetime_t c;
+        /* Stay inside the representable range rather than wrap. */
+        if (datetime_from_epoch(std_local + 3600u, &c)) {
+            return std_local + 3600u;
+        }
+    }
+    return std_local;
+}
+
+uint32_t clock_dst_standard_from_wall(uint32_t wall_local, int dst_on)
+{
+    if (dst_on && wall_local >= 3600u && dst_at(wall_local - 3600u)) {
+        return wall_local - 3600u;
+    }
+    return wall_local;
+}

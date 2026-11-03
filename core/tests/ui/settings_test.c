@@ -742,7 +742,28 @@ int main(void)
     check("dt-defaults", s.time_24h == 0 && s.time_in_title == 0 &&
                          s.utc_off_min == 0 && s.host_epoch == 0 &&
                          s.host_off_min == 0 && s.applied_epoch == 0);
-    check("dt-count", settings_count(SETTINGS_DATETIME) == 3);
+    check("dt-count", settings_count(SETTINGS_DATETIME) == 4);
+    {
+        settings_t d;
+        settings_defaults(&d);
+        char vb[SETTINGS_VALUE_MAX];
+        int tg = 0, on = 0, num = 0, den = 0;
+        check("dt-dst-row", strcmp(settings_label(SETTINGS_DATETIME, 3),
+                                   "Daylight Saving") == 0 &&
+              settings_kind(SETTINGS_DATETIME, 3) == SETTINGS_KIND_SELECT);
+        settings_value(SETTINGS_DATETIME, &d, 3, vb, &tg, &on, &num, &den);
+        check("dt-dst-default-on", d.dst_on == 1 && strcmp(vb, "On") == 0);
+        uint32_t he = d.host_epoch; int ho = d.host_off_min, uo = d.utc_off_min;
+        check("dt-dst-select-toggles-only-the-flag",
+              settings_activate(SETTINGS_DATETIME, &d, 3) == SETTINGS_ACTION_NONE &&
+              d.dst_on == 0 && d.host_epoch == he && d.host_off_min == ho &&
+              d.utc_off_min == uo);
+        settings_value(SETTINGS_DATETIME, &d, 3, vb, &tg, &on, &num, &den);
+        check("dt-dst-off-value", strcmp(vb, "Off") == 0);
+        check("dt-dst-select-back-on",
+              settings_activate(SETTINGS_DATETIME, &d, 3) == SETTINGS_ACTION_NONE &&
+              d.dst_on == 1);
+    }
     /* The TITLE, for every screen. This is here because it was wrong: the
      * renderer's own switch had no Date & Time case and titled the screen
      * "Settings", while the committed gallery still (docs/screens/datetime.png)

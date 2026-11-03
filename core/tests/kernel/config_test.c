@@ -219,6 +219,7 @@ static void defaults(settings_t *s)
     s->volume_limit = 100;   /* settings_defaults()'s "no limit"; a zeroed  */
                              /* struct would encode as the 10% floor        */
     s->backlight_secs = 15; s->backlight_bright = 32;
+    s->dst_on = 1;           /* settings_defaults()'s Daylight Saving On    */
 }
 
 static int settings_eq(const settings_t *a, const settings_t *b)
@@ -244,6 +245,7 @@ static int settings_eq(const settings_t *a, const settings_t *b)
            a->resume_ctx_hash == b->resume_ctx_hash &&
            a->time_24h == b->time_24h &&
            a->time_in_title == b->time_in_title &&
+           a->dst_on == b->dst_on && a->host_dst_raw == b->host_dst_raw &&
            a->utc_off_min == b->utc_off_min &&
            a->host_epoch == b->host_epoch &&
            a->host_off_min == b->host_off_min &&
@@ -1442,7 +1444,7 @@ static void test_time_block(void)
           rec[T_OFF_TIME + 4] == 0x30 && rec[T_OFF_TIME + 5] == 0xFD &&
                                                             /* 52 -720 as i16 */
           rec[T_OFF_TIME + 6] == 0x03 &&                    /* 54 both flags  */
-          rec[T_OFF_TIME + 7] == 0 &&                       /* 55 reserved    */
+          rec[T_OFF_TIME + 7] == 0 &&                       /* 55 host DST: none */
           get32le(&rec[T_OFF_TIME + 8]) == 1789555000u &&   /* 56 applied     */
           rec[T_OFF_TIME + 12] == 0x48 && rec[T_OFF_TIME + 13] == 0x03 &&
                                                             /* 60 +840 as i16 */
@@ -1451,6 +1453,32 @@ static void test_time_block(void)
     memset(&out, 0xA5, sizeof out);
     check("the time block round-trips",
           config_decode(rec, &out, &seq) == 1 && settings_eq(&in, &out));
+
+    /* Daylight Saving: the row is the INVERTED bit 2 of byte 54 (so every
+     * record before it reads On), and byte 55 — the host's DST flag — rides
+     * through a save verbatim, like the host's other two fields. */
+    {
+        settings_t d = in;
+        d.dst_on = 0;
+        d.host_dst_raw = 0xB6;
+        config_encode(rec, &d, 6);
+        memset(&out, 0xA5, sizeof out);
+        check("dst: Off is bit 2 of byte 54; the host's byte 55 is written back as is",
+              rec[T_OFF_TIME + 6] == 0x07 && rec[T_OFF_TIME + 7] == 0xB6 &&
+              config_decode(rec, &out, &seq) == 1 && settings_eq(&d, &out) &&
+              out.dst_on == 0 && out.host_dst_raw == 0xB6);
+        d.dst_on = 1;
+        config_encode(rec, &d, 7);
+        check("dst: On clears bit 2", rec[T_OFF_TIME + 6] == 0x03 &&
+              config_decode(rec, &out, &seq) == 1 && out.dst_on == 1);
+        /* A record written before the row: bit 2 was always 0. */
+        rec[T_OFF_TIME + 6] = 0x01;
+        rec[T_OFF_TIME + 7] = 0x00;
+        recrc(rec);
+        check("dst: a record from before the row reads On, host flag unknown",
+              config_decode(rec, &out, &seq) == 1 && out.dst_on == 1 &&
+              out.host_dst_raw == 0 && out.time_24h == 1);
+    }
 
     /* A record from before the clock existed — 48 bytes, which is what every
      * device that has taken the volume/EQ build is writing right now. */
@@ -1463,6 +1491,7 @@ static void test_time_block(void)
           out.host_epoch == 0 && out.host_off_min == 0 &&
           out.applied_epoch == 0 && out.utc_off_min == 0 &&
           out.time_24h == 0 && out.time_in_title == 0 &&
+          out.dst_on == 1 && out.host_dst_raw == 0 &&
           out.volume_limit == in.volume_limit && out.eq == in.eq);
 
     /* ...and so does a record one byte short of the block, for the same reason

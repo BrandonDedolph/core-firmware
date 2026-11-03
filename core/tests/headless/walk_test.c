@@ -347,6 +347,18 @@ static _Noreturn void session_walk(const char *disk, const char *ranges)
     CHECK("browse: tracklist row 2", on_screen("Long Two"));
     CHECK("browse: track duration from the index", on_screen("1:30"));
     CHECK("browse: album summary", on_screen("2 tracks"));
+    {
+        /* Row 1 ("Long Two", unselected): its track number (regular 9)
+         * centres its own figures on the row, as the title's caps do
+         * (UI_ROW_BASE_FOR) — on the title's baseline it hung 1.5 px low.
+         * DET_LIST_Y0 = 108, ROW_H = 24 (main.c). */
+        int ry = 108 + 24, row2 = 2 * ry + 24 - 1;
+        hl_text_hit_t hn;
+        int fn = hl_find_text_in(hl_panel(), "2", ry, ry + 24, &hn);
+        int cn = 2 * hn.y + hn.h - 1;
+        CHECK("browse: track number centred on its row (within 1/2 px)",
+              fn && cn - row2 <= 1 && row2 - cn <= 1);
+    }
 
     /* ---- 3. play ---------------------------------------------------------- */
     size_t ev0 = hl_events_mark();

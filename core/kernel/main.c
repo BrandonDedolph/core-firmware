@@ -1625,7 +1625,10 @@ static void detail_row_draw(int r, int vi)
         u32_to_dec(num, (unsigned)(g_track_num[idx] ? g_track_num[idx]
                                                     : idx + 1));
         int nw = text_width(num, FONT_SMALL);
-        ui_text(num_rx - nw, UI_ROW_BASE(ry, ROW_H), num, FONT_SMALL, nc);
+        /* Regular-9 digits are 7 px, the title's caps 10: on the title's
+         * baseline the number hung 1.5 px low. Centre its own cap band. */
+        ui_text(num_rx - nw, UI_ROW_BASE_FOR(ry, ROW_H, FONT_SMALL), num,
+                FONT_SMALL, nc);
     }
     /* Duration on the right (from the index); the title must stop before it. */
     int title_right = LCD_WIDTH - 16;

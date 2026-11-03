@@ -87,6 +87,15 @@
  * chrome.c, Settings and the album tracklist, so a row never shifts between
  * screens. */
 #define UI_ROW_BASE(ry, rh)  ((ry) + (rh) / 2 + 5)
+/* The same rule for a face that is NOT the bold-13 row face: the baseline that
+ * centres `font`'s cap height (= its digit height, Nunito's figures are lining)
+ * on a row of height `rh`. For bold 13 (caps 10) this IS UI_ROW_BASE. Use it
+ * for anything set smaller than the title on the same row — the tracklist's
+ * regular-9 track number (caps 7) and every bold-12 right-hand value such as a
+ * run time (caps 8) — which on the title's baseline sat 1-1.5 px low, their
+ * shorter cap band hanging off the title's. */
+#define UI_ROW_BASE_FOR(ry, rh, font) \
+    ((ry) + ((rh) + text_cap_height(font)) / 2)
 #define LIST_ROWS  8      /* visible rows: (240-42)/24 ~= 8              */
 
 /*

@@ -148,6 +148,43 @@ int main(void) {
     }
     CHECK(guard_ok, "OOB write detected (guard cell clobbered)");
 
+    /* ---- (z) cap height: measured from the drawn ink, and equal to the
+     * digit height (lining figures) — the row-centring rule for a track
+     * number or a run time (UI_ROW_BASE_FOR) rests on both. ------------- */
+    {
+        const text_font_t *faces[] = {
+            text_font_regular_9(), text_font_regular_11(), text_font_regular_12(),
+            text_font_bold_12(), text_font_bold_13(), text_font_bold_18(),
+        };
+        const char *probes[] = { "H", "0123456789", "3:42" };
+        for (unsigned f = 0; f < sizeof faces / sizeof faces[0]; f++) {
+            int ch = text_cap_height(faces[f]);
+            CHECK(ch > 0 && ch < text_ascent(faces[f]) + 1,
+                  "cap height out of the face's ascent");
+            for (unsigned p = 0; p < sizeof probes / sizeof probes[0]; p++) {
+                static uint16_t cb[64 * 40];
+                for (int i = 0; i < 64 * 40; i++) cb[i] = BG;
+                text_draw(cb, 64, 40, 1, 30, probes[p], faces[f], INK);
+                int top = -1, bot = -1;
+                for (int y = 0; y < 40; y++)
+                    for (int x = 0; x < 64; x++)
+                        if (cb[y * 64 + x] != BG) {
+                            if (top < 0) top = y;
+                            bot = y;
+                            break;
+                        }
+                CHECK(bot == 29, "caps/digits sit on the baseline");
+                CHECK(top >= 0 && 30 - top == ch,
+                      "text_cap_height != drawn ink height of H / digits");
+            }
+        }
+        CHECK(text_cap_height(text_font_bold_13()) == 10,
+              "bold-13 caps are 10 px (UI_ROW_BASE's +5 assumes it)");
+        CHECK(text_cap_height(text_font_regular_9()) == 7, "regular-9 caps 7 px");
+        CHECK(text_cap_height(text_font_bold_12()) == 8, "bold-12 caps 8 px");
+        CHECK(text_cap_height(NULL) == 0, "NULL face has no cap height");
+    }
+
     if (fails) {
         fprintf(stderr, "text_test: %d check(s) failed\n", fails);
         return 1;

@@ -1636,8 +1636,10 @@ static void detail_row_draw(int r, int vi)
         char dts[FMT_TIME_MAX];
         fmt_time(dts, g_track_dur[idx]);
         int dw = text_width(dts, text_font_bold_12());
-        ui_text(LCD_WIDTH - 16 - dw, UI_ROW_BASE(ry, ROW_H), dts, text_font_bold_12(),
-                is_sel ? LINEN_SEL_SUB : LINEN_MUTED_D);
+        /* Bold-12 figures (8 px) centred on the row in their own right, the
+         * way ui_list_row places every right-hand value. */
+        ui_text(LCD_WIDTH - 16 - dw, UI_ROW_BASE_FOR(ry, ROW_H, text_font_bold_12()),
+                dts, text_font_bold_12(), is_sel ? LINEN_SEL_SUB : LINEN_MUTED_D);
         title_right = LCD_WIDTH - 16 - dw - 8;
     }
     /* Title (clean — number gutter provides the index), indented past it,

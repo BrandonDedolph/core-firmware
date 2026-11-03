@@ -354,6 +354,14 @@ const char *settings_theme_name(int theme)
     return THEME_L[theme];
 }
 
+int settings_theme_shown(int screen, int sel, const settings_t *s)
+{
+    if (screen == SETTINGS_THEME && sel >= 0 && sel < THEME_COUNT) {
+        return sel;
+    }
+    return s->theme;
+}
+
 const char *settings_clicker_name(int profile)
 {
     if (profile < 0 || profile >= CLICK_N) {

@@ -3434,6 +3434,10 @@ static void settings_apply(void)
                        &curve);
     hal_eq_set(curve.gain_db, curve.cutoff, curve.narrow);
     theme_set(g_settings.theme);           /* Linen / Onyx -> live palette swap */
+    chip_placeholder_init();               /* re-bake LINEN_BORDER: the album
+                                            * list's empty chips follow a real
+                                            * theme change (a preview does not
+                                            * reach here — theme_preview_sync) */
     charger_apply();                       /* Charge Rate -> LTC4066 HPWR       */
 }
 
@@ -4971,6 +4975,32 @@ static void settings_leave(void)
     resume_capture();
     settings_commit(CFG_COMMIT_SOFT);
     otg_commit(CFG_COMMIT_SOFT);          /* a list built before Settings, too */
+}
+
+/*
+ * Settings > Theme previews the theme under the cursor: the picker page is
+ * painted in it as the wheel moves, and nothing in g_settings changes, so
+ * nothing is written. SELECT applies for real (settings_activate ->
+ * settings_apply); every other way out — MENU back to the Settings root, the
+ * MENU hold to the main menu, a modal pushed over it, a suspend — lands on a
+ * screen where settings_theme_shown() answers the saved theme, and the next
+ * pass puts it back. Called once per main-loop pass, after input and before
+ * the repaint; returns 1 when it swapped the palette (the caller repaints the
+ * whole panel). theme_current() makes the steady state free: no copy unless
+ * the wanted theme changed.
+ *
+ * The chip placeholders are deliberately NOT re-baked for a preview: no
+ * Settings screen draws an album chip, and the only screens that do are
+ * reached through a path where the saved theme is already back.
+ */
+static int theme_preview_sync(void)
+{
+    int want = (scr_cur() == SCR_SETTINGS)
+                   ? settings_theme_shown(g_set_screen, g_set_sel, &g_settings)
+                   : g_settings.theme;
+    if (want == theme_current()) return 0;
+    theme_set(want);
+    return 1;
 }
 
 /*
@@ -8212,10 +8242,9 @@ _Noreturn static void run_ui(fat32_t *fs)
     boot_screen_render("LOADING", -1);    /* the same screen, now themed          */
 
     chip_placeholder_init();              /* after theme_set: it bakes
-                                           * LINEN_BORDER in at call time (a live
-                                           * theme change in Settings still
-                                           * leaves it stale — pre-existing, out
-                                           * of scope here) */
+                                           * LINEN_BORDER in at call time
+                                           * (settings_apply re-bakes it on a
+                                           * live theme change) */
     library_ensure(fs);                   /* preload the index at boot (drive is
                                            * spinning) so Songs/Albums/Artists/
                                            * Genres open INSTANTLY, like Apple —
@@ -9824,6 +9853,10 @@ _Noreturn static void run_ui(fat32_t *fs)
                 break;                        /* dismissal is handled above */
             }
         }
+
+        /* Settings > Theme's live preview, or the saved theme back once the
+         * picker is left without SELECT. A swap repaints the whole panel. */
+        if (theme_preview_sync()) dirty = 1;
 
         /* Idle-timeout backlight: dim, then off — timeout from Settings (0 =
          * never), brightness from Settings. Playback keeps running. */

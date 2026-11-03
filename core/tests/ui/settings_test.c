@@ -850,6 +850,32 @@ int main(void)
           s.host_epoch == 0 && s.applied_epoch == 0 && s.utc_off_min == 0 &&
           s.host_off_min == 0);
 
+    /* --- Theme picker preview: the page shows the HOVERED theme, every other
+     * screen the saved one, and asking changes nothing in the record. --- */
+    {
+        settings_defaults(&s);
+        s.theme = 4;                                  /* Olive saved */
+        settings_t before = s;
+        int ok = 1;
+        for (int r = 0; r < settings_count(SETTINGS_THEME); r++) {
+            ok &= settings_theme_shown(SETTINGS_THEME, r, &s) == r;
+        }
+        check("preview-hovered-theme-on-picker", ok);
+        check("preview-record-untouched", memcmp(&before, &s, sizeof s) == 0);
+        check("preview-saved-theme-elsewhere",
+              settings_theme_shown(SETTINGS_ROOT, 1, &s) == 4 &&
+              settings_theme_shown(SETTINGS_DISPLAY, 0, &s) == 4 &&
+              settings_theme_shown(SETTINGS_ABOUT, 0, &s) == 4 &&
+              settings_theme_shown(SETTINGS_CLICKER, 1, &s) == 4);
+        check("preview-out-of-range-row-is-saved",
+              settings_theme_shown(SETTINGS_THEME, -1, &s) == 4 &&
+              settings_theme_shown(SETTINGS_THEME, 7, &s) == 4);
+        /* SELECT is what applies: then the saved theme IS the hovered one. */
+        check("preview-select-applies",
+              settings_activate(SETTINGS_THEME, &s, 2) == SETTINGS_ACTION_NONE &&
+              s.theme == 2 && settings_theme_shown(SETTINGS_ROOT, 0, &s) == 2);
+    }
+
     printf("settings_test: %s\n", g_fail ? "FAIL" : "OK");
     return g_fail ? 1 : 0;
 }

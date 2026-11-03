@@ -55,6 +55,7 @@
 
 #include "headless.h"
 #include "hl_screen.h"
+#include "ui/palette.h"            /* theme_table: the preview's colours */
 #include "../xfail.h"
 
 #include <fcntl.h>
@@ -488,6 +489,60 @@ static _Noreturn void session_walk(const char *disk, const char *ranges)
     shot("boot_details");
     CHECK("settings: Boot Details renders", on_screen("COLD BOOT"));
     tap(HL_BTN_MENU);
+    /* Settings > Theme: the cursor previews, MENU restores, SELECT applies.
+     * The probe is a pixel of bare page ground left of the list. */
+#define SURF() (hl_panel()[200 * HL_W + 2])
+    /* selected() assumes light ink on a dark bar, which a dark theme (Onyx)
+     * inverts: the bar is PAL_INK. Ask for that theme's bar instead. */
+#define SEL_IN(str, th) (hl_find_text_in(hl_panel(), (str), 40, HL_H, &th_hit) && \
+                         th_hit.bg == theme_table(th)[PAL_INK])
+    hl_text_hit_t th_hit;
+    {
+        uint16_t linen = theme_table(THEME_LINEN)[PAL_SURFACE];
+        uint16_t onyx  = theme_table(THEME_ONYX)[PAL_SURFACE];
+        uint16_t sage  = theme_table(THEME_SAGE)[PAL_SURFACE];
+        CHECK("theme: Settings root in the saved theme (Linen)", SURF() == linen);
+        CHECK("theme: select Theme", select_row("Theme"));
+        tap(HL_BTN_SELECT);
+        shot("theme_picker");
+        CHECK("theme: picker opens", hl_find_text_in(hl_panel(), "Theme", 0, 40, NULL));
+        CHECK("theme: picker opens on the saved theme", selected("Linen"));
+        hl_scroll(1);
+        hl_run_ms(450);
+        shot("theme_preview_onyx");
+        CHECK("theme: cursor on Onyx", SEL_IN("Onyx", THEME_ONYX));
+        CHECK("theme: the page repaints in the hovered theme", SURF() == onyx);
+        hl_scroll(1);
+        hl_run_ms(450);
+        CHECK("theme: cursor on Sage previews Sage", SEL_IN("Sage", THEME_SAGE) && SURF() == sage);
+        tap(HL_BTN_MENU);                     /* leave without SELECT */
+        CHECK("theme: MENU leaves the picker", on_screen("Battery"));
+        CHECK("theme: leaving without SELECT restores the saved theme",
+              SURF() == linen);
+        CHECK("theme: About is in the saved theme too",
+              select_row("About") && (tap(HL_BTN_SELECT), SURF() == linen));
+        tap(HL_BTN_MENU);
+        CHECK("theme: back into Theme", select_row("Theme"));
+        tap(HL_BTN_SELECT);
+        CHECK("theme: still opens on Linen (nothing applied)", selected("Linen"));
+        hl_scroll(1);
+        hl_run_ms(450);
+        tap(HL_BTN_SELECT);                   /* apply Onyx for real */
+        tap(HL_BTN_MENU);
+        CHECK("theme: SELECT applies, and it survives leaving the picker",
+              on_screen("Battery") && SURF() == onyx);
+        /* MENU came back to the root on the Theme row (it remembers it);
+         * selected() cannot judge a row in Onyx, SEL_IN can. */
+        CHECK("theme: root cursor still on Theme", SEL_IN("Theme", THEME_ONYX));
+        tap(HL_BTN_SELECT);
+        hl_scroll(-16);                       /* to Linen */
+        hl_run_ms(16 * 150 + 400);
+        tap(HL_BTN_SELECT);                   /* back to Linen for the rest */
+        tap(HL_BTN_MENU);
+        CHECK("theme: Linen re-applied", SURF() == linen);
+    }
+#undef SURF
+#undef SEL_IN
     CHECK("settings: back to About for the idle phase", select_row("About"));
     tap(HL_BTN_SELECT);
     CHECK("settings: on About", on_screen("iPod 5.5G"));

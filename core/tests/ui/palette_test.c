@@ -69,6 +69,8 @@ static const int IS_DARK[THEME_COUNT] = {
 
 int main(void)
 {
+    /* Before any theme_set(): Linen, the initialiser g_pal[] starts as. */
+    check("theme-current-before-any-set-is-linen", theme_current() == THEME_LINEN);
     char label[64];
 
     check("theme-count-7", THEME_COUNT == 7);
@@ -147,6 +149,19 @@ int main(void)
             all_linen &= (theme_table(bad[i]) == 0);
         }
         check("theme-set-out-of-range-is-linen", all_linen);
+    }
+    /* theme_current() reports the id the last theme_set() was given — what
+     * the Theme picker's preview compares against before re-copying. */
+    {
+        int ok = 1;
+        for (int t = 0; t < THEME_COUNT; t++) {
+            theme_set(t);
+            ok &= theme_current() == t;
+        }
+        theme_set(99);                     /* reported as given; shows Linen */
+        ok &= theme_current() == 99 &&
+              memcmp(g_pal, theme_table(THEME_LINEN), sizeof g_pal) == 0;
+        check("theme-current-tracks-theme-set", ok);
     }
     /* The static initialiser of g_pal[] must equal Linen: the boot splash
      * paints before the first theme_set(). */

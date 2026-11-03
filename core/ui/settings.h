@@ -392,6 +392,16 @@ const char *settings_title(int screen);
  * that range names "Linen", which is also what palette.c renders for it. */
 const char *settings_theme_name(int theme);
 
+/*
+ * The theme the panel should be painted in while Settings shows `screen` with
+ * row `sel` under the cursor: on the Theme picker, the HOVERED theme (a live
+ * preview — nothing in *s changes, nothing is persisted); everywhere else, and
+ * for an out-of-range row, the saved s->theme. SELECT on the picker is still
+ * what applies a theme (settings_activate); leaving it any other way puts the
+ * saved one back because the caller re-asks this on every pass.
+ */
+int settings_theme_shown(int screen, int sel, const settings_t *s);
+
 /* The display name of clicker profile `profile` ("Off"/"Tick"/"Click"/"Pop"). */
 const char *settings_clicker_name(int profile);
 

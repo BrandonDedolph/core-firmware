@@ -189,8 +189,16 @@ const uint16_t *theme_table(int theme)
     return PAL_TABLES[theme];
 }
 
+static int g_theme_cur = THEME_LINEN;   /* g_pal[]'s initialiser is Linen */
+
+int theme_current(void)
+{
+    return g_theme_cur;
+}
+
 void theme_set(int theme)
 {
+    g_theme_cur = theme;
     const uint16_t *src = theme_table(theme);
     if (!src) {
         src = PAL_LINEN;               /* unknown id (older/newer record) */

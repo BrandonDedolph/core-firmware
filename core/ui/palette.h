@@ -74,4 +74,11 @@ const uint16_t *theme_table(int theme);
  * setting changes. */
 void theme_set(int theme);
 
+/* The id the last theme_set() was given — what g_pal[] is showing now (an
+ * out-of-range id is reported as given, though Linen is what it shows).
+ * THEME_LINEN before any theme_set(), matching g_pal[]'s initialiser. Lets a
+ * caller that previews a theme (Settings > Theme) tell whether the palette
+ * already shows what it wants without re-copying it every pass. */
+int theme_current(void);
+
 #endif /* CORE_UI_PALETTE_H */

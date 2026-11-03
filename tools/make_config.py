@@ -440,10 +440,10 @@ def do_stamp(target: str, epoch, utc_offset, dst=None) -> int:
             return 1
 
         src = newest[1]
-        dst = 1 - src
+        other = 1 - src          # not `dst`: that is the daylight flag above
         rec = stamp_slot(head[src * SLOT_BYTES:(src + 1) * SLOT_BYTES],
                          epoch, off_min, dst)
-        f.seek(dst * SLOT_BYTES)
+        f.seek(other * SLOT_BYTES)
         f.write(rec)
         f.flush()
         os.fsync(f.fileno())

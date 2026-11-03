@@ -876,6 +876,43 @@ int main(void)
               s.theme == 2 && settings_theme_shown(SETTINGS_ROOT, 0, &s) == 2);
     }
 
+    /* --- Pickers open on the value in force, every other screen on row 0 --- */
+    {
+        settings_defaults(&s);
+        int ok = 1;
+        for (int t = 0; t < settings_count(SETTINGS_THEME); t++) {
+            s.theme = t;
+            ok &= settings_initial_sel(SETTINGS_THEME, &s) == t;
+        }
+        check("initial-sel-theme-is-current", ok);
+        ok = 1;
+        for (int c = 0; c < settings_count(SETTINGS_CLICKER); c++) {
+            s.clicker = c;
+            ok &= settings_initial_sel(SETTINGS_CLICKER, &s) == c;
+        }
+        check("initial-sel-clicker-is-current", ok);
+        s.theme = 99; s.clicker = 99;
+        check("initial-sel-out-of-range-is-row-0",
+              settings_initial_sel(SETTINGS_THEME, &s) == 0 &&
+              settings_initial_sel(SETTINGS_CLICKER, &s) == 0);
+        settings_defaults(&s);
+        s.theme = 5; s.clicker = 2;
+        ok = 1;
+        for (int scr = 0; scr < SETTINGS_SCREEN_COUNT; scr++) {
+            if (scr == SETTINGS_THEME || scr == SETTINGS_CLICKER) continue;
+            ok &= settings_initial_sel(scr, &s) == 0;
+        }
+        check("initial-sel-other-screens-row-0", ok);
+        /* The landing row is the CURRENT one: SELECT there is a no-op. */
+        check("initial-sel-select-is-noop",
+              settings_activate(SETTINGS_THEME, &s,
+                                settings_initial_sel(SETTINGS_THEME, &s))
+                  == SETTINGS_ACTION_NOOP &&
+              settings_activate(SETTINGS_CLICKER, &s,
+                                settings_initial_sel(SETTINGS_CLICKER, &s))
+                  == SETTINGS_ACTION_NOOP);
+    }
+
     printf("settings_test: %s\n", g_fail ? "FAIL" : "OK");
     return g_fail ? 1 : 0;
 }

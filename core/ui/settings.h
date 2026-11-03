@@ -402,6 +402,16 @@ const char *settings_theme_name(int theme);
  */
 int settings_theme_shown(int screen, int sel, const settings_t *s);
 
+/*
+ * The row the cursor starts on when `screen` is entered. The radio-style
+ * pickers — every screen that is "choose one from a list": Theme and Clicker
+ * — open on the row that is currently chosen, not on row 0 (an out-of-range
+ * stored value opens on row 0). Every other screen is a list of settings, not
+ * of values, and opens on its first row. The scroll window is derived from the
+ * selection on every paint, so the chosen row is on screen by construction.
+ */
+int settings_initial_sel(int screen, const settings_t *s);
+
 /* The display name of clicker profile `profile` ("Off"/"Tick"/"Click"/"Pop"). */
 const char *settings_clicker_name(int profile);
 

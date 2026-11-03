@@ -9736,7 +9736,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                         if (target >= 0) {                 /* descend a screen  */
                             g_set_root_sel = g_set_sel;
                             g_set_screen = target;
-                            g_set_sel = g_set_accum = 0;
+                            /* A picker opens on the value in force. */
+                            g_set_sel = settings_initial_sel(target, &g_settings);
+                            g_set_accum = 0;
                             g_set_editing = 0;
                         } else if (act == SETTINGS_ACTION_DISKMODE) {
                             /* Reboot into the ROM's USB mass-storage mode. We

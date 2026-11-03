@@ -362,6 +362,17 @@ int settings_theme_shown(int screen, int sel, const settings_t *s)
     return s->theme;
 }
 
+int settings_initial_sel(int screen, const settings_t *s)
+{
+    int v;
+    switch (screen) {
+    case SETTINGS_THEME:   v = s->theme;   break;
+    case SETTINGS_CLICKER: v = s->clicker; break;
+    default:               return 0;
+    }
+    return (v >= 0 && v < settings_count(screen)) ? v : 0;
+}
+
 const char *settings_clicker_name(int profile)
 {
     if (profile < 0 || profile >= CLICK_N) {

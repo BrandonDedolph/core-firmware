@@ -535,6 +535,8 @@ static _Noreturn void session_walk(const char *disk, const char *ranges)
          * selected() cannot judge a row in Onyx, SEL_IN can. */
         CHECK("theme: root cursor still on Theme", SEL_IN("Theme", THEME_ONYX));
         tap(HL_BTN_SELECT);
+        CHECK("theme: picker opens on the applied theme, not row 0",
+              SEL_IN("Onyx", THEME_ONYX) && SURF() == onyx);
         hl_scroll(-16);                       /* to Linen */
         hl_run_ms(16 * 150 + 400);
         tap(HL_BTN_SELECT);                   /* back to Linen for the rest */

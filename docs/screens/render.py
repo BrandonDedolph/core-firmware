@@ -1637,7 +1637,7 @@ def gif_lock():
 
 def gif_settings():
     """SETTINGS: the Sound screen's Volume slider ramps up then back down, then
-    settles on the seven-theme picker."""
+    the theme picker previews Onyx and Sage under the cursor and comes back."""
     def sound_vol(v):
         rows = list(SOUND_ROWS)
         rows[0] = ("Volume", "%d%%" % v, v, 100, False)
@@ -1650,7 +1650,14 @@ def gif_settings():
     for v in reversed(vals[:-1]):
         spec.append((sound_vol(v), 2, 130))
     spec.append((sound_vol(20), 3, 150))
-    spec.append((screen_theme(), 2, 700))     # end on the theme picker
+    # Then the theme picker: it opens on the theme in force (Linen, row 0) and
+    # repaints the page in each theme the cursor crosses — a preview, not a
+    # change; Select would keep it, MENU puts the saved theme back.
+    spec.append((screen_theme(sel=0), 1, 700))
+    spec.append((screen_theme(sel=1), 1, 900))     # Onyx under the cursor
+    spec.append((screen_theme(sel=2), 1, 900))     # Sage
+    spec.append((screen_theme(sel=1), 1, 500))
+    spec.append((screen_theme(sel=0), 1, 900))     # back on Linen
     return _save_gif("settings.gif", spec)
 
 
@@ -2142,7 +2149,7 @@ def screen_settings(sel=ROOT_SEL):
 # its first row (core/ui/screen_settings.c settime_render).
 # ---------------------------------------------------------------------------
 DT_L = [("Set Date & Time", "10:42 AM"), ("Time Format", "12-hour"),
-        ("Time in Title", "On")]
+        ("Time in Title", "On"), ("Daylight Saving", "On")]
 DT_SEL = 0
 
 def screen_datetime(sel=DT_SEL):
@@ -2411,6 +2418,14 @@ TH_CURRENT = 0                  # Linen active
 TH_SEL = 1                      # cursor on Onyx
 
 def screen_theme(sel=TH_SEL, current=TH_CURRENT):
+    """Since v0.3.0 the picker previews the theme under the cursor: main.c's
+    theme_preview_sync() repaints the whole page in the hovered theme (nothing
+    is written until Select), so the still is drawn in THEMES[sel]'s palette,
+    not the saved one. The swatches and the CURRENT mark are unchanged."""
+    pal = THEMES[sel][2]
+    return with_palette(pal, lambda: _theme_page(sel, current))
+
+def _theme_page(sel, current):
     sc = Screen()
     header(sc, "Theme", "%d themes" % len(THEMES), back=True)
     status_strip(sc)                 # main.c settings_render_cur

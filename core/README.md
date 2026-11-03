@@ -36,8 +36,9 @@ core/
 ├── docs/design/ design notes (settings persistence, …)
 ├── cross/       Meson cross file (arm-none-eabi)
 ├── tools/       icon_gen.sh + source icons (UI glyph art)
-└── tests/       host unit + MMIO golden-trace tests, and the headless
-                 firmware walk (tests/headless/)
+└── tests/       host unit + MMIO golden-trace tests, the headless
+                 firmware walk (tests/headless/) and the libFuzzer
+                 harnesses with their regression inputs (tests/fuzz/)
 ```
 
 The player UI lives in `kernel/main.c` (the menu / browser / now-playing
@@ -58,6 +59,9 @@ app layer.
 - `python3` — for `make ipod` (`../tools/pack_ipod.py`) and the `verify-hw`
   checks. No Go: the desktop app and its `core` CLI live in
   [core-desktop-app](https://github.com/BrandonDedolph/core-desktop-app).
+- `clang` — only for `make fuzz`, the libFuzzer harnesses
+  ([`docs/testing-fuzz.md`](docs/testing-fuzz.md)); the sim build is whatever
+  `cc` is.
 
 On Arch: `pacman -S arm-none-eabi-gcc arm-none-eabi-binutils
 arm-none-eabi-newlib meson ninja pkgconf sdl2 python`.
@@ -71,8 +75,11 @@ make sim        # configures + builds the HOST TEST SUITE (see note below)
 make verify-hw  # static checks against a fresh `make hw` (see below)
 make help       # all targets
 
-meson test -C build-sim     # 84 suites: host unit, MMIO golden-trace, and
-                            # firmware-walk (the real main.c, headless)
+meson test -C build-sim     # 96 suites: host unit, MMIO golden-trace, the
+                            # fuzz replays, and firmware-walk (the real
+                            # main.c, headless)
+make fuzz                   # → build-fuzz/fuzz_<name>: ten libFuzzer harnesses
+make fuzz-run FUZZ_SECS=60  # run each one for a minute (CI runs a bounded pass)
 ```
 
 `make verify-hw` is the static half of the safety net — the checks that

@@ -35,7 +35,8 @@ New to the device? Read the [user guide](docs/USER_GUIDE.md).
 - **Draws real type.** A libc-free, gamma-correct text renderer with six Nunito atlases, kerned
   and tracked from measured ink.
 - **Has seven themes.** Linen, Onyx, Sage, Plaster, Olive, Umber, Mushroom. The selection bar is
-  always the theme's ink behind its surface, so every screen inverts with the theme.
+  always the theme's ink behind its surface, so every screen inverts with the theme. The picker
+  shows each theme as the cursor crosses it; nothing changes until you press Select.
 - **Remembers.** Settings, the resume position, the queue it was in and the live On-The-Go list
   persist to pre-allocated files on the disk, CRC-checked, never moving a cluster. A 4 MiB on-disk
   event log captures every diagnostic line.
@@ -46,7 +47,9 @@ New to the device? Read the [user guide](docs/USER_GUIDE.md).
 - **Knows what time it is.** The PMIC's always-on clock, read at boot and carried in software, with
   the time optionally in the title bar. The iPod cannot be told the time over the cable — on it,
   Apple's disk mode is what answers the computer — so `core sync` and `core eject` leave the time in
-  the settings file and the device takes it at the next boot.
+  the settings file and the device takes it at the next boot. It keeps standard time inside and
+  adds the daylight hour on the display between March and November (the US rule); Settings →
+  Date & Time → Daylight Saving turns that off.
 
 ## Screens
 
@@ -109,7 +112,8 @@ left.
 
 ### Themes
 
-Seven palettes, swapped live from Settings. Same layout, same type, different ink and surface.
+Seven palettes. Settings → Theme repaints the page in the theme under the cursor as you scroll;
+Select keeps it, Menu puts the saved one back. Same layout, same type, different ink and surface.
 
 <p align="center"><img src="docs/screens/themes.gif" alt="the seven themes" width="360"></p>
 
@@ -123,11 +127,13 @@ Seven palettes, swapped live from Settings. Same layout, same type, different in
 
 ### Settings
 
-Playback, Sound (volume limit, EQ presets, tone), Theme, Display, Clicker, Date & Time, Battery
-(charge rate, and what the charge is actually doing), About, Boot Details, Disk Mode, Reset.
-Everything but the diagnostics is saved to the disk.
+Playback, Sound (volume limit, EQ presets, tone), Theme, Display, Clicker, Date & Time (12- or
+24-hour, the time in the title bar, Daylight Saving), Battery (charge rate, and what the charge is
+actually doing), About, Boot Details, Disk Mode, Reset. Everything but the diagnostics is saved to
+the disk. Every value follows the volume wheel's rule — a slow detent is one step, a fast spin
+more — and Theme and Clicker open with the cursor on the value in force.
 
-<p align="center"><img src="docs/screens/settings.gif" alt="a Sound slider, then the theme picker" width="360"></p>
+<p align="center"><img src="docs/screens/settings.gif" alt="a Sound slider, then the theme picker previewing Onyx and Sage" width="360"></p>
 
 <table>
   <tr>
@@ -139,8 +145,8 @@ Everything but the diagnostics is saved to the disk.
   <tr>
     <td><img src="docs/screens/battery.png" width="260" alt="Battery"></td>
     <td><img src="docs/screens/bootdetails.png" width="260" alt="Boot Details"></td>
-    <td></td>
-    <td></td>
+    <td><img src="docs/screens/datetime.png" width="260" alt="Date &amp; Time"></td>
+    <td><img src="docs/screens/theme.png" width="260" alt="The theme picker, previewing Onyx"></td>
   </tr>
 </table>
 
@@ -197,12 +203,13 @@ and newlib for the device.
 cd core
 make hw                        # build-hw/core.elf, core.bin
 make ipod                      # build-hw/core.ipod
-make sim && meson test -C build-sim   # host tests, 84 suites (one boots main.c headless)
+make sim && meson test -C build-sim   # host tests, 96 suites (one boots main.c headless)
 make verify-hw                 # layout, header/doc and size checks on the ARM image
+make fuzz && make fuzz-run     # ten libFuzzer harnesses over every reader of the disk (clang)
 ```
 
-Detail, sanitizer builds and the host tools: [`core/README.md`](core/README.md),
-[`tools/README.md`](tools/README.md).
+Detail, sanitizer builds, the fuzzers and the host tools: [`core/README.md`](core/README.md),
+[`core/docs/testing-fuzz.md`](core/docs/testing-fuzz.md), [`tools/README.md`](tools/README.md).
 
 ## The `core` app
 

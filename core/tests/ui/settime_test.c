@@ -22,6 +22,7 @@
 #include <stdio.h>
 
 #include "settime.h"
+#include "wheel.h"            /* wheel_value_step: what main.c hands it */
 #include "../xfail.h"
 
 static int str_eq(const char *a, const char *b)
@@ -128,8 +129,13 @@ static void check_wrap(xfail_ctx *c)
     t.field = ST_MIN;
     t.min   = 0;
     settime_adjust(&t, 40);
-    xpect(c, "delta_clamp: a flick moves at most four steps, like the sliders",
+    xpect(c, "delta_clamp: a flick moves the minute at most SETTIME_DELTA_MAX",
           t.min == SETTIME_DELTA_MAX);
+    t.field = ST_YEAR;
+    t.year  = 2026;
+    settime_adjust(&t, 40);
+    xpect(c, "delta_clamp: ...and the year at most four",
+          t.year == 2026 + SETTIME_YEAR_DELTA_MAX);
 }
 
 static void check_day_clamp(xfail_ctx *c)
@@ -281,10 +287,40 @@ static void check_select_walk(xfail_ctx *c)
              "day", sel_text_is(&t, "Sep"));
 }
 
+/* What kernel/main.c hands the editor is wheel_value_step()'s answer for the
+ * event, not the raw tick delta: one slow detent must move a minute by ONE.
+ * (It was the raw ~4 ticks, so 10:00 stepped 10:04, 10:08 ... and 10:01 was
+ * unreachable.) */
+static void check_wheel_detents(xfail_ctx *c)
+{
+    settime_t t;
+    datetime_t now = { 2026, 7, 14, 10, 0, 0, 0 };
+    settime_begin(&t, 1, &now, 0);
+    t.field = ST_MIN;
+    const int D = CW_WHEEL_SENSITIVITY;
+    settime_adjust(&t, wheel_value_step(D, WHEEL_VALUE_STEP_MAX));
+    int one = (t.min == 1);
+    for (int i = 0; i < 4; i++) settime_adjust(&t, wheel_value_step(D, WHEEL_VALUE_STEP_MAX));
+    int five = (t.min == 5);
+    settime_adjust(&t, wheel_value_step(-D, WHEEL_VALUE_STEP_MAX));
+    xpect(c, "wheel: one slow detent steps the minute by exactly one, both ways",
+          one && five && t.min == 4);
+    settime_adjust(&t, wheel_value_step(3 * D, WHEEL_VALUE_STEP_MAX));
+    xpect(c, "wheel: a fast turn (three detents in one event) steps by more",
+          t.min == 10);
+    t.field = ST_HOUR;
+    settime_adjust(&t, wheel_value_step(D, WHEEL_VALUE_STEP_MAX));
+    xpect(c, "wheel: ...and the hour by one", t.hour == 11);
+    t.field = ST_YEAR;
+    settime_adjust(&t, wheel_value_step(D, WHEEL_VALUE_STEP_MAX));
+    xpect(c, "wheel: ...and the year by one", t.year == 2027);
+}
+
 int main(void)
 {
     xfail_ctx c = { "settime", 0, 0, 0 };
 
+    check_wheel_detents(&c);
     check_seed(&c);
     check_wrap(&c);
     check_day_clamp(&c);

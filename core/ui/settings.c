@@ -218,8 +218,8 @@ static const char *const DISP_L[2] = { "Backlight", "Brightness" };
 /* Date & Time. The editor is behind the first row rather than being the screen
  * itself because the other two are ordinary rows and a screen that is half a
  * list and half a widget reads as neither. */
-static const char *const DT_L[3] = { "Set Date & Time", "Time Format",
-                                     "Time in Title" };
+static const char *const DT_L[4] = { "Set Date & Time", "Time Format",
+                                     "Time in Title", "Daylight Saving" };
 /* Theme picker rows, in THEME_* id order (ui/palette.h) — the id IS the row. */
 static const char *const THEME_L[THEME_COUNT] = {
     [THEME_LINEN]    = "Linen",
@@ -291,6 +291,8 @@ void settings_defaults(settings_t *s)
     s->host_epoch        = 0;
     s->host_off_min      = 0;
     s->applied_epoch     = 0;
+    s->dst_on            = 1;            /* Daylight Saving: On             */
+    s->host_dst_raw      = 0;            /* the host's; main.c's Reset keeps */
 }
 
 /* ---------------------------------------------------------------------------
@@ -319,7 +321,7 @@ int settings_count(int screen)
     case SETTINGS_DISPLAY:  return 2;
     case SETTINGS_ABOUT:    return 1;   /* non-interactive info page */
     case SETTINGS_DIAG:     return 1;   /* non-interactive info page */
-    case SETTINGS_DATETIME: return 3;
+    case SETTINGS_DATETIME: return 4;
     case SETTINGS_SETTIME:  return 1;   /* the editor; main.c drives it */
     case SETTINGS_BATTERY:  return 1;   /* Charge Rate, over the dashboard */
     case SETTINGS_THEME:    return THEME_COUNT;
@@ -352,6 +354,25 @@ const char *settings_theme_name(int theme)
         return THEME_L[THEME_LINEN];   /* what palette.c renders for it too */
     }
     return THEME_L[theme];
+}
+
+int settings_theme_shown(int screen, int sel, const settings_t *s)
+{
+    if (screen == SETTINGS_THEME && sel >= 0 && sel < THEME_COUNT) {
+        return sel;
+    }
+    return s->theme;
+}
+
+int settings_initial_sel(int screen, const settings_t *s)
+{
+    int v;
+    switch (screen) {
+    case SETTINGS_THEME:   v = s->theme;   break;
+    case SETTINGS_CLICKER: v = s->clicker; break;
+    default:               return 0;
+    }
+    return (v >= 0 && v < settings_count(screen)) ? v : 0;
 }
 
 const char *settings_clicker_name(int profile)
@@ -401,7 +422,7 @@ int settings_kind(int screen, int idx)
     case SETTINGS_THEME:
         return SETTINGS_KIND_THEME;
     case SETTINGS_DATETIME:
-        /* Set Date & Time descends into the editor; the other two cycle. */
+        /* Set Date & Time descends into the editor; the other three cycle. */
         return (idx == 0) ? SETTINGS_KIND_SUBMENU : SETTINGS_KIND_SELECT;
     case SETTINGS_ABOUT:
     case SETTINGS_DIAG:
@@ -506,6 +527,7 @@ void settings_value(int screen, const settings_t *s, int idx,
         }
         case 1: scopy(buf, s->time_24h ? "24-hour" : "12-hour"); break;
         case 2: scopy(buf, s->time_in_title ? "On" : "Off"); break;
+        case 3: scopy(buf, s->dst_on ? "On" : "Off"); break;
         default: break;
         }
         break;
@@ -580,6 +602,9 @@ int settings_activate(int screen, settings_t *s, int idx)
         case 1: s->time_24h = !s->time_24h; return SETTINGS_ACTION_NONE;
         case 2: s->time_in_title = !s->time_in_title;
                 return SETTINGS_ACTION_NONE;
+        /* Daylight Saving: the display gains or loses the hour; the RTC and
+         * the stored (standard) offset do not move. */
+        case 3: s->dst_on = !s->dst_on; return SETTINGS_ACTION_NONE;
         default: return SETTINGS_ACTION_NOOP;
         }
 
@@ -686,8 +711,9 @@ int settings_adjust(int screen, settings_t *s, int idx, int delta)
         /* The wheel steps the two-valued rows the way it steps Backlight: any
          * detent lands on the other value, and an even count lands back where
          * it started, so the record only moves when the value does. */
-        if (idx == 1 || idx == 2) {
-            int *field = (idx == 1) ? &s->time_24h : &s->time_in_title;
+        if (idx == 1 || idx == 2 || idx == 3) {
+            int *field = (idx == 1) ? &s->time_24h
+                       : (idx == 2) ? &s->time_in_title : &s->dst_on;
             if ((delta & 1) == 0) {
                 return 0;
             }

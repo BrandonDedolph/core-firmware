@@ -49,6 +49,27 @@ timesync_action_t timesync_decide(const timesync_state_t *st, int writable,
     return TIMESYNC_SET;
 }
 
+int timesync_host_dst(uint32_t host_epoch, unsigned raw)
+{
+    unsigned state = raw & 3u;
+    if ((raw & ~3u & 0xFFu) != TIMESYNC_DST_TAG(host_epoch)) {
+        return TIMESYNC_HOST_DST_UNKNOWN;   /* another stamp's flag, or none */
+    }
+    return (state == TIMESYNC_HOST_DST_STD || state == TIMESYNC_HOST_DST_DST)
+               ? (int)state : TIMESYNC_HOST_DST_UNKNOWN;
+}
+
+int timesync_std_offset(const timesync_state_t *st)
+{
+    int off = st->host_off_min;
+    if (st->host_dst == TIMESYNC_HOST_DST_DST) {
+        off -= 60;
+    }
+    if (off < DATETIME_OFF_MIN) off = DATETIME_OFF_MIN;
+    if (off > DATETIME_OFF_MAX) off = DATETIME_OFF_MAX;
+    return off;
+}
+
 int timesync_apply(timesync_state_t *st, timesync_action_t action)
 {
     if (st == 0 || action == TIMESYNC_NONE) {
@@ -62,8 +83,9 @@ int timesync_apply(timesync_state_t *st, timesync_action_t action)
     }
     /* The offset is copied even when the epoch was judged STALE: a DST change
      * reaches the device as a new offset beside an epoch we may not use. */
-    if (st->utc_off_min != st->host_off_min) {
-        st->utc_off_min = st->host_off_min;
+    int std_off = timesync_std_offset(st);
+    if (st->utc_off_min != std_off) {
+        st->utc_off_min = std_off;
         moved = 1;
     }
     return moved;

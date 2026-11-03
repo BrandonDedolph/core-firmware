@@ -742,7 +742,28 @@ int main(void)
     check("dt-defaults", s.time_24h == 0 && s.time_in_title == 0 &&
                          s.utc_off_min == 0 && s.host_epoch == 0 &&
                          s.host_off_min == 0 && s.applied_epoch == 0);
-    check("dt-count", settings_count(SETTINGS_DATETIME) == 3);
+    check("dt-count", settings_count(SETTINGS_DATETIME) == 4);
+    {
+        settings_t d;
+        settings_defaults(&d);
+        char vb[SETTINGS_VALUE_MAX];
+        int tg = 0, on = 0, num = 0, den = 0;
+        check("dt-dst-row", strcmp(settings_label(SETTINGS_DATETIME, 3),
+                                   "Daylight Saving") == 0 &&
+              settings_kind(SETTINGS_DATETIME, 3) == SETTINGS_KIND_SELECT);
+        settings_value(SETTINGS_DATETIME, &d, 3, vb, &tg, &on, &num, &den);
+        check("dt-dst-default-on", d.dst_on == 1 && strcmp(vb, "On") == 0);
+        uint32_t he = d.host_epoch; int ho = d.host_off_min, uo = d.utc_off_min;
+        check("dt-dst-select-toggles-only-the-flag",
+              settings_activate(SETTINGS_DATETIME, &d, 3) == SETTINGS_ACTION_NONE &&
+              d.dst_on == 0 && d.host_epoch == he && d.host_off_min == ho &&
+              d.utc_off_min == uo);
+        settings_value(SETTINGS_DATETIME, &d, 3, vb, &tg, &on, &num, &den);
+        check("dt-dst-off-value", strcmp(vb, "Off") == 0);
+        check("dt-dst-select-back-on",
+              settings_activate(SETTINGS_DATETIME, &d, 3) == SETTINGS_ACTION_NONE &&
+              d.dst_on == 1);
+    }
     /* The TITLE, for every screen. This is here because it was wrong: the
      * renderer's own switch had no Date & Time case and titled the screen
      * "Settings", while the committed gallery still (docs/screens/datetime.png)
@@ -849,6 +870,69 @@ int main(void)
     check("dt-reset-forgets-the-stamp",
           s.host_epoch == 0 && s.applied_epoch == 0 && s.utc_off_min == 0 &&
           s.host_off_min == 0);
+
+    /* --- Theme picker preview: the page shows the HOVERED theme, every other
+     * screen the saved one, and asking changes nothing in the record. --- */
+    {
+        settings_defaults(&s);
+        s.theme = 4;                                  /* Olive saved */
+        settings_t before = s;
+        int ok = 1;
+        for (int r = 0; r < settings_count(SETTINGS_THEME); r++) {
+            ok &= settings_theme_shown(SETTINGS_THEME, r, &s) == r;
+        }
+        check("preview-hovered-theme-on-picker", ok);
+        check("preview-record-untouched", memcmp(&before, &s, sizeof s) == 0);
+        check("preview-saved-theme-elsewhere",
+              settings_theme_shown(SETTINGS_ROOT, 1, &s) == 4 &&
+              settings_theme_shown(SETTINGS_DISPLAY, 0, &s) == 4 &&
+              settings_theme_shown(SETTINGS_ABOUT, 0, &s) == 4 &&
+              settings_theme_shown(SETTINGS_CLICKER, 1, &s) == 4);
+        check("preview-out-of-range-row-is-saved",
+              settings_theme_shown(SETTINGS_THEME, -1, &s) == 4 &&
+              settings_theme_shown(SETTINGS_THEME, 7, &s) == 4);
+        /* SELECT is what applies: then the saved theme IS the hovered one. */
+        check("preview-select-applies",
+              settings_activate(SETTINGS_THEME, &s, 2) == SETTINGS_ACTION_NONE &&
+              s.theme == 2 && settings_theme_shown(SETTINGS_ROOT, 0, &s) == 2);
+    }
+
+    /* --- Pickers open on the value in force, every other screen on row 0 --- */
+    {
+        settings_defaults(&s);
+        int ok = 1;
+        for (int t = 0; t < settings_count(SETTINGS_THEME); t++) {
+            s.theme = t;
+            ok &= settings_initial_sel(SETTINGS_THEME, &s) == t;
+        }
+        check("initial-sel-theme-is-current", ok);
+        ok = 1;
+        for (int c = 0; c < settings_count(SETTINGS_CLICKER); c++) {
+            s.clicker = c;
+            ok &= settings_initial_sel(SETTINGS_CLICKER, &s) == c;
+        }
+        check("initial-sel-clicker-is-current", ok);
+        s.theme = 99; s.clicker = 99;
+        check("initial-sel-out-of-range-is-row-0",
+              settings_initial_sel(SETTINGS_THEME, &s) == 0 &&
+              settings_initial_sel(SETTINGS_CLICKER, &s) == 0);
+        settings_defaults(&s);
+        s.theme = 5; s.clicker = 2;
+        ok = 1;
+        for (int scr = 0; scr < SETTINGS_SCREEN_COUNT; scr++) {
+            if (scr == SETTINGS_THEME || scr == SETTINGS_CLICKER) continue;
+            ok &= settings_initial_sel(scr, &s) == 0;
+        }
+        check("initial-sel-other-screens-row-0", ok);
+        /* The landing row is the CURRENT one: SELECT there is a no-op. */
+        check("initial-sel-select-is-noop",
+              settings_activate(SETTINGS_THEME, &s,
+                                settings_initial_sel(SETTINGS_THEME, &s))
+                  == SETTINGS_ACTION_NOOP &&
+              settings_activate(SETTINGS_CLICKER, &s,
+                                settings_initial_sel(SETTINGS_CLICKER, &s))
+                  == SETTINGS_ACTION_NOOP);
+    }
 
     printf("settings_test: %s\n", g_fail ? "FAIL" : "OK");
     return g_fail ? 1 : 0;

@@ -362,6 +362,24 @@ int text_ascent(const text_font_t *font) {
     return font->a->ascent;
 }
 
+int text_cap_height(const text_font_t *font) {
+    if (!font) return 0;
+    const atlas_t *a = font->a;
+    const atlas_glyph_t *g = &a->glyphs['H' - 0x20];
+    const uint8_t *d = a->data + g->data_offset;
+    /* The first row of 'H' that carries any coverage: the generator's box can
+     * start on an empty row, and an empty row is not ink. */
+    int top = 0;
+    while (top < g->h) {
+        int any = 0;
+        for (int x = 0; x < g->w; x++) any |= d[top * g->w + x];
+        if (any) break;
+        top++;
+    }
+    /* Baseline-relative: the glyph's top is (ascent - offset_y) above it. */
+    return a->ascent - g->offset_y - top;
+}
+
 /* ---------- Rendering ---------------------------------------------- */
 
 /* Paint the .notdef box for one unrenderable codepoint: a 1px hollow rectangle

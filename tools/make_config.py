@@ -156,7 +156,18 @@ PAYLOAD_LEN = PAYLOAD_V2Q_LEN + 4                          # 48
 #
 #   host_epoch     UTC seconds when the host stamped; 0 = never
 #   host_off_min   the host's UTC offset then, in minutes (-720..840)
-#   time_flags     bit0 24-hour clock, bit1 clock in the title bar (firmware's)
+#   time_flags     bit0 24-hour clock, bit1 clock in the title bar,
+#                  bit2 Daylight Saving OFF (0 = On, the default) (firmware's)
+#   host_dst       the HOST's: was the host on daylight time when it stamped?
+#                  bits 0-1: 0 unknown (an older tool — every record before
+#                  this byte), 1 standard time, 2 daylight time, 3 reserved
+#                  (= unknown); bits 2-7: host_epoch & 0x3F, a tag binding the
+#                  flag to its own stamp (a tool that copies the record
+#                  verbatim without knowing this byte would otherwise leave an
+#                  earlier flag beside its new epoch; a mismatched tag reads as
+#                  unknown). See core/kernel/timesync.h. With DST the firmware
+#                  stores host_off_min - 60 as the zone's STANDARD offset and
+#                  adds the hour back itself; unknown stores host_off_min as is.
 #   applied_epoch  the host_epoch the firmware last acted on (firmware's)
 #   utc_off_min    the device's display offset (firmware's)
 #
@@ -167,7 +178,7 @@ TIME_FIELDS = [
     ("host_epoch",        "<I", 48),
     ("host_off_min",      "<h", 52),
     ("time_flags",        "<B", 54),
-    ("time_pad",          "<B", 55),   # reserved, 0
+    ("host_dst",          "<B", 55),   # host's DST flag + tag (see above)
     ("applied_epoch",     "<I", 56),
     ("utc_off_min",       "<h", 60),
     ("time_pad2",         "<H", 62),   # reserved, 0
@@ -346,7 +357,16 @@ def seq_newer(a: int, b: int) -> bool:
     return ((a - b) & 0xFFFFFFFF) != 0 and ((a - b) & 0xFFFFFFFF) < 0x80000000
 
 
-def stamp_slot(slot: bytes, epoch: int, off_min: int) -> bytes:
+HOST_DST_UNKNOWN, HOST_DST_STD, HOST_DST_DST = 0, 1, 2
+
+
+def host_dst_byte(epoch: int, state: int) -> int:
+    """Payload byte 55: the DST state in bits 0-1, host_epoch & 0x3F in 2-7.
+    Mirrors TIMESYNC_DST_BYTE in core/kernel/timesync.h."""
+    return ((epoch & 0x3F) << 2) | (state & 3)
+
+
+def stamp_slot(slot: bytes, epoch: int, off_min: int, dst=None) -> bytes:
     """The patch itself, pure so it can be reasoned about (and matched by
     cli/internal/devicefs/config.go byte for byte).
 
@@ -356,6 +376,11 @@ def stamp_slot(slot: bytes, epoch: int, off_min: int) -> bytes:
     stamp — then changes exactly four things: host_epoch, host_off_min, the
     sequence number and the CRC. The declared length grows to cover the time
     block if it did not already.
+
+    `dst` (None, or True/False for "the host is on daylight time") is the
+    fifth: with it, byte 55 is written (host_dst_byte). None leaves byte 55 as
+    it is — the behaviour of every tool before the byte existed, which is what
+    the app's parity test against this function pins until the app writes it.
     """
     rec = bytearray(slot)
     length = struct.unpack_from("<H", rec, OFF_LENGTH)[0]
@@ -369,13 +394,16 @@ def stamp_slot(slot: bytes, epoch: int, off_min: int) -> bytes:
         struct.pack_into("<H", rec, OFF_LENGTH, PAYLOAD_TIME_LEN)
     struct.pack_into("<I", rec, OFF_PAYLOAD + 48, epoch & 0xFFFFFFFF)
     struct.pack_into("<h", rec, OFF_PAYLOAD + 52, max(-720, min(840, off_min)))
+    if dst is not None:
+        rec[OFF_PAYLOAD + 55] = host_dst_byte(
+            epoch, HOST_DST_DST if dst else HOST_DST_STD)
     seq = struct.unpack_from("<I", rec, OFF_SEQ)[0]
     struct.pack_into("<I", rec, OFF_SEQ, (seq + 1) & 0xFFFFFFFF)
     struct.pack_into("<I", rec, OFF_CRC, crc32(bytes(rec[:OFF_CRC])))
     return bytes(rec)
 
 
-def do_stamp(target: str, epoch, utc_offset) -> int:
+def do_stamp(target: str, epoch, utc_offset, dst=None) -> int:
     """Write the host's current time into CORECFG.DAT's OTHER slot.
 
     `target` is a mounted volume's root (the usual case) or the file itself.
@@ -412,16 +440,16 @@ def do_stamp(target: str, epoch, utc_offset) -> int:
             return 1
 
         src = newest[1]
-        dst = 1 - src
+        other = 1 - src          # not `dst`: that is the daylight flag above
         rec = stamp_slot(head[src * SLOT_BYTES:(src + 1) * SLOT_BYTES],
-                         epoch, off_min)
-        f.seek(dst * SLOT_BYTES)
+                         epoch, off_min, dst)
+        f.seek(other * SLOT_BYTES)
         f.write(rec)
         f.flush()
         os.fsync(f.fileno())
 
     sign = "+" if off_min >= 0 else "-"
-    print(f"stamped {path}: slot {dst} seq {(newest[0] + 1) & 0xFFFFFFFF}, "
+    print(f"stamped {path}: slot {other} seq {(newest[0] + 1) & 0xFFFFFFFF}, "
           f"epoch {epoch} ({sign}{abs(off_min) // 60:02d}:"
           f"{abs(off_min) % 60:02d})")
     print("The device takes the stamp at its next boot.")
@@ -622,6 +650,11 @@ def main():
     ap.add_argument("--utc-offset", type=int, default=None,
                     help="with --stamp: the UTC offset in minutes to write "
                          "instead of this machine's")
+    ap.add_argument("--dst", choices=("on", "off"), default=None,
+                    help="with --stamp: also write the 'host was on daylight "
+                         "time' flag (payload byte 55). Omitted, byte 55 is "
+                         "left as it is (the firmware then reads the offset "
+                         "as is)")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing CORECFG.DAT even if it holds "
                          "a valid record (resets saved settings)")
@@ -630,7 +663,8 @@ def main():
     if args.create:
         return do_create(args.create, args.size, args.force)
     if args.stamp:
-        return do_stamp(args.stamp, args.epoch, args.utc_offset)
+        dst = None if args.dst is None else (args.dst == "on")
+        return do_stamp(args.stamp, args.epoch, args.utc_offset, dst)
     if args.emit:
         return do_emit(args.emit)
     return do_verify(args.verify)

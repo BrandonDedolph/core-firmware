@@ -42,9 +42,13 @@ enum { ST_YEAR = 0, ST_MONTH, ST_DAY, ST_HOUR, ST_MIN, ST_AMPM, ST_FIELDS };
 #define SETTIME_YEAR_MIN 2001
 #define SETTIME_YEAR_MAX 2099
 
-/* One wheel event may carry several detents; the sliders clamp the same way
- * (kernel/main.c), so a flick cannot spin the year by fifty. */
-#define SETTIME_DELTA_MAX 4
+/* One wheel event may carry several steps: kernel/main.c hands this editor
+ * wheel_value_step()'s answer (ui/wheel.h — one slow detent is ONE step, a
+ * faster spin steps by more). The year is held to SETTIME_YEAR_DELTA_MAX so a
+ * flick cannot spin it by decades; every other field takes up to
+ * SETTIME_DELTA_MAX, the same cap as the volume and the sliders. */
+#define SETTIME_DELTA_MAX      12
+#define SETTIME_YEAR_DELTA_MAX 4
 
 /* Longest field text is the year: "2026" + NUL. */
 #define SETTIME_FIELD_MAX 8
@@ -74,8 +78,8 @@ void settime_begin(settime_t *t, int valid, const datetime_t *now,
 
 /*
  * A wheel event on the selected field. `delta` is clamped to
- * ±SETTIME_DELTA_MAX. Every field WRAPS except the year, which CLAMPS at
- * SETTIME_YEAR_MIN / _MAX — a year that wrapped from 2099 to 2001 under a
+ * ±SETTIME_DELTA_MAX (the year to ±SETTIME_YEAR_DELTA_MAX). Every field WRAPS
+ * except the year, which CLAMPS at SETTIME_YEAR_MIN / _MAX — a year that wrapped from 2099 to 2001 under a
  * flick would be a silent forty-year error, while a month that wraps is
  * obviously a month. The day is re-clamped to the month's length after a month
  * or year move, so 31 January stepped to February becomes the 28th (or the

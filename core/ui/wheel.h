@@ -129,6 +129,29 @@ uint32_t wheel_tps(void);
  * the current list; `sel` unchanged at either end or on a letterless screen. */
 int list_letter_step(int sel, int count, int dir);
 
+/*
+ * VALUE wheels — anything the wheel tweaks by a number rather than moving a
+ * cursor over rows: Now Playing's volume, every Settings slider (Volume,
+ * Volume Limit, Bass, Treble, Balance, Brightness) and the Set Date & Time
+ * fields. One rule for all of them, the one the volume wheel was tuned with:
+ *
+ *   - the raw tick delta is quantised to whole detents (CW_WHEEL_SENSITIVITY
+ *     ticks each); motion short of a detent still counts as one, so a slow
+ *     turn never stalls;
+ *   - ONE detent in an event is exactly ONE step, either way — a slow turn
+ *     tweaks by a single value (a minute, a dB, a volume point);
+ *   - n > 1 detents in one event (the wheel turned faster than the loop
+ *     drains it) step by 2n — 2 detents = 4, 3 = 6 — so a fast spin sweeps;
+ *   - clamped to +/-cap (WHEEL_VALUE_STEP_MAX unless the caller wants less).
+ *
+ * Before this existed only the volume did it: the sliders and the clock
+ * editor were handed the RAW delta (~4 ticks per detent), so one slow detent
+ * moved a slider or a minute by four and no single value was reachable.
+ * Pure and stateless: returns the signed step, 0 for a zero delta.
+ */
+#define WHEEL_VALUE_STEP_MAX 12
+int wheel_value_step(int raw_delta, int cap);
+
 /* Apply a wheel event to a selection index in [0, count) with acceleration.
  * `accum` carries the sub-detent tick remainder between events. */
 int wheel_move(int sel, int count, int8_t delta, int *accum);

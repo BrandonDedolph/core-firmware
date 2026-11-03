@@ -402,8 +402,10 @@ void ui_list_row(int y0, int r, const char *text, const char *sub,
         ui_text(tx, sub_y, sub, FONT_SMALL, subc);
     }
     if (show_right) {
-        ui_text(LCD_WIDTH - 16 - right_w, rowmid, right, text_font_bold_12(),
-                rightc);
+        /* Its own cap band centred on the row, not the title's baseline. */
+        ui_text(LCD_WIDTH - 16 - right_w,
+                UI_ROW_BASE_FOR(ry, rh, text_font_bold_12()), right,
+                text_font_bold_12(), rightc);
     } else if (chevron) {
         ui_chevron(UI_CHEV_X, UI_CHEV_Y(ry, rh), 0, chevc);
     }

@@ -330,10 +330,112 @@ static void check_local(xfail_ctx *c)
              "underflow", !datetime_utc_from_local(60u, 120, &back));
 }
 
+/* The US daylight-saving window, STANDARD time in. Each transition is pinned
+ * by the minute on both sides of its edge: spring at 02:00 std on the second
+ * Sunday of March (2025-03-09, 2026-03-08, 2027-03-14), fall at 01:00 std
+ * (= 02:00 daylight) on the first Sunday of November (2025-11-02,
+ * 2026-11-01, 2027-11-07). Dates hand-checked against a calendar. */
+typedef struct { int y, mo, d, h, mi, want; const char *what; } dst_vec_t;
+static const dst_vec_t DST[] = {
+    { 2025,  3,  9,  1, 59, 0, "2025 spring: 01:59 std, the minute before" },
+    { 2025,  3,  9,  2,  0, 1, "2025 spring: 02:00 std, the edge" },
+    { 2025,  3,  8,  2,  0, 0, "2025 spring: the Saturday before is not it" },
+    { 2025, 11,  2,  0, 59, 1, "2025 fall: 00:59 std (01:59 daylight)" },
+    { 2025, 11,  2,  1,  0, 0, "2025 fall: 01:00 std, the edge" },
+    { 2026,  3,  8,  1, 59, 0, "2026 spring: 01:59 std" },
+    { 2026,  3,  8,  2,  0, 1, "2026 spring: 02:00 std" },
+    { 2026,  3,  1,  2,  0, 0, "2026 spring: the FIRST Sunday is not it" },
+    { 2026, 11,  1,  0, 59, 1, "2026 fall: 00:59 std" },
+    { 2026, 11,  1,  1,  0, 0, "2026 fall: 01:00 std" },
+    { 2026, 10, 31, 23, 59, 1, "2026 fall: the Saturday night before" },
+    { 2027,  3, 14,  1, 59, 0, "2027 spring: 01:59 std" },
+    { 2027,  3, 14,  2,  0, 1, "2027 spring: 02:00 std" },
+    { 2027,  3,  7,  2,  0, 0, "2027 spring: the first Sunday is not it" },
+    { 2027, 11,  7,  0, 59, 1, "2027 fall: 00:59 std" },
+    { 2027, 11,  7,  1,  0, 0, "2027 fall: 01:00 std" },
+    { 2027, 10, 31,  1, 30, 1, "2027 fall: the last Sunday of October is not it" },
+    { 2026,  7, 14, 12,  0, 1, "summer" },
+    { 2026,  1, 15, 12,  0, 0, "winter" },
+    { 2026, 12, 31, 23, 59, 0, "new year's eve" },
+    { 2026,  4,  1,  0,  0, 1, "1 April" },
+    { 2026, 10, 31, 23, 59, 1, "31 October" },
+    { 1999,  7,  1, 12,  0, 0, "out of range" },
+};
+
+static uint32_t ep(int y, int mo, int d, int h, int mi)
+{
+    datetime_t t = { y, mo, d, h, mi, 0, 0 };
+    return datetime_to_epoch(&t);
+}
+
+static void check_dst(xfail_ctx *c)
+{
+    int ok = 1;
+    for (unsigned i = 0; i < sizeof DST / sizeof DST[0]; i++) {
+        const dst_vec_t *v = &DST[i];
+        int got = clock_dst_active(v->y, v->mo, v->d, v->h, v->mi);
+        if (got != v->want) {
+            printf("  dst: %s: got %d want %d\n", v->what, got, v->want);
+            ok = 0;
+        }
+    }
+    xpect(c, "dst: the US window, 2025-2027 transitions and both edges", ok);
+
+    /* Display: standard + 1 h inside the window when On; never when Off. */
+    xpect(c, "dst: 13:30 std in July displays 14:30 with Daylight Saving On",
+          clock_dst_display(ep(2026, 7, 14, 13, 30), 1) == ep(2026, 7, 14, 14, 30));
+    xpect(c, "dst: ...and 13:30 with it Off (toggling moves only the display)",
+          clock_dst_display(ep(2026, 7, 14, 13, 30), 0) == ep(2026, 7, 14, 13, 30));
+    xpect(c, "dst: January is standard either way",
+          clock_dst_display(ep(2026, 1, 14, 13, 30), 1) == ep(2026, 1, 14, 13, 30));
+    xpect(c, "dst: spring forward — 01:59 std shows 01:59, 02:00 std shows 03:00",
+          clock_dst_display(ep(2026, 3, 8, 1, 59), 1) == ep(2026, 3, 8, 1, 59) &&
+          clock_dst_display(ep(2026, 3, 8, 2, 0), 1) == ep(2026, 3, 8, 3, 0));
+    xpect(c, "dst: fall back — 00:59 std shows 01:59, 01:00 std shows 01:00",
+          clock_dst_display(ep(2026, 11, 1, 0, 59), 1) == ep(2026, 11, 1, 1, 59) &&
+          clock_dst_display(ep(2026, 11, 1, 1, 0), 1) == ep(2026, 11, 1, 1, 0));
+
+    /* Wall -> standard (Set Date & Time). */
+    xpect(c, "dst: 02:30 typed on a July day with DST On is 01:30 standard",
+          clock_dst_standard_from_wall(ep(2026, 7, 14, 2, 30), 1)
+              == ep(2026, 7, 14, 1, 30));
+    xpect(c, "dst: ...and displays as the 02:30 that was typed",
+          clock_dst_display(clock_dst_standard_from_wall(ep(2026, 7, 14, 2, 30), 1), 1)
+              == ep(2026, 7, 14, 2, 30));
+    xpect(c, "dst: with DST Off the typed time IS standard",
+          clock_dst_standard_from_wall(ep(2026, 7, 14, 2, 30), 0)
+              == ep(2026, 7, 14, 2, 30));
+    xpect(c, "dst: a winter time typed is standard already",
+          clock_dst_standard_from_wall(ep(2026, 1, 14, 2, 30), 1)
+              == ep(2026, 1, 14, 2, 30));
+    xpect(c, "dst: the doubled 01:30 on the fall-back Sunday takes the daylight reading",
+          clock_dst_standard_from_wall(ep(2026, 11, 1, 1, 30), 1)
+              == ep(2026, 11, 1, 0, 30));
+    xpect(c, "dst: 02:30 that morning is standard",
+          clock_dst_standard_from_wall(ep(2026, 11, 1, 2, 30), 1)
+              == ep(2026, 11, 1, 2, 30));
+    xpect(c, "dst: 03:30 on the spring-forward Sunday is daylight (02:30 std)",
+          clock_dst_standard_from_wall(ep(2026, 3, 8, 3, 30), 1)
+              == ep(2026, 3, 8, 2, 30));
+    /* Round trip: every wall minute that exists reads back as itself. */
+    int rt = 1;
+    for (uint32_t w = ep(2026, 3, 7, 0, 0); w < ep(2026, 3, 10, 0, 0); w += 60u) {
+        datetime_t cw;
+        datetime_from_epoch(w, &cw);
+        if (cw.month == 3 && cw.day == 8 && cw.hour == 2) continue;  /* never happens */
+        rt &= clock_dst_display(clock_dst_standard_from_wall(w, 1), 1) == w;
+    }
+    for (uint32_t w = ep(2026, 10, 31, 0, 0); w < ep(2026, 11, 3, 0, 0); w += 60u) {
+        rt &= clock_dst_display(clock_dst_standard_from_wall(w, 1), 1) == w;
+    }
+    xpect(c, "dst: every wall minute around both 2026 transitions round-trips", rt);
+}
+
 int main(void)
 {
     xfail_ctx c = { "datetime", 0, 0, 0 };
 
+    check_dst(&c);
     check_vectors(&c);
     check_mdays(&c);
     check_exhaustive(&c);

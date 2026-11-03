@@ -247,7 +247,11 @@ enum {
 #define P_HOST_EPOCH    (CFG_PAYLOAD_V2S + 0u)   /* 48: u32 host's UTC stamp  */
 #define P_HOST_OFF      (CFG_PAYLOAD_V2S + 4u)   /* 52: i16 host UTC offset   */
 #define P_TIME_FLAGS    (CFG_PAYLOAD_V2S + 6u)   /* 54: u8  TIME_FLAG_*       */
-#define P_TIME_PAD      (CFG_PAYLOAD_V2S + 7u)   /* 55: u8  reserved (0)      */
+#define P_HOST_DST      (CFG_PAYLOAD_V2S + 7u)   /* 55: u8  host DST flag+tag:
+                                                  *     the HOST's, carried
+                                                  *     verbatim (timesync.h;
+                                                  *     was reserved 0, which
+                                                  *     reads as "unknown")  */
 #define P_APPLIED_EPOCH (CFG_PAYLOAD_V2S + 8u)   /* 56: u32 stamp acted on    */
 #define P_UTC_OFF       (CFG_PAYLOAD_V2S + 12u)  /* 60: i16 display offset    */
 #define P_TIME_PAD2     (CFG_PAYLOAD_V2S + 14u)  /* 62: u16 reserved (0)      */
@@ -436,8 +440,9 @@ void config_encode(uint8_t *rec, const settings_t *s, uint32_t seq)
          (uint16_t)(int16_t)clampi(s->host_off_min,
                                    CFG_OFF_MIN_MINUTES, CFG_OFF_MAX_MINUTES));
     p[P_TIME_FLAGS] = (uint8_t)((s->time_24h ? TIME_FLAG_24H : 0u) |
-                                (s->time_in_title ? TIME_FLAG_IN_TITLE : 0u));
-    p[P_TIME_PAD]   = 0;
+                                (s->time_in_title ? TIME_FLAG_IN_TITLE : 0u) |
+                                (s->dst_on ? 0u : TIME_FLAG_DST_OFF));
+    p[P_HOST_DST]   = (uint8_t)s->host_dst_raw;
     wr32(&p[P_APPLIED_EPOCH], s->applied_epoch);
     wr16(&p[P_UTC_OFF],
          (uint16_t)(int16_t)clampi(s->utc_off_min,
@@ -589,6 +594,8 @@ int config_decode(const uint8_t *rec, settings_t *s, uint32_t *seq)
         int flags        = p[P_TIME_FLAGS] & (int)TIME_FLAGS_MASK;
         s->time_24h      = (flags & (int)TIME_FLAG_24H) ? 1 : 0;
         s->time_in_title = (flags & (int)TIME_FLAG_IN_TITLE) ? 1 : 0;
+        s->dst_on        = (flags & (int)TIME_FLAG_DST_OFF) ? 0 : 1;
+        s->host_dst_raw  = p[P_HOST_DST];
         s->applied_epoch = rd32(&p[P_APPLIED_EPOCH]);
         s->utc_off_min   = clampi((int16_t)rd16(&p[P_UTC_OFF]),
                                   CFG_OFF_MIN_MINUTES, CFG_OFF_MAX_MINUTES);
@@ -597,6 +604,8 @@ int config_decode(const uint8_t *rec, settings_t *s, uint32_t *seq)
         s->host_off_min  = 0;
         s->time_24h      = 0;
         s->time_in_title = 0;
+        s->dst_on        = 1;
+        s->host_dst_raw  = 0;
         s->applied_epoch = 0;
         s->utc_off_min   = 0;
     }

@@ -195,15 +195,35 @@ still reads and every older build still reads a newer record. As shipped:
                             -- length 48 --
 48  host_epoch         u32  the HOST's UTC stamp; 0 = never stamped
 52  host_off_min       i16  the host's UTC offset then (-720..840)
-54  time_flags         u8   bit0 24-hour, bit1 clock in the title bar
-55  (reserved)         u8   0
+54  time_flags         u8   bit0 24-hour, bit1 clock in the title bar,
+                            bit2 Daylight Saving OFF (0 = On, the default)
+55  host_dst           u8   the HOST's: bits0-1 0 unknown / 1 standard /
+                            2 daylight / 3 reserved; bits2-7 host_epoch&0x3F
+                            (a tag: a mismatch reads as unknown). Was
+                            reserved 0, so every older record is "unknown"
 56  applied_epoch      u32  the host_epoch the firmware acted on; 0 = none
-60  utc_off_min        i16  the device's display offset (-720..840)
+60  utc_off_min        i16  the device's STANDARD offset (-720..840); the
+                            display adds 1 h inside the US DST window when
+                            Daylight Saving is On (kernel/datetime.h)
 62  (reserved)         u16  0
                             -- length 64, what this build writes --
 ```
 
 ### The time block is the one tail the HOST also writes
+
+**Daylight saving (byte 55, 2026-11).** The device keeps standard time: the
+RTC holds UTC, `utc_off_min` is the zone's standard offset, and the display
+adds the hour itself (`clock_dst_display`, the US rule: from 02:00 standard on
+the second Sunday of March to 01:00 standard on the first Sunday of
+November) while Settings > Date & Time > Daylight Saving is On. The host's
+`host_off_min` is its CURRENT offset, so a host on daylight time also writes
+byte 55 = `((host_epoch & 0x3F) << 2) | 2` (standard time: `| 1`), and the
+firmware stores `host_off_min - 60`. An old tool leaves byte 55 alone: 0 for
+every record before it, or an earlier tool's flag whose tag no longer matches
+the new epoch — both read as unknown, and the offset is stored as it is. No
+version bump and no length change: the byte was reserved and zero.
+`tools/make_config.py --stamp --dst on|off` is the reference writer (omit
+`--dst` to leave the byte as it is, the old behaviour).
 
 Everything above is the device's. `host_epoch` / `host_off_min` are not: the
 iPod cannot be told the time over the cable (in disk mode it is Apple's boot

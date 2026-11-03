@@ -213,13 +213,26 @@ typedef struct {
     uint32_t host_epoch;     /* the host's stamp; 0 = never stamped           */
     int  host_off_min;       /* the host's UTC offset when it stamped         */
     uint32_t applied_epoch;  /* the stamp we acted on; 0 = none yet           */
+    /*
+     * Daylight Saving (a row, Settings > Date & Time; default On). With it the
+     * stored utc_off_min is the STANDARD offset and the display adds an hour
+     * inside the US window (kernel/datetime.h clock_dst_*). Toggling it moves
+     * only the display, never the stored time. On disk as the INVERTED bit
+     * TIME_FLAG_DST_OFF, so every record written before it reads as On.
+     */
+    int  dst_on;
+    /* CORECFG.DAT byte 55 as the host wrote it — the "host was on daylight
+     * time" flag and its tag (kernel/timesync.h). The host's, like
+     * host_epoch: carried through every save unchanged. */
+    int  host_dst_raw;
 } settings_t;
 
 /* time_24h / time_in_title share one byte on disk (kernel/config.c). The bit
  * numbers are part of the record format: append, never renumber. */
 #define TIME_FLAG_24H      0x01u
 #define TIME_FLAG_IN_TITLE 0x02u
-#define TIME_FLAGS_MASK    0x03u
+#define TIME_FLAG_DST_OFF  0x04u   /* SET = Daylight Saving Off (0 = On)    */
+#define TIME_FLAGS_MASK    0x07u
 
 /* What kind of queue the resume locator's track was playing in. On disk as
  * one byte; unknown values read back as NONE (the album fallback). */
@@ -391,6 +404,26 @@ const char *settings_title(int screen);
  * "Olive", "Umber", "Mushroom" — ui/palette.h THEME_* order). An id outside
  * that range names "Linen", which is also what palette.c renders for it. */
 const char *settings_theme_name(int theme);
+
+/*
+ * The theme the panel should be painted in while Settings shows `screen` with
+ * row `sel` under the cursor: on the Theme picker, the HOVERED theme (a live
+ * preview — nothing in *s changes, nothing is persisted); everywhere else, and
+ * for an out-of-range row, the saved s->theme. SELECT on the picker is still
+ * what applies a theme (settings_activate); leaving it any other way puts the
+ * saved one back because the caller re-asks this on every pass.
+ */
+int settings_theme_shown(int screen, int sel, const settings_t *s);
+
+/*
+ * The row the cursor starts on when `screen` is entered. The radio-style
+ * pickers — every screen that is "choose one from a list": Theme and Clicker
+ * — open on the row that is currently chosen, not on row 0 (an out-of-range
+ * stored value opens on row 0). Every other screen is a list of settings, not
+ * of values, and opens on its first row. The scroll window is derived from the
+ * selection on every paint, so the chosen row is on screen by construction.
+ */
+int settings_initial_sel(int screen, const settings_t *s);
 
 /* The display name of clicker profile `profile` ("Off"/"Tick"/"Click"/"Pop"). */
 const char *settings_clicker_name(int profile);

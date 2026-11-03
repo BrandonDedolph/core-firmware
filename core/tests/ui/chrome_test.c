@@ -207,6 +207,37 @@ int main(void)
         xpect(&c, "chevron box is centred on the bar",
               (2 * by + UI_CHEV_H - 1) - bar2 <= 1
               && bar2 - (2 * by + UI_CHEV_H - 1) <= 1);
+        /* The right-hand value (a run time, a count) is bold 12 — 8 px caps
+         * to the title's 10. It centres ITS OWN cap band on the bar
+         * (UI_ROW_BASE_FOR); on the title's baseline it sat 1 px low. Both
+         * row heights, selected and plain. */
+        for (int two = 0; two < 2; two++) {
+            for (int sel = 0; sel < 2; sel++) {
+                int rh = two ? ROW_H2 : ROW_H;
+                uint16_t bg = sel ? LINEN_SEL_BG : LINEN_SURFACE;
+                console_clear(LINEN_SURFACE);
+                ui_list_row(LIST_Y0, 1, "HIH", two ? "Sub" : NULL, "3:42", 0,
+                            sel, 0, NULL, 0, rh);
+                int vry = LIST_Y0 + rh;
+                int vw = text_width("3:42", text_font_bold_12());
+                int vx = LCD_WIDTH - 16 - vw;
+                int vlo = -1, vhi = -1;
+                for (int y = vry + 1; y < vry + rh - 1; y++)
+                    for (int x = vx; x < vx + vw; x++)
+                        if (fb[y * LCD_WIDTH + x] != bg) {
+                            if (vlo < 0) vlo = y;
+                            vhi = y;
+                            break;
+                        }
+                int vbar2 = 2 * vry + rh - 1, vink2 = vlo + vhi;
+                xpect(&c, two ? "two-line row's run time is centred on the row "
+                                "(within 1/2 px)"
+                              : "row's run time is centred on the bar "
+                                "(within 1/2 px)",
+                      vlo > 0 && vhi - vlo + 1 == 8 &&
+                      vink2 - vbar2 <= 1 && vbar2 - vink2 <= 1);
+            }
+        }
         /* Mirrored mark in the header, where the back glyph was. */
         console_clear(LINEN_SURFACE);
         ui_header("Albums", NULL, 1);

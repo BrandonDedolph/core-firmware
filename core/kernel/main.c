@@ -1230,8 +1230,10 @@ static int strip_sleep_token(int right_x, int y, uint16_t ink)
  * The clock, as the UI reads it
  * ------------------------------------------------------------------------- */
 
-/* The device's LOCAL epoch right now (the software clock plus the stored UTC
- * offset). 1 when a time is known, 0 when it is not. */
+/* The device's LOCAL epoch right now, as the user is shown it: the software
+ * clock plus the stored (STANDARD) offset, plus the daylight hour when
+ * Daylight Saving is On and it is in force (kernel/datetime.h). 1 when a time
+ * is known, 0 when it is not. */
 static int clock_local_epoch(uint32_t *local)
 {
     uint32_t utc;
@@ -1251,6 +1253,7 @@ static int clock_local_epoch(uint32_t *local)
         }
         *local = utc - back;
     }
+    *local = clock_dst_display(*local, g_settings.dst_on);
     return 1;
 }
 
@@ -1625,7 +1628,10 @@ static void detail_row_draw(int r, int vi)
         u32_to_dec(num, (unsigned)(g_track_num[idx] ? g_track_num[idx]
                                                     : idx + 1));
         int nw = text_width(num, FONT_SMALL);
-        ui_text(num_rx - nw, UI_ROW_BASE(ry, ROW_H), num, FONT_SMALL, nc);
+        /* Regular-9 digits are 7 px, the title's caps 10: on the title's
+         * baseline the number hung 1.5 px low. Centre its own cap band. */
+        ui_text(num_rx - nw, UI_ROW_BASE_FOR(ry, ROW_H, FONT_SMALL), num,
+                FONT_SMALL, nc);
     }
     /* Duration on the right (from the index); the title must stop before it. */
     int title_right = LCD_WIDTH - 16;
@@ -1633,8 +1639,10 @@ static void detail_row_draw(int r, int vi)
         char dts[FMT_TIME_MAX];
         fmt_time(dts, g_track_dur[idx]);
         int dw = text_width(dts, text_font_bold_12());
-        ui_text(LCD_WIDTH - 16 - dw, UI_ROW_BASE(ry, ROW_H), dts, text_font_bold_12(),
-                is_sel ? LINEN_SEL_SUB : LINEN_MUTED_D);
+        /* Bold-12 figures (8 px) centred on the row in their own right, the
+         * way ui_list_row places every right-hand value. */
+        ui_text(LCD_WIDTH - 16 - dw, UI_ROW_BASE_FOR(ry, ROW_H, text_font_bold_12()),
+                dts, text_font_bold_12(), is_sel ? LINEN_SEL_SUB : LINEN_MUTED_D);
         title_right = LCD_WIDTH - 16 - dw - 8;
     }
     /* Title (clean — number gutter provides the index), indented past it,
@@ -3429,6 +3437,10 @@ static void settings_apply(void)
                        &curve);
     hal_eq_set(curve.gain_db, curve.cutoff, curve.narrow);
     theme_set(g_settings.theme);           /* Linen / Onyx -> live palette swap */
+    chip_placeholder_init();               /* re-bake LINEN_BORDER: the album
+                                            * list's empty chips follow a real
+                                            * theme change (a preview does not
+                                            * reach here — theme_preview_sync) */
     charger_apply();                       /* Charge Rate -> LTC4066 HPWR       */
 }
 
@@ -4966,6 +4978,32 @@ static void settings_leave(void)
     resume_capture();
     settings_commit(CFG_COMMIT_SOFT);
     otg_commit(CFG_COMMIT_SOFT);          /* a list built before Settings, too */
+}
+
+/*
+ * Settings > Theme previews the theme under the cursor: the picker page is
+ * painted in it as the wheel moves, and nothing in g_settings changes, so
+ * nothing is written. SELECT applies for real (settings_activate ->
+ * settings_apply); every other way out — MENU back to the Settings root, the
+ * MENU hold to the main menu, a modal pushed over it, a suspend — lands on a
+ * screen where settings_theme_shown() answers the saved theme, and the next
+ * pass puts it back. Called once per main-loop pass, after input and before
+ * the repaint; returns 1 when it swapped the palette (the caller repaints the
+ * whole panel). theme_current() makes the steady state free: no copy unless
+ * the wanted theme changed.
+ *
+ * The chip placeholders are deliberately NOT re-baked for a preview: no
+ * Settings screen draws an album chip, and the only screens that do are
+ * reached through a path where the saved theme is already back.
+ */
+static int theme_preview_sync(void)
+{
+    int want = (scr_cur() == SCR_SETTINGS)
+                   ? settings_theme_shown(g_set_screen, g_set_sel, &g_settings)
+                   : g_settings.theme;
+    if (want == theme_current()) return 0;
+    theme_set(want);
+    return 1;
 }
 
 /*
@@ -8138,6 +8176,8 @@ _Noreturn static void run_ui(fat32_t *fs)
         timesync_state_t ts = {
             g_settings.host_epoch, g_settings.host_off_min,
             g_settings.applied_epoch, g_settings.utc_off_min,
+            timesync_host_dst(g_settings.host_epoch,
+                              (unsigned)g_settings.host_dst_raw),
         };
         timesync_action_t act = timesync_decide(&ts, config_writable(),
                                                 rtc_rc == 1, rtc_epoch);
@@ -8207,10 +8247,9 @@ _Noreturn static void run_ui(fat32_t *fs)
     boot_screen_render("LOADING", -1);    /* the same screen, now themed          */
 
     chip_placeholder_init();              /* after theme_set: it bakes
-                                           * LINEN_BORDER in at call time (a live
-                                           * theme change in Settings still
-                                           * leaves it stale — pre-existing, out
-                                           * of scope here) */
+                                           * LINEN_BORDER in at call time
+                                           * (settings_apply re-bakes it on a
+                                           * live theme change) */
     library_ensure(fs);                   /* preload the index at boot (drive is
                                            * spinning) so Songs/Albums/Artists/
                                            * Genres open INSTANTLY, like Apple —
@@ -9490,15 +9529,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                      * Quantise to whole detents: a single slow detent nudges the
                      * volume by exactly ±1, and spinning faster (more detents per
                      * event) accelerates so you can still sweep the whole range. */
-                    int units = ev.wheel_delta / CW_WHEEL_SENSITIVITY;
-                    if (units == 0) {                    /* sub-detent motion: ±1  */
-                        units = (ev.wheel_delta > 0) ? 1 : -1;
-                    }
-                    int sign = (units < 0) ? -1 : 1;
-                    int mag  = (units < 0) ? -units : units;
-                    int step = (mag <= 1) ? sign : sign * mag * 2;  /* 1->1, 2->4, 3->6 */
-                    if (step >  12) step =  12;
-                    if (step < -12) step = -12;
+                    /* The rule now lives in ui/wheel.c (wheel_value_step) and
+                     * every value wheel shares it: 1 detent = 1, faster
+                     * sweeps (2 -> 4, 3 -> 6), capped at 12. */
+                    int step = wheel_value_step(ev.wheel_delta,
+                                                WHEEL_VALUE_STEP_MAX);
                     /* The Volume Limit is applied by the same helper the
                      * Settings slider uses — one rule, two wheels. No click
                      * either way: this is a slider, not navigation. */
@@ -9564,7 +9599,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                  */
                 if (g_set_screen == SETTINGS_SETTIME) {
                     if (ev.wheel_delta) {
-                        settime_adjust(&g_settime, ev.wheel_delta);
+                        /* Detents, not raw ticks: one slow detent is one
+                         * minute / hour / day (it was ~4). */
+                        settime_adjust(&g_settime,
+                                       wheel_value_step(ev.wheel_delta,
+                                                        WHEEL_VALUE_STEP_MAX));
                         dirty = 1;
                     }
                     if (ev.buttons & WHEEL_BTN_SELECT) {
@@ -9574,7 +9613,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                              * device's stored offset comes back off here. */
                             datetime_t civil;
                             settime_civil(&g_settime, &civil);
-                            uint32_t local = datetime_to_epoch(&civil);
+                            /* The editor shows WALL time; the device keeps
+                             * standard (Daylight Saving, kernel/datetime.h). */
+                            uint32_t local = clock_dst_standard_from_wall(
+                                                 datetime_to_epoch(&civil),
+                                                 g_settings.dst_on);
                             uint32_t utc   = 0;
                             /* The editor clamps the YEAR to 2001..2099; the
                              * zone can still push the UTC epoch off either end
@@ -9621,9 +9664,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * changes which row SELECT lands on. */
                 if (ev.wheel_delta) {
                     if (g_set_editing && slider) {         /* adjust the value  */
-                        int dd = ev.wheel_delta;
-                        if (dd >  4) dd =  4;
-                        if (dd < -4) dd = -4;
+                        /* Detents, not raw ticks: this was the raw delta
+                         * clamped to +/-4, so ONE slow detent (~4 ticks)
+                         * moved every slider by four and no single value
+                         * was reachable. The volume wheel's rule now. */
+                        int dd = wheel_value_step(ev.wheel_delta,
+                                                  WHEEL_VALUE_STEP_MAX);
                         /* Only a value that MOVED earns an apply and a disk
                          * write: a wheel pinned at a rail (volume 100,
                          * brightness 32) is not a change — settings_adjust
@@ -9702,7 +9748,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                         if (target >= 0) {                 /* descend a screen  */
                             g_set_root_sel = g_set_sel;
                             g_set_screen = target;
-                            g_set_sel = g_set_accum = 0;
+                            /* A picker opens on the value in force. */
+                            g_set_sel = settings_initial_sel(target, &g_settings);
+                            g_set_accum = 0;
                             g_set_editing = 0;
                         } else if (act == SETTINGS_ACTION_DISKMODE) {
                             /* Reboot into the ROM's USB mass-storage mode. We
@@ -9755,10 +9803,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                             uint32_t host_epoch = g_settings.host_epoch;
                             int      host_off   = g_settings.host_off_min;
                             int      disp_off   = g_settings.utc_off_min;
+                            int      host_dst   = g_settings.host_dst_raw;
                             settings_defaults(&g_settings);
                             g_settings.host_epoch   = host_epoch;
                             g_settings.host_off_min = host_off;
                             g_settings.utc_off_min  = disp_off;
+                            g_settings.host_dst_raw = host_dst;
                             settings_apply();
                             sleep_timer_apply();           /* defaults() zeroed
                                                             * the row: disarm  */
@@ -9819,6 +9869,10 @@ _Noreturn static void run_ui(fat32_t *fs)
                 break;                        /* dismissal is handled above */
             }
         }
+
+        /* Settings > Theme's live preview, or the saved theme back once the
+         * picker is left without SELECT. A swap repaints the whole panel. */
+        if (theme_preview_sync()) dirty = 1;
 
         /* Idle-timeout backlight: dim, then off — timeout from Settings (0 =
          * never), brightness from Settings. Playback keeps running. */

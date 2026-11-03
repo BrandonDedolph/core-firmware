@@ -138,6 +138,24 @@ uint32_t wheel_tps(void)
 }
 #endif
 
+int wheel_value_step(int raw_delta, int cap)
+{
+    if (raw_delta == 0 || cap <= 0) {
+        return 0;
+    }
+    int units = raw_delta / CW_WHEEL_SENSITIVITY;
+    if (units == 0) {                    /* sub-detent motion: one step     */
+        units = (raw_delta > 0) ? 1 : -1;
+    }
+    int sign = (units < 0) ? -1 : 1;
+    int mag  = (units < 0) ? -units : units;
+    int step = (mag <= 1) ? 1 : mag * 2;     /* 1 -> 1, 2 -> 4, 3 -> 6       */
+    if (step > cap) {
+        step = cap;
+    }
+    return sign * step;
+}
+
 /* Forget the gesture entirely. Called when the UI is taken away from the user
  * (backlight off, panel wake, screen change) so a spin that ended before the
  * screen slept can't still be "in progress" when they come back to it. */

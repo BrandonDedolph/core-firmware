@@ -87,6 +87,12 @@ int text_line_height(const text_font_t *font);
  * baseline_y = top_y + text_ascent(font)). */
 int text_ascent(const text_font_t *font);
 
+/* Cap height in pixels: rows of ink from the top of 'H' down to the baseline,
+ * measured from the atlas coverage itself. Nunito's figures are lining, so
+ * this is also the height of a digit (the track number, a run time) in every
+ * face shipped (regular 9 = 7, bold 12 = 8, bold 13 = 10). */
+int text_cap_height(const text_font_t *font);
+
 /* Pixels the font descends below the baseline (glyph ink box = ascent+descent,
  * tighter than line_height which includes inter-line leading). */
 int text_descent(const text_font_t *font);

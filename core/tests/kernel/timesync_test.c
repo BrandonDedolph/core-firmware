@@ -43,7 +43,7 @@
 
 static timesync_state_t stamped(uint32_t host, int off, uint32_t applied)
 {
-    timesync_state_t s = { host, off, applied, 0 };
+    timesync_state_t s = { host, off, applied, 0, TIMESYNC_HOST_DST_UNKNOWN };
     return s;
 }
 
@@ -332,9 +332,47 @@ static void check_resync(xfail_ctx *c)
           wallclock_resync(&w, 1, HOST_T, 0u, 0) == WALLCLOCK_RESYNC_OK);
 }
 
+/* The host's DST byte (CORECFG.DAT payload 55, timesync.h). */
+static void check_host_dst(xfail_ctx *c)
+{
+    const uint32_t E = 1789555320u;        /* 2026-09-16 10:42 UTC, in DST */
+    xpect(c, "host dst: an old stamp (byte 0) is unknown",
+          timesync_host_dst(E, 0) == TIMESYNC_HOST_DST_UNKNOWN);
+    xpect(c, "host dst: state + matching tag decodes",
+          timesync_host_dst(E, TIMESYNC_DST_BYTE(E, TIMESYNC_HOST_DST_DST))
+              == TIMESYNC_HOST_DST_DST &&
+          timesync_host_dst(E, TIMESYNC_DST_BYTE(E, TIMESYNC_HOST_DST_STD))
+              == TIMESYNC_HOST_DST_STD);
+    xpect(c, "host dst: a flag left beside ANOTHER stamp's epoch is unknown",
+          timesync_host_dst(E + 1, TIMESYNC_DST_BYTE(E, TIMESYNC_HOST_DST_DST))
+              == TIMESYNC_HOST_DST_UNKNOWN);
+    xpect(c, "host dst: state 3 (reserved) is unknown",
+          timesync_host_dst(E, TIMESYNC_DST_BYTE(E, 3)) == TIMESYNC_HOST_DST_UNKNOWN);
+
+    /* The stamp with the flag set stores wall - 1 h: the standard offset. */
+    timesync_state_t st = { E, -300, 0, 0, TIMESYNC_HOST_DST_DST };  /* CDT */
+    timesync_action_t a = timesync_decide(&st, 1, 0, 0);
+    xpect(c, "host dst: a DST stamp stores the standard offset (wall - 1 h)",
+          a == TIMESYNC_SET && timesync_apply(&st, a) &&
+          st.utc_off_min == -360 && st.applied_epoch == E);
+    timesync_state_t sd = { E, -360, 0, 0, TIMESYNC_HOST_DST_STD };  /* CST */
+    a = timesync_decide(&sd, 1, 0, 0);
+    xpect(c, "host dst: a standard-time stamp stores its offset as is",
+          timesync_apply(&sd, a) && sd.utc_off_min == -360);
+    timesync_state_t old = { E, -300, 0, 0, TIMESYNC_HOST_DST_UNKNOWN };
+    a = timesync_decide(&old, 1, 0, 0);
+    xpect(c, "host dst: an old stamp without the flag stores the wall offset as is",
+          timesync_apply(&old, a) && old.utc_off_min == -300);
+    timesync_state_t edge = { E, -720, 0, 0, TIMESYNC_HOST_DST_DST };
+    xpect(c, "host dst: the standard offset is clamped to the real-world range",
+          timesync_std_offset(&edge) == -720);
+}
+
 int main(void)
 {
     xfail_ctx c = { "timesync", 0, 0, 0 };
+
+    check_host_dst(&c);
 
     check_table(&c);
     check_sequences(&c);

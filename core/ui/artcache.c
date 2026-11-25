@@ -51,10 +51,11 @@ typedef struct {
     uint16_t px[ARTCACHE_DIM * ARTCACHE_DIM];  /* 28x28 RGB565 (valid iff LOADED) */
 } way_t;
 
-/* ~63 KB resident, versus ~198.5 KB for the old album-indexed pixel array:
- *   directory  1024 * 12                   = 12,288 B
- *   no-art + retried bitmaps               =    256 B
- *   ways       32 * (28*28*2 + 8)          = 50,432 B
+/* ~214 KB resident, versus ~1.6 MB for a pixel array covering every album
+ * the library can hold:
+ *   directory  1024 * 12                   =  12,288 B
+ *   no-art + retried bitmaps               =     256 B
+ *   ways       128 * (28*28*2 + 8)         = 201,728 B
  * Scratch adds ARTCACHE_SCRATCH_SZ (28,812 B) on top, shareable via
  * artcache_scratch() so the rest of the UI need not carry a second copy. */
 static album_t  g_album[ARTCACHE_SLOTS];
@@ -100,8 +101,9 @@ static void set_noart(int idx, int on)
     }
 }
 
-/* Find the way holding `idx`, or -1. Linear over 16 — a handful of calls per
- * frame, so a scan beats carrying a second index. */
+/* Find the way holding `idx`, or -1. Linear over the ways: a few dozen calls
+ * a pass at most, ~128 compares each, cheaper than keeping a second index
+ * in step with every claim and eviction. */
 static int find(int idx)
 {
     for (int i = 0; i < ARTCACHE_WAYS; i++) {

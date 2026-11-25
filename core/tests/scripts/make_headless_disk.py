@@ -241,6 +241,34 @@ def build_tree(vectors, stage):
     shutil.rmtree(src)
     os.makedirs(os.path.join(music, "Playlists"))   # the importer makes it
 
+    # A playlist of every entry shape the firmware's index lookup has to get
+    # right (tests/headless/playlist_index_test.c): relative, absolute, case-
+    # changed, backslashed, a file on the disk the index does not know (it
+    # must be walked), and one that is not there. ".m3u", not ".m3u8", so it
+    # is not one of the pre-allocated files the firmware may write.
+    albums = sorted(d for d in os.listdir(music)
+                    if os.path.isdir(os.path.join(music, d)) and d != "Playlists")
+    def tracks(folder):
+        return sorted(f for f in os.listdir(os.path.join(music, folder))
+                      if f.lower().endswith((".flac", ".mp3")))
+    loose = os.path.join(music, "Loose Files")
+    os.makedirs(loose)
+    shutil.copyfile(os.path.join(music, albums[2], tracks(albums[2])[0]),
+                    os.path.join(loose, "Bonus.flac"))
+    a0, a1, a2 = albums[0], albums[1], albums[2]
+    lines = [
+        "#EXTM3U",
+        f"../{a0}/{tracks(a0)[0]}",
+        f"/Music/{a1}/{tracks(a1)[1]}",
+        f"/music/{a2.lower()}/{tracks(a2)[0].upper()}",
+        f"..\\{a1}\\{tracks(a1)[0]}",
+        "../Loose Files/Bonus.flac",
+        f"../{a0}/Not There.flac",
+    ]
+    with open(os.path.join(music, "Playlists", "Mixed.m3u"), "w",
+              encoding="utf-8", newline="\r\n") as f:
+        f.write("\n".join(lines) + "\n")
+
     py = sys.executable
     for tool, extra in (("make_config.py", []),
                         ("make_log.py", ["--size", str(256 * 1024)]),

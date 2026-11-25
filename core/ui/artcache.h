@@ -50,14 +50,19 @@
                                     * whole library (LIB_MAX_ALBUMS). This is a
                                     * KEY RANGE + a 12-byte directory entry —
                                     * NOT a decoded thumbnail each. */
-#define ARTCACHE_WAYS  32          /* resident decoded covers, ~50 KB. Sized
+#define ARTCACHE_WAYS  128         /* resident decoded covers, ~197 KB. Sized
                                     * for a REVERSAL: scrolling down and back
                                     * up stays free for (WAYS - 6 visible)
                                     * rows, and every row past that is a disk
                                     * read under the wheel. At 16 ways a
                                     * 20-row round trip re-read 10 covers
-                                    * (tests/ui/artcache_test.c); at 32 it
-                                    * re-reads none. */
+                                    * (tests/ui/artcache_test.c); 32 covered
+                                    * that one, but each detent past it still
+                                    * re-read a cover and re-presented its row.
+                                    * 128 holds ~20 screens of the list, and
+                                    * leaves room for the main loop's
+                                    * look-ahead rows (chip_prefetch_rows)
+                                    * without evicting what was just seen. */
 
 /* CoreArt sidecar layout (see tools/coreart.py): "CART"(4) + u16 version +
  * u16 width + u16 height + u16 reserved, then width*height RGB565 pixels.

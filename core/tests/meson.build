@@ -1702,6 +1702,28 @@ if target == 'sim'
       dependencies: [headless_fw_dep],
       override_options: test_opts,
     )
+    playlist_index_test = executable(
+      'playlist_index_test',
+      sources: ['headless/playlist_index_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('playlist-index', playlist_index_test,
+         args: [headless_disk[0].full_path()],
+         depends: [headless_disk],
+         timeout: 120,
+         suite: 'unit')
+    drive_park_test = executable(
+      'drive_park_test',
+      sources: ['headless/drive_park_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('drive-park', drive_park_test,
+         args: [headless_disk[0].full_path()],
+         depends: [headless_disk],
+         timeout: 120,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

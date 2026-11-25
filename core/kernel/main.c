@@ -372,6 +372,7 @@ static uint32_t g_list_epoch;
  * backing out of an album returns the cursor to that album in the list rather
  * than jumping to the top. */
 static int g_br_sel, g_br_accum;      /* album list (depth 0)  */
+static int g_chip_last_sel, g_chip_dir = 1;  /* cover look-ahead's direction */
 /* This tracklist was opened straight from a Search hit, so the album list
  * underneath it was never on screen: MENU must go back to the results, not
  * reveal a list the user did not ask for. Cleared by every other push. */
@@ -3556,9 +3557,11 @@ static const char *playlists_base_dir(void)
     return g_lib_root_clus ? "Music/" PLAYLIST_DIR : PLAYLIST_DIR;
 }
 
-/* (Re)read the Playlists folder into g_playlists. Every entry into the list
- * screen re-reads it — a playlist copied over USB should show up without a
- * reboot, and the folder is one directory read. */
+/* (Re)read the Playlists folder into g_playlists. The list screen reads it
+ * once a boot (playlists_ensure): a playlist copied over USB arrives through
+ * Disk Mode, which reboots, so the folder cannot change under a running
+ * firmware except by the On-The-Go save and delete below, and both re-read
+ * it here. */
 static void playlists_load(fat32_t *fs)
 {
     g_list_epoch++;
@@ -3575,11 +3578,24 @@ static void playlists_load(fat32_t *fs)
      * disk error would otherwise leave Search with no playlist hits until the
      * next boot, while Music > Playlists — which re-reads on every entry —
      * recovered on the next look. */
-    if (n >= 0) g_playlists_scanned = 1;
+    g_playlists_scanned = (n >= 0);
     if (g_pl_sel >= g_playlists_n + 1) {      /* + the pinned On-The-Go row */
         g_pl_sel = 0;                     /* the row under the cursor is gone */
     }
     g_pl_accum = 0;
+}
+
+/* Entering the Playlists screen. The folder read used to happen on every
+ * entry, and with the drive parked that was a spin-up before the list
+ * appeared. Only a read that worked is kept (g_playlists_scanned), so a
+ * transient error is still retried on the next entry. */
+static void playlists_ensure(fat32_t *fs)
+{
+    if (!g_playlists_scanned) {
+        playlists_load(fs);
+        return;
+    }
+    g_pl_accum = 0;                       /* what the load would have reset */
 }
 
 /*
@@ -3616,6 +3632,131 @@ static int playlist_bind_row(const playlist_track_t *t)
     return pick;
 }
 
+/* Copy the path component at *p (up to the next '/' or '\\' or the end)
+ * into dst, NUL-terminated, and step *p past its separator. Returns its
+ * length, or -1 when it is empty or does not fit (cap includes the NUL). */
+static int pl_path_part(const char **p, char *dst, int cap)
+{
+    int n = 0;
+    const char *s = *p;
+    while (*s && *s != '/' && *s != '\\') {
+        if (n + 1 >= cap) return -1;
+        dst[n++] = *s++;
+    }
+    dst[n] = '\0';
+    if (*s) s++;
+    *p = s;
+    return n > 0 ? n : -1;
+}
+
+/*
+ * playlist_resolve_ex's index lookup: answer an entry from what the boot
+ * pass already bound, with no directory read. It must give exactly the
+ * walk's answer or none, so every step mirrors what fat32_resolve_path
+ * would match (name_eq_ci on the long name) and declines anything it cannot
+ * check:
+ *
+ *   - the path is exactly <lib root>/<album folder>/<file> ("Music/" only
+ *     when the library lives under Music/); deeper or shallower paths walk.
+ *   - the folder is one the index root walk mapped, matched by name_eq_ci on
+ *     its stored name. The map cuts names to NAME_MAX - 1 bytes, so a
+ *     component of that length could equal a longer name's cut: it, and
+ *     anything longer, walks.
+ *   - the file is a record BOUND at boot (file_clus set, so its dirent was
+ *     seen in that folder), whose file_hash is the leaf's, whose stored
+ *     on-disk stem equals the leaf's stem under name_eq_ci and is not cut
+ *     at NAME_MAX, and whose format matches the leaf's extension. The hash
+ *     covers the extension, which tells a ".fla" from a ".flac" of the same
+ *     stem — the same hash-only test resolve_art_cb binds by.
+ *
+ * Short (8.3) names, unindexed files and the tag-scan fallback (no folder
+ * map) all miss and are walked as before. The disk cannot change under a
+ * running firmware, so the clusters bound at boot are still the files'.
+ */
+static int g_pl_index_hits;               /* this open's answered entries */
+
+static int pl_index_lookup(void *ud, const char *path, playlist_track_t *t)
+{
+    (void)ud;
+    if (g_folder_n == 0) return 0;
+    char folder[NAME_MAX - 1], leaf[FAT32_NAME_BYTES];   /* folder: < NAME_MAX - 1 */
+    const char *p = path;
+    if (g_lib_root_clus) {
+        char root[8];
+        if (pl_path_part(&p, root, (int)sizeof root) < 0 ||
+            !name_eq_ci(root, "Music")) return 0;
+    }
+    if (pl_path_part(&p, folder, (int)sizeof folder) < 0) return 0;
+    if (pl_path_part(&p, leaf, (int)sizeof leaf) < 0 || *p) return 0;
+
+    uint32_t dir = 0;
+    uint32_t dh = name_hash(folder);
+    for (int i = g_folder_hh[dh & (FOLDER_HASH_BUCKETS - 1)]; i; i = g_folder_hn[i - 1]) {
+        if (g_folder_map[i - 1].hash == dh &&
+            name_eq_ci(g_folder_map[i - 1].name, folder)) {
+            dir = g_folder_map[i - 1].clus;
+            break;
+        }
+    }
+    if (dir == 0) return 0;
+
+    int fmt = classify_ext(leaf);
+    if (fmt < 0) return 0;
+    char stem[NAME_MAX + 1];
+    copy_display_name(stem, leaf, 1);
+    int sl = 0;
+    while (stem[sl]) sl++;
+    if (sl >= NAME_MAX) return 0;          /* the stored stem may be cut */
+    uint32_t fh = name_hash(leaf);
+    if (fh == 0) return 0;
+    for (int i = g_song_hh[fh & (SONG_HASH_BUCKETS - 1)]; i; i = g_song_hn[i - 1]) {
+        const lib_song_t *s = &g_songs[i - 1];
+        if (s->file_hash != fh || s->dir_clus != dir || s->file_clus == 0) continue;
+        if (s->fmt != (uint8_t)fmt || !name_eq_ci(s->file, stem)) continue;
+        int k = 0;
+        for (; s->file[k]; k++) t->name[k] = s->file[k];
+        t->name[k]   = '\0';
+        t->clus      = s->file_clus;
+        t->size      = s->file_size;
+        t->dir_clus  = dir;
+        t->file_hash = s->file_hash;
+        t->fmt       = (uint8_t)fmt;
+        g_pl_index_hits++;
+        return 1;
+    }
+    return 0;
+}
+
+#ifdef MMIO_MOCK
+/* Host builds only (the headless firmware): resolve the playlist again by
+ * walking every entry and compare, row by row, with what the index answered.
+ * The lookup's whole contract is "the walk's answer or none", and this is
+ * where a real index on a real FAT image checks it. Never in the hw image:
+ * it is the full walk the lookup exists to avoid, and a second 40 KB array. */
+static playlist_track_t   g_pl_check[PLAYLIST_TRACKS_MAX];
+static playlist_stats_t   g_pl_check_st;
+static void pl_index_selfcheck(fat32_t *fs, int pi, int n)
+{
+    int w = playlist_resolve(fs, &g_playlists[pi], playlists_base_dir(),
+                             g_pl_check, PLAYLIST_TRACKS_MAX,
+                             &g_pl_scratch, &g_pl_check_st);
+    uint32_t bad = (w != n) ? 1u : 0u;
+    for (int i = 0; !bad && i < n; i++) {
+        const playlist_track_t *a = &g_pl_tracks[i], *b = &g_pl_check[i];
+        int k = 0;
+        while (a->name[k] && a->name[k] == b->name[k]) k++;
+        if (a->name[k] != b->name[k] || a->clus != b->clus ||
+            a->size != b->size || a->dir_clus != b->dir_clus ||
+            a->file_hash != b->file_hash || a->fmt != b->fmt) {
+            bad = (uint32_t)i + 2u;          /* the first row that differs */
+        }
+    }
+    uart_puts("core: playlist index check mismatch ");
+    uart_put_hex32(bad);
+    uart_putc('\n');
+}
+#endif
+
 /* Open playlist `pi`: parse it, resolve every entry, bind the rows. Rows
  * that resolve to nothing are simply absent (counted in g_pl_stats); a
  * playlist file that cannot be read leaves g_pl_err set and no rows. */
@@ -3632,9 +3773,21 @@ static void playlist_open(fat32_t *fs, int pi)
     if (pi < 0 || pi >= g_playlists_n) {
         return;
     }
-    int n = playlist_resolve(fs, &g_playlists[pi], playlists_base_dir(),
-                             g_pl_tracks, PLAYLIST_TRACKS_MAX,
-                             &g_pl_scratch, &g_pl_stats);
+    g_pl_index_hits = 0;
+    int n = playlist_resolve_ex(fs, &g_playlists[pi], playlists_base_dir(),
+                                g_pl_tracks, PLAYLIST_TRACKS_MAX,
+                                &g_pl_scratch, &g_pl_stats,
+                                pl_index_lookup, 0);
+    /* Into the log: how much of the open the index answered. The rest were
+     * directory walks, which is what to look at if a playlist opens slowly. */
+    uart_puts("core: playlist rows ");
+    uart_put_hex32((uint32_t)n);
+    uart_puts(" index ");
+    uart_put_hex32((uint32_t)g_pl_index_hits);
+    uart_putc('\n');
+#ifdef MMIO_MOCK
+    if (n >= 0) pl_index_selfcheck(fs, pi, n);
+#endif
     g_pl_err      = (n < 0) ? n : 0;
     g_pl_tracks_n = (n < 0) ? 0 : n;
     for (int i = 0; i < g_pl_tracks_n; i++) {
@@ -5484,6 +5637,9 @@ static int otg_save_to_slot(fat32_t *fs)
     uart_putc('\n');
     if (rc != 0) {
         otg_flash(0, "Could not save", 0);
+        /* As a failed delete: the slot may be half-written, so read the
+         * Playlists folder afresh on the next entry. */
+        g_playlists_scanned = 0;
         return 1;                        /* the screen changed: repaint */
     }
 
@@ -5566,6 +5722,9 @@ static int otg_delete_slot(fat32_t *fs)
     uart_putc('\n');
     if (rc != 0) {
         otg_flash(0, "Could not delete", 0);
+        /* The rewrite may have stopped partway: read the folder afresh on
+         * the next entry rather than trust the list from before. */
+        g_playlists_scanned = 0;
         return 1;
     }
     otg_flash(-1, "Deleted", 0);
@@ -5872,6 +6031,33 @@ static uint32_t g_ui_art_held;         /* passes that refused to wake a parked p
 
 static uint32_t present_gap_us(void);  /* defined just below, with the throttle */
 
+/*
+ * Was each park worth it? A park followed by a read within DISK_PARK_QUICK_US
+ * paid a spin-up (power, and a wait if it was a menu) to save a few seconds
+ * of spinning: the idle timeout and the browsing hold are tuned by how often
+ * that happens in real use. Counted separately for parks made while playing
+ * (the player's, between bursts) and while not (the idle timeout, the hold
+ * switch), cumulative for the boot, in the 5 s `core: ui` line.
+ */
+#define DISK_PARK_QUICK_US 15000000u
+static uint32_t g_park_n[2], g_park_quick[2];   /* [0] not playing, [1] playing */
+static uint32_t g_park_at_us;
+static int      g_park_was, g_park_kind;
+static void disk_park_track(int playing)
+{
+    int parked = ata_is_parked();
+    if (parked == g_park_was) return;
+    uint32_t now = mmio_read32(USEC_TIMER_ADDR);
+    if (parked) {
+        g_park_kind  = playing ? 1 : 0;
+        g_park_at_us = now;
+        g_park_n[g_park_kind]++;
+    } else if ((uint32_t)(now - g_park_at_us) < DISK_PARK_QUICK_US) {
+        g_park_quick[g_park_kind]++;
+    }
+    g_park_was = parked;
+}
+
 static void ui_stats_emit(void)
 {
     if (g_ui_full + g_ui_partial == 0 && g_ui_art_reads == 0 && g_ui_art_held == 0) {
@@ -5889,6 +6075,10 @@ static void ui_stats_emit(void)
     uart_puts(" max_us ");              uart_dec((int)g_ui_art_max_us);
     uart_puts(" held ");                uart_dec((int)g_ui_art_held);
     uart_puts(" parked ");              uart_dec(ata_is_parked());
+    uart_puts(" parks ");               uart_dec((int)g_park_n[0]);
+    uart_puts(" quick ");               uart_dec((int)g_park_quick[0]);
+    uart_puts(" parks_play ");          uart_dec((int)g_park_n[1]);
+    uart_puts(" quick ");               uart_dec((int)g_park_quick[1]);
     /* BCM health, cumulative: handshakes that ran out of budget (a post-wake
      * absorb that never retired lands here) and presents refused because the
      * panel was slept. A healthy device reads 0 0 forever. */
@@ -6206,6 +6396,25 @@ static int list_repaint_partial(void)
  * detent scroll (~300 ms apart) never trips a spin-up mid-gesture. */
 #define CHIP_WHEEL_SETTLE_US   150000u
 #define CHIP_SPINUP_QUIET_US   500000u
+/* Rows past the window the cover pump also loads, once every visible row is
+ * resident: a screen ahead in the direction of travel and a screen behind.
+ * Without them every newly revealed row waited for its read and then
+ * re-presented its band when the cover landed: two paints per detent. */
+#define CHIP_AHEAD_ROWS        LIST_ROWS2
+
+/* The drive's two timeouts after the last input, tuned from the park log
+ * (`parks`/`quick` in the core: ui line): nothing playing, the idle spin-down;
+ * playing, how long the player is held off parking between bursts. */
+#define DISK_IDLE_US           10000000u
+#define DISK_BROWSE_HOLD_US     5000000u
+/* The last UI disk read (a cover batch), and how long after it the drive is
+ * still kept up: see the spin-down block in run_ui. */
+#define UI_DISK_GRACE_US       5000000u
+static uint32_t g_ui_disk_us;
+/* A refused STANDBY, and when: retried at most this often. */
+#define DISK_STANDBY_RETRY_US  10000000u
+static int      g_standby_failed;
+static uint32_t g_standby_fail_us;
 
 /* ---------------------------------------------------------------------------
  * The A-Z locator: which letter a row is under, on whichever list is up
@@ -9205,7 +9414,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         g_set_editing = 0;
                         scr_push(SCR_SETTINGS);
                     } else if (g_main_sel == MM_PLAYLISTS) {
-                        playlists_load(fs);            /* same list as Music -> */
+                        playlists_ensure(fs);          /* same list as Music -> */
                         scr_push(SCR_PLAYLISTS);       /* Playlists; MENU pops here */
                     }
                     /* other items are greyed: SELECT does nothing yet */
@@ -9232,7 +9441,8 @@ _Noreturn static void run_ui(fat32_t *fs)
                     } else if (g_music_sel == MU_ARTISTS) {
                         library_ensure(fs);            /* index -> g_albums      */
                         g_artist_filter[0] = '\0';
-                        build_artists();
+                        /* No rebuild: library_ensure built the list when the
+                         * index loaded, and nothing changes g_albums after. */
                         g_artist_sel = g_artist_accum = 0;
                         scr_push(SCR_ARTISTS);
                     } else if (g_music_sel == MU_SONGS) {
@@ -9251,17 +9461,14 @@ _Noreturn static void run_ui(fat32_t *fs)
                         g_genre_sel = g_genre_accum = 0;
                         scr_push(SCR_GENRES);
                     } else if (g_music_sel == MU_PLAYLISTS) {
-                        playlists_load(fs);            /* Music/Playlists/NAME.m3u8 */
+                        playlists_ensure(fs);          /* Music/Playlists/NAME.m3u8 */
                         scr_push(SCR_PLAYLISTS);
                     } else if (g_music_sel == MU_SEARCH) {
                         library_ensure(fs);
-                        /* Artists are derived, not loaded: Search wants them
-                         * without making the user open the Artists list
-                         * first. Both this and the playlist folder read are
-                         * once a session — the disk cannot change under a
-                         * running firmware — so only the FIRST Search entry
-                         * can spin a parked drive. */
-                        if (g_artists_n == 0)     build_artists();
+                        /* Artists are built by library_ensure. The playlist
+                         * folder read is once a session — the disk cannot
+                         * change under a running firmware — so only the
+                         * first entry here or into Playlists reads it. */
                         if (!g_playlists_scanned) playlists_load(fs);
                         /* The query survives leaving the screen, so re-scan
                          * on the way back in: the hits then always name rows
@@ -9960,10 +10167,47 @@ _Noreturn static void run_ui(fat32_t *fs)
          * parked drive; at most one block per pass. */
         evlog_commit(CFG_COMMIT_IDLE);
 
-        const uint32_t disk_idle_us = 20000000u;   /* 20 s: saves ~100 mA, no thrash */
-        if (!player_playing() && !ata_is_parked() && idle > disk_idle_us) {
-            ata_standby();
+        /* 10 s: long enough that reading a list and picking a song does not
+         * usually land on a spin-up (the next read after browsing is most
+         * often Play), short enough that a put-down device is not spinning
+         * for nothing. The park log below says whether that holds. */
+        /* The hold switch is the user saying they are done navigating: park
+         * now rather than after the idle timeout, unless the player is still
+         * reading (a refill burst, or a paused buffer not yet stocked). */
+        /* A UI read (a cover batch) in the last few seconds means more may
+         * be coming: parking between batches spun the drive up and down
+         * once per batch. Neither park fires until the reads have stopped. */
+        uint32_t now_d = mmio_read32(USEC_TIMER_ADDR);
+        int ui_reading = (uint32_t)(now_d - g_ui_disk_us) < UI_DISK_GRACE_US;
+        int lock_park = g_locked && !player_disk_busy();
+        /* A STANDBY the drive refused is not re-issued every pass: each try
+         * can block for the ready wait. Once per DISK_STANDBY_RETRY_US. */
+        int may_standby = !g_standby_failed ||
+                          (uint32_t)(now_d - g_standby_fail_us) >= DISK_STANDBY_RETRY_US;
+        if (!player_playing() && !ata_is_parked() && may_standby &&
+            ((idle > DISK_IDLE_US && !ui_reading) || lock_park)) {
+            if (lock_park) {
+                /* The idle path waits out a 3 s debounce and never wakes a
+                 * parked drive, so a setting changed just before the lock
+                 * would sit pending until the next spin-up. Write it while
+                 * the platters still turn. */
+                settings_commit(CFG_COMMIT_SOFT);
+                otg_commit(CFG_COMMIT_SOFT);
+            }
+            g_standby_failed  = (ata_standby() != 0);
+            g_standby_fail_us = now_d;
         }
+        /* While playing, a shorter hold: the player parks between refill
+         * bursts, and without this a menu opened mid-song read from a
+         * parked drive and froze for the spin-up. 5 s covers the gaps
+         * between presses of someone browsing; once they have been quiet
+         * that long the player parks as it always has. Shorter than the
+         * idle spin-down above because the music is what is in use now,
+         * and every second held is the drive's ~100 mA on top of it. */
+        /* Locked: nobody is browsing, so no hold (the player parks between
+         * bursts as it always has, and its reads are never held back). */
+        player_hold_drive(!g_locked && (idle <= DISK_BROWSE_HOLD_US || ui_reading));
+        disk_park_track(player_playing());
 
         /*
          * SELECT press-length arbitration on a LIST ROW: the tap acts on
@@ -10451,7 +10695,12 @@ _Noreturn static void run_ui(fat32_t *fs)
             uint32_t since_wheel = nowc - wheel_last_us();
             int moving = since_wheel < CHIP_WHEEL_SETTLE_US;
             int budget;
-            if (ata_is_parked() && since_wheel < CHIP_SPINUP_QUIET_US) {
+            if (ata_is_parked() && g_locked) {
+                /* Locked: the user has said they are done with the menus,
+                 * and the lock parks the drive. Waking it for a cover here
+                 * was a spin-up and a park per batch. */
+                budget = 0;
+            } else if (ata_is_parked() && since_wheel < CHIP_SPINUP_QUIET_US) {
                 budget = 0;
                 g_ui_art_held++;
             } else if (moving) {
@@ -10468,8 +10717,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * through g_lp.rows, so a landed cover costs one row band, not a
                  * cleared panel and a full-frame push (see list_repaint_partial). */
                 const uint16_t *before[LIST_ROWS2];
-                int want[LIST_ROWS2];
-                int vtop = ui_scroll_window(g_br_sel, albumlist_count(), LIST_ROWS2);
+                int want[LIST_ROWS2 + 2 * CHIP_AHEAD_ROWS];
+                int nlist = albumlist_count();
+                int vtop = ui_scroll_window(g_br_sel, nlist, LIST_ROWS2);
                 /* PEEK, not get: this loop is only observing. artcache_get
                  * claims a way and re-stamps the LRU, so using it here (12
                  * times a pass, always in row order) is what pinned the top
@@ -10482,13 +10732,35 @@ _Noreturn static void run_ui(fat32_t *fs)
                     want[r]   = albumlist_album_at(vtop + r);
                     before[r] = (want[r] >= 0) ? artcache_peek(want[r]) : 0;
                 }
+                /* Then the look-ahead, after the window so it never delays a
+                 * visible chip: a screen in the direction the selection last
+                 * moved, then a screen the other way. Only from a drive that
+                 * is already turning: rows nobody is looking at are not worth
+                 * a spin-up (or, idle, the battery a spin-up costs). */
+                int nwant = LIST_ROWS2;
+                if (g_br_sel != g_chip_last_sel) {
+                    g_chip_dir = (g_br_sel > g_chip_last_sel) ? 1 : -1;
+                    g_chip_last_sel = g_br_sel;
+                }
+                if (!ata_is_parked()) {
+                    for (int pass = 0; pass < 2; pass++) {
+                        int dir = pass == 0 ? g_chip_dir : -g_chip_dir;
+                        for (int k = 0; k < CHIP_AHEAD_ROWS; k++) {
+                            int row = dir > 0 ? vtop + LIST_ROWS2 + k
+                                              : vtop - 1 - k;
+                            if (row < 0 || row >= nlist) break;
+                            want[nwant++] = albumlist_album_at(row);
+                        }
+                    }
+                }
                 uint32_t t_art = mmio_read32(USEC_TIMER_ADDR);
                 int loaded = 0;
-                while (loaded < budget && artcache_pump_for(fs, want, LIST_ROWS2)) {
+                while (loaded < budget && artcache_pump_for(fs, want, nwant)) {
                     loaded++;
                 }
                 t_art = mmio_read32(USEC_TIMER_ADDR) - t_art;
                 g_ui_art_reads += (uint32_t)loaded;
+                if (loaded) g_ui_disk_us = mmio_read32(USEC_TIMER_ADDR);
                 if (loaded && t_art > g_ui_art_max_us) g_ui_art_max_us = t_art;
                 for (int r = 0; r < LIST_ROWS2; r++) {
                     const uint16_t *now_px = (want[r] >= 0) ? artcache_peek(want[r]) : 0;

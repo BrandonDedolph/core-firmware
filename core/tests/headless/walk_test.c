@@ -672,11 +672,19 @@ static _Noreturn void session_reboot(const char *disk, int paused_at_s)
     CHECK("reboot: ...and offered on the main menu", on_screen("Now Playing"));
     CHECK("reboot: it comes up paused", !hl_stats().audio_running);
 
-    /* Leave it until the drive parks, so PLAY has to spin it up. */
-    size_t ev_park = hl_events_mark();
+    /* Leave it until the drive parks, so PLAY has to spin it up. With the
+     * 10 s idle timeout that can already have happened inside hl_boot's
+     * 12 s, so the park is looked for from the start of the boot, and the
+     * spin-up below from the LAST park on. */
     for (int i = 0; i < 60 && !hl_stats().ata_parked; i++) hl_run_ms(1000);
+    long last_park = -1;
+    for (long k = ev_find(0, HL_EV_ATA_STANDBY, 0); k >= 0;
+         k = ev_find((size_t)k + 1, HL_EV_ATA_STANDBY, 0)) {
+        last_park = k;
+    }
     CHECK("reboot: the drive parks while nothing plays", hl_stats().ata_parked &&
-          ev_find(ev_park, HL_EV_ATA_STANDBY, 0) >= 0);
+          last_park >= 0);
+    size_t ev_park = last_park >= 0 ? (size_t)last_park : hl_events_mark();
 
     CHECK("reboot: select Now Playing", select_row("Now Playing"));
     tap(HL_BTN_SELECT);

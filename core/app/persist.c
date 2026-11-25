@@ -15,7 +15,7 @@
 #include "../kernel/otg_store.h"
 #include "state.h"
 #include "util.h"
-#include "main_internal.h"
+#include "otg.h"
 #include "persist.h"
 
 /* ---------------------------------------------------------------------------

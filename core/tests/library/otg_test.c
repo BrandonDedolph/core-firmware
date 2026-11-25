@@ -207,7 +207,7 @@ static void test_crc(void)
 
 int main(void)
 {
-    /* The one instance lives in kernel/main.c's .bss; keep its size honest. */
+    /* The one instance lives in app/otg.c's .bss; keep its size honest. */
     printf("sizeof(otg_list_t) = %u\n", (unsigned)sizeof(otg_list_t));
     check("otg_list_t is 4 + 8 * OTG_MAX bytes",
           sizeof(otg_list_t) == 4u + 8u * OTG_MAX);

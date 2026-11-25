@@ -697,13 +697,14 @@ int fat32_readdir(fat32_t *fs, uint32_t dir_clus, fat32_dir_cb cb, void *ud)
 
     /*
      * The directory sector is read into this LOCAL, not into a shared static
-     * scratch buffer. Reentrancy: the entry pointer below indexes into this
-     * buffer across the cb() call, and cb() is arbitrary caller code that
-     * routinely does disk I/O through this same API (resolving album art,
-     * opening the index, descending a level). Parsing out of the shared
-     * buffer — which is what this did — meant any such callback clobbered the
-     * sector mid-loop and the rest of that directory parsed as garbage; it
-     * was safe only by accident of who happened to call what. The cost of
+     * scratch buffer. Reentrancy, defensively: the entry pointer below
+     * indexes into this buffer across the cb() call, and cb() is arbitrary
+     * caller code. None of the shipping callbacks does disk I/O today, but
+     * one that did through this same API (resolving album art, opening the
+     * index, descending a level) would clobber a shared buffer — which is
+     * what this used to parse out of — mid-loop, and the rest of that
+     * directory would parse as garbage; it was safe only by accident of who
+     * happened to call what. The cost of
      * making it structurally safe is one FS-sector of stack (<= 4 KB) per
      * readdir frame out of ~89 KB, and the shared scratch buffer goes away.
      */

@@ -3,6 +3,7 @@
 """check_frames.py — per-function stack-frame gate for the linked hw image.
 
     check_frames.py CORE_ELF CORE_MAP [STAMP]
+    check_frames.py --no-lto CORE_ELF CORE_MAP [STAMP]
 
 The hw image is linked with -fstack-usage (core/meson.build, core_elf
 link_args). Under b_lto the frames only exist at link time, so GCC writes one
@@ -15,7 +16,12 @@ Every function's frame must be <= DEFAULT_LIMIT unless it is listed in
 ALLOWANCES with its own cap. Prints the frames over 512 B either way, and FAILS
 on a frame over its limit, on a dynamic/bounded frame (alloca or a VLA: the
 number is then a lower bound, not a size), and on an allowance that no longer
-matches any function (a stale entry would silently exempt a future one).
+matches any function (a stale entry would silently exempt a future one) or
+whose function's frame has fallen below half its cap (tighten it).
+
+--no-lto (meson passes it when b_lto is off): the frames are then written at
+compile time, not by this link, so this gate has nothing to read. It says so
+and passes; only the -Wframe-larger-than ceiling on c_args applies then.
 
 WHY THESE NUMBERS (boot/linker.ld):
 
@@ -28,8 +34,9 @@ WHY THESE NUMBERS (boot/linker.ld):
   measured from objdump bl edges + these frames) is 12 frames and ~7.4 KB,
   ~5.5 KB of it the one fat32_readdir allowance. At 1 KB per ordinary frame
   even a chain twice as deep (24 frames, 24 KB) plus the allowances below —
-  fat32_readdir nested three directory levels deep through its callback
-  (16.6 KB) and a FLAC open (4.3 KB) — stays under ~45 KB, half the stack. The
+  in a HYPOTHETICAL worst case fat32_readdir nested three directory levels
+  deep through its callback (16.6 KB; no shipping callback re-enters it
+  today) and a FLAC open (4.3 KB) — stays under ~45 KB, half the stack. The
   limit is what keeps that arithmetic true: a new multi-KB local array fails
   here, by name, instead of eating the margin unseen. The largest ordinary
   frame today is pl_index_lookup at 952 B (fixed name buffers).
@@ -37,6 +44,13 @@ WHY THESE NUMBERS (boot/linker.ld):
   ALLOWANCES are frames that are big on purpose, each capped a little above
   its measured size (GCC 14.2) so codegen noise or the rolling toolchain does
   not trip it but a second buffer does. Raise one only with a note saying why.
+
+  NOTE the guard band is only 4 KB. The 6144 B ceiling (core/meson.build) and
+  the two big allowed frames (5536 B, 4344 B) are all larger than it, so near
+  the stack floor one such frame can jump the band entirely: the overflow
+  lands below it, the band's paint stays intact, and stack_guard_breached()
+  (kernel/panic.c; linker.ld calls it stack_guard_ok) does not see it. The
+  margin above, not the band, is what protects against those.
 
 The IRQ stack is a separate 1 KB (banked SP_irq). Its users are the crt0 stub
 (24 B), irq_dispatch (timer + DMA ISRs inlined) and the DMA refill's
@@ -51,10 +65,10 @@ DEFAULT_LIMIT = 1024
 
 ALLOWANCES = {
     # fs/fat32.c: one FS sector (up to 4 KB) read into a LOCAL, not a shared
-    # static, because cb() does disk I/O through the same API mid-walk (album
-    # art, the index, descending a level) and must not clobber the sector the
-    # loop is still parsing. Re-entered by design, so it cannot be static.
-    # Measured 5536 B.
+    # static. Defensive: the entry pointer into it is live across cb(), so a
+    # callback that did disk I/O through the same API (none of the shipping
+    # ones does today), or a future one, would clobber a shared static
+    # mid-walk. Kept on the stack so that stays safe. Measured 5536 B.
     "fat32_readdir": 6144,
     # codecs/dr_flac (vendored, not ours to restructure): its drflac_init_info
     # local holds a whole bitstream reader, whose L2 read cache is
@@ -77,10 +91,23 @@ def base_name(name):
 
 
 def main():
-    if len(sys.argv) not in (3, 4):
-        sys.exit("usage: check_frames.py CORE_ELF CORE_MAP [STAMP]")
-    elf, map_path = sys.argv[1], sys.argv[2]
-    stamp = sys.argv[3] if len(sys.argv) == 4 else None
+    args = sys.argv[1:]
+    no_lto = bool(args) and args[0] == "--no-lto"
+    if no_lto:
+        args = args[1:]
+    if len(args) not in (2, 3):
+        sys.exit("usage: check_frames.py [--no-lto] CORE_ELF CORE_MAP [STAMP]")
+    elf, map_path = args[0], args[1]
+    stamp = args[2] if len(args) == 3 else None
+
+    if no_lto:
+        text = ("check_frames: SKIPPED, b_lto is off (frames come from the "
+                "compile step; only the -Wframe-larger-than ceiling applies)\n")
+        sys.stdout.write(text)
+        if stamp:
+            with open(stamp, "w") as f:
+                f.write(text)
+        return
 
     with open(map_path) as f:
         parts = sorted({int(n) for n in
@@ -103,13 +130,13 @@ def main():
                              f"{os.path.basename(path)}:{ln}"))
 
     fails = []
-    seen = set()
+    seen = {}
     report = []
     for nbytes, qual, name, where in sorted(rows, reverse=True):
         base = base_name(name)
         limit = ALLOWANCES.get(base, DEFAULT_LIMIT)
         if base in ALLOWANCES:
-            seen.add(base)
+            seen[base] = max(seen.get(base, 0), nbytes)
         tag = ""
         if nbytes > limit:
             tag = f"  FAIL: over {limit} B"
@@ -120,8 +147,12 @@ def main():
         if nbytes > REPORT_OVER or tag:
             note = " (allowance)" if base in ALLOWANCES else ""
             report.append(f"  {nbytes:6d} / {limit:5d}  {name}  ({where}){note}{tag}")
-    for base in sorted(set(ALLOWANCES) - seen):
+    for base in sorted(set(ALLOWANCES) - set(seen)):
         fails.append(f"allowance for {base} matches no function: remove it")
+    for base, nbytes in sorted(seen.items()):
+        if nbytes * 2 < ALLOWANCES[base]:
+            fails.append(f"allowance for {base} is {ALLOWANCES[base]} B but its "
+                         f"frame is {nbytes} B: tighten it")
 
     out = [f"stack frames over {REPORT_OVER} B (limit {DEFAULT_LIMIT} B unless "
            f"allowed; {len(rows)} functions, {len(parts)} LTO partitions):"]

@@ -123,7 +123,11 @@ if target == 'hw'
   #    so on c_args alone it never fired. meson's -Werror reaches the LTO link
   #    too, so an over-ceiling frame fails the build with its file:line.
   #    6144 is just above the largest allowed frame (fat32_readdir, 5536 B).
-  #    It stays on c_args for a -Db_lto=false build.
+  #    It stays on c_args too: in a -Db_lto=false build that is where it
+  #    fires, and it is then the only frame check (check_frames.py skips,
+  #    saying so, because there are no link-time frames to read). Such a
+  #    build links, but vendored dr_flac warns (not -Werror there) about
+  #    8-16 KB frames in functions the LTO image never contains.
   #  - tests/scripts/check_frames.py (post-link, below), the real per-frame
   #    limit: 1024 B, with a short per-function allowance list for the frames
   #    that are big on purpose. GCC cannot exempt one function from this
@@ -639,6 +643,7 @@ if target == 'hw'
     command: [
       find_program('python3'),
       meson.current_source_dir() / 'tests' / 'scripts' / 'check_frames.py',
+    ] + (get_option('b_lto') ? [] : ['--no-lto']) + [
       '@INPUT@', meson.current_build_dir() / 'core.map', '@OUTPUT@',
     ],
     depend_files: files('tests/scripts/check_frames.py'),

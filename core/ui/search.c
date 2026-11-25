@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
  * core/ui/search.c — Music > Search: the character ring, the scan, the rows.
- * See search.h for why the scan is a plain linear walk and why main.c hands
+ * See search.h for why the scan is a plain linear walk and why app/search_glue.c hands
  * this file the library through two function pointers instead of headers.
  */
 

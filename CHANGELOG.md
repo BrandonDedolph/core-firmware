@@ -5,6 +5,32 @@ the boot screen and Settings → About show the one the device runs.
 The desktop app and the `core` CLI have their own repository, releases and changelog:
 [core-desktop-app/CHANGELOG.md](https://github.com/BrandonDedolph/core-desktop-app/blob/main/CHANGELOG.md).
 
+## v0.4.0 — 2026-11-25
+
+Since v0.3.0. Menus stop waiting on the disk: no screen looks or behaves differently, but opening
+things mid-song no longer freezes, playlists open from memory, and the album list scrolls without
+covers popping in. The drive also spins less when you are not using it.
+
+- **No more freeze opening a menu mid-song.** While a song played, the drive was parked between
+  refills, so opening an album, the playlists or a cover often waited out a 1–3 s spin-up with the
+  screen frozen. It now stays up for 5 s after your last press or turn of the wheel, and parks
+  again once you stop.
+- **The drive rests sooner, and at once when you lock.** With nothing playing it parks 10 s after
+  your last input instead of 20. Flipping the Hold switch parks it straight away, unless the player
+  is still reading ahead for the song; locking while a song plays never interrupts it.
+- **Playlists open from memory.** Every track the library index knows is found without searching
+  the disk, which for a playlist mixing albums was over a thousand reads. Tracks the index does not
+  know are still looked up on the disk as before.
+- **Covers are there before the row is.** The album list loads covers a screen ahead in the
+  direction you scroll and keeps 128 of them (was 32), so a new row no longer draws first and then
+  again when its cover lands.
+- **Artists and Playlists open without re-reading.** The artist list is built once when the
+  library loads, and the Playlists folder is read once a boot (a playlist added over USB arrives
+  through Disk Mode, which restarts the iPod; saving or deleting an On-The-Go playlist re-reads it).
+- **The log says how the drive is doing.** `CORELOG.BIN` now records how often a park was followed
+  by a read within 15 s, and how much of each playlist came from the index, so the timeouts can be
+  tuned from real use.
+
 ## v0.3.0 — 2026-11-03
 
 Since v0.2.2. The settings pages behave like the volume wheel, the clock knows about daylight

@@ -28,6 +28,9 @@ extern int g_sel_pending;                  /* until nowplaying moves */
 int np_scrubbing(void);                    /* until nowplaying moves */
 void scrub_exit(void);                     /* until nowplaying moves */
 void settings_leave(void);                 /* until settings_glue moves */
+void resume_capture(void);                 /* until resume moves */
+int enter_standby(void);                   /* until power moves */
+extern uint32_t g_present_cost_us;         /* until paint moves */
 
 extern int      g_song_sel, g_song_accum;   /* until lists moves */
 

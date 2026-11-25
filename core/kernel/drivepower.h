@@ -61,7 +61,7 @@
  * player: it also drives the spin-up probe and the parked refill gate.)
  *
  * THE OTHER PARK SITES, which stay where they are:
- *   - battery_refresh (kernel/main.c), the DISKSAFE shutdown: parks unless
+ *   - battery_refresh (app/battery_ui.c), the DISKSAFE shutdown: parks unless
  *     the player is mid-stream (active and not paused), after the last
  *     commits.
  *   - enter_standby (kernel/main.c): STANDBY before the PMU rail cut.

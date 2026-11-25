@@ -110,7 +110,7 @@ int battery_percent_charging(int mv, int charge_ma);
  * a median and not an EMA), and the shutoff line must additionally hold for
  * BATTERY_SHUTOFF_CONFIRM consecutive evaluations.
  *
- * The caller (kernel/main.c battery_refresh) samples every 5 s and feeds each
+ * The caller (app/battery_ui.c battery_refresh) samples every 5 s and feeds each
  * result here; this module decides, the caller acts on the returned EVENT.
  * Events are EDGES, so an action fires exactly once per crossing.
  * ------------------------------------------------------------------------- */

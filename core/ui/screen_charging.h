@@ -10,7 +10,7 @@
  *
  * Pure rendering: it draws the whole 320x240 panel into the console
  * framebuffer and returns. No hardware reads and no present — the caller
- * samples pct/charging/external (kernel/main.c battery_refresh) and hands
+ * samples pct/charging/external (app/battery_ui.c battery_refresh) and hands
  * the framebuffer to lcd_present_fb(). Freestanding, integer-only, no
  * libc/libm/malloc — same idioms as the rest of core/ui.
  */

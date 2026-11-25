@@ -82,7 +82,7 @@ void screen_battery_render(battwarn_kind_t kind)
  * The toast
  * ------------------------------------------------------------------------- */
 
-/* The status strip's 22x12 battery (kernel/main.c draw_battery), redrawn here
+/* The status strip's 22x12 battery (app/battery_ui.c draw_battery), redrawn here
  * at a fixed near-empty fill. A private copy rather than a shared drawer: the
  * original is a static in main.c, which this file cannot reach and must not
  * pull in, and six fill_rects are cheaper to keep honest than an export.

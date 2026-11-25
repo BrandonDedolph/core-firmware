@@ -1785,6 +1785,22 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 180,
          suite: 'unit')
+    # search-walk: every kind of Search hit (artist, album, song, playlist)
+    # opened with SELECT and played with PLAY — the screen and row it lands
+    # on, MENU back to the results, the track and queue position that start.
+    # The search_open_hit / search_play_hit glue the search unit test (which
+    # links ui/search.c alone) never runs (headless/search_walk_test.c).
+    search_walk_test = executable(
+      'search_walk_test',
+      sources: ['headless/search_walk_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('search-walk', search_walk_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
     # settings-leave: leaving the Settings root commits the pending change
     # (settings_leave, CFG_COMMIT_SOFT) — a power cut well inside the 3 s
     # debounce keeps it — and, playing with the drive parked, defers it

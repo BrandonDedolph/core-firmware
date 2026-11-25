@@ -7,11 +7,11 @@
 
 #include "hw/uart.h"
 #include "../ui/wheel.h"
-#include "main_internal.h"
 #include "settings_glue.h"
 #include "albums.h"
 #include "nav.h"
 #include "nowplaying.h"
+#include "lists.h"
 
 /* Bumped whenever a list's CONTENT is rebuilt or the screen stack moves. The
  * partial-repaint path (list_repaint_partial) compares it, so it can never

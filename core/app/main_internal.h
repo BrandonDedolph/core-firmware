@@ -21,12 +21,9 @@
 
 #include "util.h"
 
-extern int g_menu_accum;                   /* until lists moves */
 void resume_capture(void);                 /* until resume moves */
 int enter_standby(void);                   /* until power moves */
 extern uint32_t g_present_cost_us;         /* until paint moves */
-
-extern int      g_song_sel, g_song_accum;   /* until lists moves */
 
 extern ui_window_t g_pl_confirm;            /* until actions moves */
 

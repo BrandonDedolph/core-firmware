@@ -20,8 +20,8 @@
 #include "../library/sort.h"
 #include "bootscreen.h"
 #include "nav.h"
-#include "main_internal.h"
 #include "otg.h"
+#include "lists.h"
 #include "library.h"
 
 lib_album_t g_albums[LIB_MAX_ALBUMS];

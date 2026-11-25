@@ -10,6 +10,7 @@
 #include "main_internal.h"
 #include "albums.h"
 #include "nav.h"
+#include "nowplaying.h"
 
 /* Bumped whenever a list's CONTENT is rebuilt or the screen stack moves. The
  * partial-repaint path (list_repaint_partial) compares it, so it can never

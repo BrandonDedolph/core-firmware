@@ -109,7 +109,7 @@
 
 /* ---------- Now Playing partial-present rects ------------------------
  * The two regions of Now Playing that repaint on their own, without the
- * art/metadata above them (kernel/main.c nowplaying_render):
+ * art/metadata above them (app/nowplaying.c nowplaying_render):
  *
  *   - the TRANSPORT band: elapsed / remaining times + progress bar, redrawn
  *     by the clock tick and by every scrubber detent. Full-width, so the

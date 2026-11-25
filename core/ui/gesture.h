@@ -45,7 +45,7 @@
 /*
  * Press-length thresholds.
  *
- * SELECT's 450 ms (SEL_HOLD_US in kernel/main.c) is the neighbour the seek
+ * SELECT's 450 ms (SEL_HOLD_US in app/nowplaying.h) is the neighbour the seek
  * threshold was chosen against: a hold long enough to be deliberate, short
  * enough that the seek confirms itself under the thumb. MENU's is longer
  * because its tap already fired at the down-edge — a hesitant back-press must

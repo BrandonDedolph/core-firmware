@@ -24,9 +24,6 @@
 
 extern otg_list_t g_otg;                  /* until otg moves */
 extern int g_menu_accum;                   /* until lists moves */
-extern int g_sel_pending;                  /* until nowplaying moves */
-int np_scrubbing(void);                    /* until nowplaying moves */
-void scrub_exit(void);                     /* until nowplaying moves */
 void settings_leave(void);                 /* until settings_glue moves */
 void resume_capture(void);                 /* until resume moves */
 int enter_standby(void);                   /* until power moves */

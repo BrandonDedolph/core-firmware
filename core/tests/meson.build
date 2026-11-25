@@ -1400,6 +1400,20 @@ if target == 'sim'
   )
   test('idlesleep', idlesleep_test, suite: 'unit')
 
+  # drivepower: when the drive may be parked and when it must be held up
+  # (core/kernel/drivepower.c) — run_ui's idle spin-down, lock park, refused-
+  # STANDBY retry and browsing hold, the player's burst park, and the park
+  # accounting in the `core: ui` line. Pure, so the host runs the SAME source
+  # the ARM build links, every threshold to the microsecond and across the
+  # 32-bit timer wrap.
+  drivepower_test = executable(
+    'drivepower_test',
+    sources: ['kernel/drivepower_test.c', '../kernel/drivepower.c'],
+    include_directories: include_directories('../kernel', '.'),
+    override_options: test_opts,
+  )
+  test('drivepower', drivepower_test, suite: 'unit')
+
   # timesync: what the firmware does at boot with the clock stamp the host
   # leaves in CORECFG.DAT (core/kernel/timesync.c), and the software clock that
   # carries the time between the rare RTC reads (core/kernel/wallclock.c) —
@@ -1450,6 +1464,7 @@ if target == 'sim'
               'player/player_test_stubs.c',
               'hw_mmio/mmio_mock.c',
               '../player/player.c',
+              '../kernel/drivepower.c',
               '../kernel/pcm_ring.c'],
     include_directories: include_directories(
       '../player', '../hal', '../hal/hw', '../fs', '../kernel',
@@ -1471,6 +1486,7 @@ if target == 'sim'
               'player/player_test_stubs.c',
               'hw_mmio/mmio_mock.c',
               '../player/player.c',
+              '../kernel/drivepower.c',
               '../kernel/pcm_ring.c'],
     include_directories: include_directories(
       '../player', '../hal', '../hal/hw', '../fs', '../kernel',
@@ -1492,6 +1508,7 @@ if target == 'sim'
               'player/player_test_stubs.c',
               'hw_mmio/mmio_mock.c',
               '../player/player.c',
+              '../kernel/drivepower.c',
               '../kernel/pcm_ring.c'],
     include_directories: include_directories(
       '../player', '../hal', '../hal/hw', '../fs', '../kernel',
@@ -1514,6 +1531,7 @@ if target == 'sim'
               'player/player_test_stubs.c',
               'hw_mmio/mmio_mock.c',
               '../player/player.c',
+              '../kernel/drivepower.c',
               '../kernel/pcm_ring.c'],
     include_directories: include_directories(
       '../player', '../hal', '../hal/hw', '../fs', '../kernel',
@@ -1653,6 +1671,7 @@ if target == 'sim'
       '../kernel/config.c', '../kernel/cfg_commit.c', '../kernel/evlog.c',
       '../kernel/otg_store.c', '../kernel/datetime.c', '../kernel/timesync.c',
       '../kernel/wallclock.c', '../kernel/chargestat.c', '../kernel/idlesleep.c',
+      '../kernel/drivepower.c',
       '../fs/fat32.c', '../fs/m3u.c',
       '../player/player.c',
       '../codecs/arena.c', '../codecs/readahead.c', '../codecs/diskbuf.c',

@@ -564,7 +564,7 @@ class Screen:
 
     def fill_disc_aa(self, cx, cy, r, c):
         """AA filled disc of radius r centred on the pixel EDGE (cx, cy) — it
-        covers pixels cx-r .. cx+r-1. Mirrors main.c fill_disc_aa EXACTLY (the
+        covers pixels cx-r .. cx+r-1. Mirrors app/bootscreen.c fill_disc_aa EXACTLY (the
         boot mark's ring/dot/hole): 4x4 sub-sample centres at 8*(p - c) + 2k + 1,
         inside when dx^2 + dy^2 <= (8r)^2, solid at 16/16, otherwise blended
         onto what is already there. NOT fill_round_rect_aa — the firmware's
@@ -2620,7 +2620,7 @@ BOOT_BAR_W    = W - 120
 
 
 def boot_screen(phase, pct, build=BOOT_BUILD_ID):
-    """main.c boot_screen_render(): the click-wheel mark, "Core", the device
+    """app/bootscreen.c boot_screen_render(): the click-wheel mark, "Core", the device
     line, and along the bottom a 2 px bar with the phase in small caps. pct < 0
     draws no bar (the pre-mount splash)."""
     sc = Screen(SURFACE)

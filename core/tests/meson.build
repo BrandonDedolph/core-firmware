@@ -1668,7 +1668,7 @@ if target == 'sim'
       '../library/otg_slot.c',
       '../hal/hw/battery.c', '../hal/hw/rtc.c',
       '../hal/headless/headless_hw.c',
-    )
+    ) + app_sources   # core/app/meson.build: compiled exactly as main.c is
     headless_inc = include_directories(
       '..', '../hal', '../hal/hw', '../hal/headless', '../kernel',
       '../codecs', '../codecs/dr_flac', '../codecs/pvmp3', '.')

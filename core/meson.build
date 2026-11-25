@@ -207,6 +207,7 @@ pvmp3_wrapper_c = files(
 )
 
 subdir('hal')         # hardware abstraction layer (sim or hw backend)
+subdir('app')         # app layer split out of kernel/main.c (app_sources)
 
 if target == 'hw'
   # Bare-metal ARM build. boot/ + kernel/ are all that's freestanding-
@@ -540,7 +541,7 @@ if target == 'hw'
 
   core_elf = executable(
     'core.elf',
-    boot_sources + kernel_sources + fs_sources + files('codecs/arena.c')
+    boot_sources + kernel_sources + app_sources + fs_sources + files('codecs/arena.c')
       + [core_version_h, core_version_tag_h],   # generated stamps; main.c includes both
     dependencies: [hal_dep, mem_dep],   # hal/hw: SER0 UART; mem: freestanding memcpy/…
     link_with: [flac_hw_lib, pvmp3_hw_lib, mp3_hw_lib, flac_meta_hw_lib, meta_text_hw_lib, readahead_hw_lib, diskbuf_hw_lib, text_hw_lib, chrome_hw_lib, wheel_hw_lib, letterindex_hw_lib, search_hw_lib, keyhold_hw_lib, gesture_hw_lib, sleeptimer_hw_lib, jackwatch_hw_lib, library_hw_lib, thumb_hw_lib, screen_charging_hw_lib, artcache_hw_lib, settings_hw_lib, player_hw_lib, screen_battery_hw_lib],

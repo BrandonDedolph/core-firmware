@@ -314,7 +314,7 @@ static void check_resync(xfail_ctx *c)
           drift == 0 && wallclock_now(&w, SEC_US, &got) == 0);
 
     /* The module's contract is "no time" resets; keeping a running clock across
-     * a bus error is the CALLER's distinction (kernel/main.c clock_resync, which
+     * a bus error is the CALLER's distinction (app/clockui.c clock_resync, which
      * ticks the clock forward instead of resyncing when hal_rtc_get returns -1).
      * What the module has to guarantee for that to work is this: a tick does not
      * need the chip, and the clock it carries stays exact across one. */

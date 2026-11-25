@@ -21,7 +21,6 @@
 
 #include "util.h"
 
-void resume_capture(void);                 /* until resume moves */
 int enter_standby(void);                   /* until power moves */
 extern uint32_t g_present_cost_us;         /* until paint moves */
 

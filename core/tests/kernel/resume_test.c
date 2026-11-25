@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
  * tests/kernel/resume_test.c — host tests for the resume LOCATOR RESOLUTION
- * in kernel/main.c: given a saved name hash and track length, which song in
+ * in app/resume.c: given a saved name hash and track length, which song in
  * the library (if any) may the boot path re-open?
  *
  * WHY THIS IS THE TEST THAT MATTERS. Everything else about resume degrades
@@ -11,12 +11,12 @@
  * opens it. Resuming nothing is a shrug; resuming somebody else's track
  * because two albums both contain "01 Intro.flac" is the bug.
  *
- * WHY A COPY: resume_find_song() is `static` inside kernel/main.c, which also
+ * WHY A COPY: resume_find_song() is `static` inside app/resume.c, which also
  * drags in the whole UI, the FAT reader, the player and the HAL — there is no
  * way to link the real one into a host test. So the function body below is a
- * VERBATIM COPY, diffed against main.c by tests/scripts/check_resume_parity.py
+ * VERBATIM COPY, diffed against app/resume.c by tests/scripts/check_resume_parity.py
  * (run from `meson test` and from `make verify-hw`). Do not reformat, re-indent
- * or rename anything between the BEGIN/END markers; if you change main.c,
+ * or rename anything between the BEGIN/END markers; if you change app/resume.c,
  * paste the new text in here. (The locator hash it calls is no longer a copy:
  * name_hash() lives in library/names.c and is linked here for real, and so
  * is the queue-context seam in kernel/resume_ctx.h — test 5 below.)
@@ -68,10 +68,10 @@ static int g_songs_n;
 
 /* Slop between the library's indexed duration and the decoder's, in seconds.
  * Restated here rather than shared: this file is the independent statement of
- * what the rule is, and check_resume_parity.py pins the value against main.c. */
+ * what the rule is, and check_resume_parity.py pins the value against app/resume.c. */
 #define RESUME_DUR_SLOP    2u
 
-/* ---- BEGIN VERBATIM COPY OF core/kernel/main.c ------------------------- */
+/* ---- BEGIN VERBATIM COPY OF core/app/resume.c -------------------------- */
 
 static int resume_find_song(uint32_t hash, uint32_t total_s)
 {
@@ -193,7 +193,7 @@ static void test_stale(void)
     check("declines a song with no file cluster",
           resume_find_song(H("Blue Monday"), 442) < 0);
 
-    /* A hash of 0 is main.c's "nothing saved" sentinel, and resume_restore
+    /* A hash of 0 is app/resume.c's "nothing saved" sentinel, and resume_restore
      * short-circuits on it — but if one ever reached here it must not match a
      * real song by accident. */
     lib_reset();

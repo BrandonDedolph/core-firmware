@@ -33,6 +33,7 @@
 #include "albums.h"
 #include "statusbar.h"
 #include "main_internal.h"
+#include "resume.h"
 #include "settings_glue.h"
 
 /* ---------------------------------------------------------------------------

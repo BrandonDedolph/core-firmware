@@ -1302,7 +1302,7 @@ if target == 'sim'
   test('name-hash', name_hash_test, suite: 'unit')
 
   # resume: which library song the boot path may re-open for a saved resume
-  # position (kernel/main.c resume_find_song). The rest of the resume feature
+  # position (app/resume.c resume_find_song). The rest of the resume feature
   # degrades gracefully — a missed capture loses a position, a rejected record
   # means "start from the menu" — but this is the one answer that is ACTED ON,
   # so a wrong one wakes the device playing somebody else's track. Covers the
@@ -1310,7 +1310,7 @@ if target == 'sim'
   # library / empty locator), and the ambiguity rules: duplicate filenames are
   # disambiguated by the saved track LENGTH, and decline outright when the
   # length cannot choose. Compiles a verbatim copy of the static function;
-  # hw-resume-parity below diffs it against main.c. The locator hash it
+  # hw-resume-parity below diffs it against app/resume.c. The locator hash it
   # calls is the real library/names.c, and the queue-context seam (which
   # list a view is, the seeded Shuffle Songs order, what a capture stores)
   # is the real header-only kernel/resume_ctx.h.
@@ -1579,7 +1579,7 @@ if target == 'sim'
          suite: 'unit')
 
     # hw-resume-parity: the same guard for the resume matcher — the copy in
-    # tests/kernel/resume_test.c must not drift from kernel/main.c, and
+    # tests/kernel/resume_test.c must not drift from app/resume.c, and
     # RESUME_DUR_SLOP must agree. A drifted copy is worse than no test: it
     # passes while the device applies a different rule.
     test('hw-resume-parity', py,

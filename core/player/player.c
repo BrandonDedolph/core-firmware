@@ -2028,8 +2028,8 @@ void player_pump(void)
      * ...except while someone is using the menus (player_hold_drive). Every
      * list, album and cover the UI opens is a synchronous read on this same
      * loop, and on a parked drive each one waited out a 1-3 s spin-up with
-     * the screen frozen. So the park waits for the same 20 s of quiet the
-     * main loop's idle spin-down already uses when nothing is playing.
+     * the screen frozen. So the park waits until the main loop reports the
+     * user quiet (5 s without a press or a turn of the wheel).
      *
      * The HAL's ata_is_parked() is checked as well as g_drive_parked: a menu
      * read spins the platters back up without telling the player, and keyed

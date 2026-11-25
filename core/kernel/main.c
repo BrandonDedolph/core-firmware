@@ -10120,11 +10120,15 @@ _Noreturn static void run_ui(fat32_t *fs)
         if (!player_playing() && !ata_is_parked() && idle > disk_idle_us) {
             ata_standby();
         }
-        /* The same 20 s while playing: the player parks between refill
+        /* While playing, a shorter hold: the player parks between refill
          * bursts, and without this a menu opened mid-song read from a
-         * parked drive and froze for the spin-up. Once the user has been
-         * quiet 20 s the player parks as it always has. */
-        player_hold_drive(idle <= disk_idle_us);
+         * parked drive and froze for the spin-up. 5 s covers the gaps
+         * between presses of someone browsing; once they have been quiet
+         * that long the player parks as it always has. Shorter than the
+         * idle spin-down above because the music is what is in use now,
+         * and every second held is the drive's ~100 mA on top of it. */
+        const uint32_t browse_hold_us = 5000000u;
+        player_hold_drive(idle <= browse_hold_us);
 
         /*
          * SELECT press-length arbitration on a LIST ROW: the tap acts on

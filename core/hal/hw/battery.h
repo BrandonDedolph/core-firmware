@@ -203,7 +203,7 @@ int battery_filter_ready(void);
  * are unaffected — playback can keep going down to the shutoff line.
  *
  * config_save() (kernel/config.c) is the only ata_write_sectors() caller in
- * the firmware, and settings_commit() in kernel/main.c is its only caller;
+ * the firmware, and settings_commit() in app/persist.c is its only caller;
  * that is where this belongs. Pending changes should stay pending, not be
  * dropped, so they land on the next commit after RECOVERED.
  */

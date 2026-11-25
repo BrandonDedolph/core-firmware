@@ -17,4 +17,8 @@
 #ifndef CORE_APP_MAIN_INTERNAL_H
 #define CORE_APP_MAIN_INTERNAL_H
 
+#include "../library/otg.h"
+
+extern otg_list_t g_otg;                  /* until otg moves */
+
 #endif /* CORE_APP_MAIN_INTERNAL_H */

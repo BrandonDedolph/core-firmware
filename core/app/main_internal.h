@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "../library/otg.h"
+#include "util.h"
 
 extern otg_list_t g_otg;                  /* until otg moves */
 extern int g_dir_depth;                    /* until albums moves */
@@ -41,5 +42,7 @@ void otg_bind_all(void);                    /* until otg moves */
 extern int8_t g_otg_flash_sign;             /* until otg moves */
 extern char   g_otg_flash_label[40];        /* until otg moves */
 extern char   g_otg_flash_token[16];        /* until otg moves */
+extern ui_window_t g_pl_confirm;            /* until otg moves */
+int otg_confirm_up(ui_window_t *w);         /* until otg moves */
 
 #endif /* CORE_APP_MAIN_INTERNAL_H */

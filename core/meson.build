@@ -113,6 +113,29 @@ common_link_args = [
 ]
 
 if target == 'hw'
+  # Stack-depth guard. There is no stack probe and no MMU on this target: the
+  # supervisor stack is [0x40002000, 0x40017C00), ~89 KB growing down
+  # (boot/linker.ld), so an oversized frame corrupts memory instead of
+  # faulting. Two layers:
+  #
+  #  - this warning, a hard ceiling on any one frame. It must be on the LINK
+  #    line (core_elf link_args): under b_lto the compile step emits no code,
+  #    so on c_args alone it never fired. meson's -Werror reaches the LTO link
+  #    too, so an over-ceiling frame fails the build with its file:line.
+  #    6144 is just above the largest allowed frame (fat32_readdir, 5536 B).
+  #    It stays on c_args too: in a -Db_lto=false build that is where it
+  #    fires, and it is then the only frame check (check_frames.py skips,
+  #    saying so, because there are no link-time frames to read). Such a
+  #    build links, but vendored dr_flac warns (not -Werror there) about
+  #    8-16 KB frames in functions the LTO image never contains.
+  #  - tests/scripts/check_frames.py (post-link, below), the real per-frame
+  #    limit: 1024 B, with a short per-function allowance list for the frames
+  #    that are big on purpose. GCC cannot exempt one function from this
+  #    warning under LTO (a #pragma GCC diagnostic is not honoured at link
+  #    time), so the allowances live in that script, from -fstack-usage. The
+  #    script's header has the arithmetic behind both numbers.
+  hw_frame_warn = ['-Wframe-larger-than=6144']
+
   # ARM cross-build. Toolchain + ARM-specific flags live in
   # cross/arm-none-eabi.txt under [built-in options]; we add only the
   # freestanding-correctness flags that don't belong in the cross file.
@@ -120,15 +143,7 @@ if target == 'hw'
     '-fno-builtin',
     '-fno-common',
     '-fno-stack-protector',
-    # Stack-depth guard. There is no stack probe and no guard page on this
-    # target: the supervisor stack is 0x40017C00 growing down with only the
-    # 1 KB banked IRQ stack above it, so one oversized frame silently corrupts
-    # memory instead of faulting. 1024 bytes/frame is well above anything
-    # legitimate here (the deepest real frames are a few hundred bytes of
-    # dirent/sector scratch) and well below the available stack, so it catches
-    # a new multi-KB local array at compile time. Raise it only with a note
-    # about where the space came from.
-  ] + cc.get_supported_arguments(['-Wframe-larger-than=1024'])
+  ] + hw_frame_warn
   add_project_arguments(common_c_args, language: 'c')
   add_project_link_arguments(common_link_args, language: 'c')
   message('Configured for hardware target (ARM, iPod 5G/5.5G)')
@@ -578,7 +593,12 @@ if target == 'hw'
       # design (there is no MMU and no loader to honour page permissions), so
       # ld's hardening warning about it is noise, not a finding.
       '-Wl,--no-warn-rwx-segments',
-    ],
+      # Per-function frame sizes for check_frames.py: under LTO GCC writes them
+      # at link time, one core.elf.ltrans<N>.ltrans.su per partition. A report
+      # only; the image is unchanged (tests/scripts/hw_size_report.py checks
+      # the same thing for its own -fstack-usage build).
+      '-fstack-usage',
+    ] + hw_frame_warn,
     link_depends: boot_linker_script,
   )
 
@@ -610,6 +630,23 @@ if target == 'hw'
       meson.current_source_dir() / 'tests' / 'scripts' / 'check_size.sh',
       '@INPUT@', size_prog.full_path(), '@OUTPUT@',
     ],
+    build_by_default: true,
+  )
+
+  # Post-link per-function stack-frame gate (see hw_frame_warn above and the
+  # script's header): fails the build on a frame over 1024 B that is not on
+  # its allowance list. Reads the .su files of THIS link, named by core.map.
+  custom_target(
+    'core-frame-check',
+    input: core_elf,
+    output: 'core.frames',
+    command: [
+      find_program('python3'),
+      meson.current_source_dir() / 'tests' / 'scripts' / 'check_frames.py',
+    ] + (get_option('b_lto') ? [] : ['--no-lto']) + [
+      '@INPUT@', meson.current_build_dir() / 'core.map', '@OUTPUT@',
+    ],
+    depend_files: files('tests/scripts/check_frames.py'),
     build_by_default: true,
   )
 

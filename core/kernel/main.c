@@ -40,6 +40,7 @@
 #include "evlog.h"
 #include "chargestat.h"
 #include "idlesleep.h"
+#include "drivepower.h"
 #include "otg_store.h"
 #include "core_version.h"       /* CORE_BUILD_ID: meson vcs_tag, git describe   */
 #include "core_version_tag.h"   /* CORE_VERSION:  meson vcs_tag, nearest tag    */
@@ -5832,30 +5833,17 @@ static uint32_t g_ui_art_held;         /* passes that refused to wake a parked p
 static uint32_t present_gap_us(void);  /* defined just below, with the throttle */
 
 /*
- * Was each park worth it? A park followed by a read within DISK_PARK_QUICK_US
- * paid a spin-up (power, and a wait if it was a menu) to save a few seconds
- * of spinning: the idle timeout and the browsing hold are tuned by how often
- * that happens in real use. Counted separately for parks made while playing
- * (the player's, between bursts) and while not (the idle timeout, the hold
- * switch), cumulative for the boot, in the 5 s `core: ui` line.
+ * The drive-power policy's state (kernel/drivepower.h: the idle spin-down,
+ * the lock park, the browsing hold, and whether each park was worth it).
  */
-#define DISK_PARK_QUICK_US 15000000u
-static uint32_t g_park_n[2], g_park_quick[2];   /* [0] not playing, [1] playing */
-static uint32_t g_park_at_us;
-static int      g_park_was, g_park_kind;
+static drivepower_t g_drivepower;
+/* Park accounting: the timer is read only on a park edge. */
 static void disk_park_track(int playing)
 {
     int parked = ata_is_parked();
-    if (parked == g_park_was) return;
-    uint32_t now = mmio_read32(USEC_TIMER_ADDR);
-    if (parked) {
-        g_park_kind  = playing ? 1 : 0;
-        g_park_at_us = now;
-        g_park_n[g_park_kind]++;
-    } else if ((uint32_t)(now - g_park_at_us) < DISK_PARK_QUICK_US) {
-        g_park_quick[g_park_kind]++;
-    }
-    g_park_was = parked;
+    if (!drivepower_park_edge(&g_drivepower, parked)) return;
+    drivepower_park_note(&g_drivepower, parked, playing,
+                         mmio_read32(USEC_TIMER_ADDR));
 }
 
 static void ui_stats_emit(void)
@@ -5875,10 +5863,10 @@ static void ui_stats_emit(void)
     uart_puts(" max_us ");              uart_dec((int)g_ui_art_max_us);
     uart_puts(" held ");                uart_dec((int)g_ui_art_held);
     uart_puts(" parked ");              uart_dec(ata_is_parked());
-    uart_puts(" parks ");               uart_dec((int)g_park_n[0]);
-    uart_puts(" quick ");               uart_dec((int)g_park_quick[0]);
-    uart_puts(" parks_play ");          uart_dec((int)g_park_n[1]);
-    uart_puts(" quick ");               uart_dec((int)g_park_quick[1]);
+    uart_puts(" parks ");               uart_dec((int)drivepower_parks(&g_drivepower, 0));
+    uart_puts(" quick ");               uart_dec((int)drivepower_quick_parks(&g_drivepower, 0));
+    uart_puts(" parks_play ");          uart_dec((int)drivepower_parks(&g_drivepower, 1));
+    uart_puts(" quick ");               uart_dec((int)drivepower_quick_parks(&g_drivepower, 1));
     /* BCM health, cumulative: handshakes that ran out of budget (a post-wake
      * absorb that never retired lands here) and presents refused because the
      * panel was slept. A healthy device reads 0 0 forever. */
@@ -6201,20 +6189,6 @@ static int list_repaint_partial(void)
  * Without them every newly revealed row waited for its read and then
  * re-presented its band when the cover landed: two paints per detent. */
 #define CHIP_AHEAD_ROWS        LIST_ROWS2
-
-/* The drive's two timeouts after the last input, tuned from the park log
- * (`parks`/`quick` in the core: ui line): nothing playing, the idle spin-down;
- * playing, how long the player is held off parking between bursts. */
-#define DISK_IDLE_US           10000000u
-#define DISK_BROWSE_HOLD_US     5000000u
-/* The last UI disk read (a cover batch), and how long after it the drive is
- * still kept up: see the spin-down block in run_ui. */
-#define UI_DISK_GRACE_US       5000000u
-static uint32_t g_ui_disk_us;
-/* A refused STANDBY, and when: retried at most this often. */
-#define DISK_STANDBY_RETRY_US  10000000u
-static int      g_standby_failed;
-static uint32_t g_standby_fail_us;
 
 /* ---------------------------------------------------------------------------
  * The A-Z locator: which letter a row is under, on whichever list is up
@@ -9967,26 +9941,19 @@ _Noreturn static void run_ui(fat32_t *fs)
          * parked drive; at most one block per pass. */
         evlog_commit(CFG_COMMIT_IDLE);
 
-        /* 10 s: long enough that reading a list and picking a song does not
-         * usually land on a spin-up (the next read after browsing is most
-         * often Play), short enough that a put-down device is not spinning
-         * for nothing. The park log below says whether that holds. */
-        /* The hold switch is the user saying they are done navigating: park
-         * now rather than after the idle timeout, unless the player is still
-         * reading (a refill burst, or a paused buffer not yet stocked). */
-        /* A UI read (a cover batch) in the last few seconds means more may
-         * be coming: parking between batches spun the drive up and down
-         * once per batch. Neither park fires until the reads have stopped. */
+        /* The idle spin-down, the lock park, the refused-STANDBY retry and
+         * the browsing hold handed to the player: kernel/drivepower.h. */
         uint32_t now_d = mmio_read32(USEC_TIMER_ADDR);
-        int ui_reading = (uint32_t)(now_d - g_ui_disk_us) < UI_DISK_GRACE_US;
-        int lock_park = g_locked && !player_disk_busy();
-        /* A STANDBY the drive refused is not re-issued every pass: each try
-         * can block for the ready wait. Once per DISK_STANDBY_RETRY_US. */
-        int may_standby = !g_standby_failed ||
-                          (uint32_t)(now_d - g_standby_fail_us) >= DISK_STANDBY_RETRY_US;
-        if (!player_playing() && !ata_is_parked() && may_standby &&
-            ((idle > DISK_IDLE_US && !ui_reading) || lock_park)) {
-            if (lock_park) {
+        drivepower_in_t dp_in;
+        dp_in.now_us      = now_d;
+        dp_in.idle_us     = idle;
+        dp_in.locked      = g_locked;
+        dp_in.playing     = player_playing();
+        dp_in.parked      = ata_is_parked();
+        dp_in.player_busy = player_disk_busy();
+        drivepower_out_t dp = drivepower_idle_feed(&g_drivepower, &dp_in);
+        if (dp.standby) {
+            if (dp.flush_first) {
                 /* The idle path waits out a 3 s debounce and never wakes a
                  * parked drive, so a setting changed just before the lock
                  * would sit pending until the next spin-up. Write it while
@@ -9994,19 +9961,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                 settings_commit(CFG_COMMIT_SOFT);
                 otg_commit(CFG_COMMIT_SOFT);
             }
-            g_standby_failed  = (ata_standby() != 0);
-            g_standby_fail_us = now_d;
+            drivepower_standby_result(&g_drivepower, ata_standby(), now_d);
         }
-        /* While playing, a shorter hold: the player parks between refill
-         * bursts, and without this a menu opened mid-song read from a
-         * parked drive and froze for the spin-up. 5 s covers the gaps
-         * between presses of someone browsing; once they have been quiet
-         * that long the player parks as it always has. Shorter than the
-         * idle spin-down above because the music is what is in use now,
-         * and every second held is the drive's ~100 mA on top of it. */
-        /* Locked: nobody is browsing, so no hold (the player parks between
-         * bursts as it always has, and its reads are never held back). */
-        player_hold_drive(!g_locked && (idle <= DISK_BROWSE_HOLD_US || ui_reading));
+        player_hold_drive(dp.hold);
         disk_park_track(player_playing());
 
         /*
@@ -10560,7 +10517,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 }
                 t_art = mmio_read32(USEC_TIMER_ADDR) - t_art;
                 g_ui_art_reads += (uint32_t)loaded;
-                if (loaded) g_ui_disk_us = mmio_read32(USEC_TIMER_ADDR);
+                if (loaded) drivepower_note_ui_read(&g_drivepower, mmio_read32(USEC_TIMER_ADDR));
                 if (loaded && t_art > g_ui_art_max_us) g_ui_art_max_us = t_art;
                 for (int r = 0; r < LIST_ROWS2; r++) {
                     const uint16_t *now_px = (want[r] >= 0) ? artcache_peek(want[r]) : 0;

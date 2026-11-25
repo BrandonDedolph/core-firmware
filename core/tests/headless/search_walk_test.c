@@ -1,0 +1,420 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * tests/headless/search_walk_test.c — Music > Search, every kind of hit,
+ * opened and played through the UI.
+ *
+ * The search unit test links ui/search.c alone: the ring, the scan, the
+ * rows. What a hit DOES — search_open_hit() (SELECT) and search_play_hit()
+ * (PLAY) — is app-level glue it never runs: which screen is pushed, which row
+ * that screen lands on, whether MENU comes back to the results, which queue
+ * is built and where in it playback starts. This drives that glue on the
+ * headless disk, by the gestures a user makes, and judges it by the panel and
+ * the UART.
+ *
+ * The disk's library (tests/scripts/make_headless_disk.py):
+ *   Low Rate    / Mono Mix     Mono Flac (1), Mono Mp3 (2)
+ *   Test Tones  / Long Player  Long One (1), Long Two (2)
+ *   Playlists/Mixed.m3u        six lines, five of them on the disk
+ * "LO" finds the artist Low Rate, the album Long Player and the songs Long
+ * One and Long Two; "MI" finds the playlist Mixed (and the album Mono Mix).
+ *
+ * Every case is its own power-on (a fresh process on a fresh copy of the
+ * disk), so one broken gesture cannot leave the next on the wrong screen:
+ *
+ *   artist   SELECT  the artist's album list, "All Songs" (row 0) selected;
+ *                    MENU is the results, the artist still selected
+ *            PLAY    the whole discography from its first song in title
+ *                    order: Mono Flac, TRACK 1 OF 2; MENU is the results
+ *   album    SELECT  the tracklist, its first track selected; MENU is the
+ *                    results (not an album list that was never shown)
+ *            PLAY    the album from track 1: Long One, TRACK 1 OF 2
+ *   song     SELECT  Now Playing, the song in its album: Long Two, TRACK 2
+ *                    OF 2; the first frame is not held back by the present
+ *                    throttle (np_first); MENU is the results
+ *            PLAY    the same, by the PLAY gesture
+ *   playlist SELECT  the playlist screen, its first entry selected, "core:
+ *                    playlist rows" on the UART; MENU is the results
+ *            PLAY    the playlist from its first entry, TRACK 1 OF 5
+ *
+ * Throughout: the DAC is running after a PLAY, no write outside the
+ * pre-allocated files, no panic. (The firmware prints no UART line when a
+ * track starts, so which track started is read off Now Playing: its title
+ * and its "TRACK n OF m" eyebrow, which is the queue position.)
+ *
+ * Usage: search_walk_test DISK.img DISK.img.ranges [SHOT_DIR]
+ */
+
+#include "headless.h"
+#include "hl_screen.h"
+#include "../xfail.h"
+
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+static xfail_ctx T = { "search-walk", 0, 0, 0 };
+#define CHECK(label, cond) xpect(&T, (label), (cond) ? 1 : 0)
+
+static const char *g_shots;
+static const char *g_case = "";
+static int g_shot_n;
+
+/* ---- helpers (as walk_test.c's) ------------------------------------------ */
+
+static void shot(const char *name)
+{
+    if (!g_shots) return;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/search_walk_%s_%02d_%s.bmp",
+             g_shots, g_case, g_shot_n++, name);
+    (void)hl_write_bmp(path);
+}
+
+static int lum(uint16_t c)
+{
+    return ((c >> 11) & 0x1F) * 2 + ((c >> 5) & 0x3F) + (c & 0x1F) * 2;
+}
+static int on_screen(const char *s) { return hl_find_text(hl_panel(), s, NULL); }
+static int header(const char *s) { return hl_find_text_in(hl_panel(), s, 0, 40, NULL); }
+static int in_list(const char *s) { return hl_find_text_in(hl_panel(), s, 40, HL_H, NULL); }
+static int selected(const char *s)
+{
+    hl_text_hit_t h;
+    return hl_find_text_in(hl_panel(), s, 40, HL_H, &h) && lum(h.ink) > lum(h.bg);
+}
+static void tap(unsigned btn) { hl_tap(btn, 500); }
+
+/* Wheel to the top of a list, then down a row at a time to `s`. */
+static int select_row(const char *s)
+{
+    if (selected(s)) return 1;
+    hl_scroll(-16);
+    hl_run_ms(16 * 150 + 400);
+    for (int i = 0; i < 24; i++) {
+        if (selected(s)) return 1;
+        hl_scroll(1);
+        hl_run_ms(450);
+    }
+    return selected(s);
+}
+
+static int log_has_since(size_t from, const char *s)
+{
+    return from <= hl_log_len() && strstr(hl_log() + from, s) != NULL;
+}
+
+/* hl_run_until predicate: the header reads `a`. */
+static int pred_header(void *a) { return header((const char *)a); }
+
+/* Now Playing's eyebrow, exactly as app/nowplaying.c spaces it. */
+static int eyebrow(int n, int of)
+{
+    char s[64];
+    snprintf(s, sizeof s, "TRACK   %d     OF     %d", n, of);
+    return hl_find_text(hl_panel(), s, NULL);
+}
+
+static int copy_disk(const char *src, const char *dst)
+{
+    int in = open(src, O_RDONLY), out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (in < 0 || out < 0) return -1;
+    static char buf[1 << 16];
+    ssize_t n;
+    while ((n = read(in, buf, sizeof buf)) > 0) {
+        if (write(out, buf, (size_t)n) != n) return -1;
+    }
+    close(in);
+    return close(out);
+}
+
+static int load_ranges(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    unsigned lba, cnt;
+    char name[512];
+    int n = 0;
+    while (fscanf(f, "%u %u %511[^\n]", &lba, &cnt, name) == 3) {
+        if (hl_allow_writes(lba, cnt) == 0) n++;
+    }
+    fclose(f);
+    return n;
+}
+
+static _Noreturn void session_end(void)
+{
+    hl_stats_t s = hl_stats();
+    CHECK("disk: every write inside a pre-allocated file", s.bad_writes == 0);
+    CHECK("never panicked", hl_parked() != HL_PARK_PANIC);
+    if (T.fails && getenv("HL_DUMP_LOG")) {
+        fputs(hl_log(), stderr);
+    }
+    printf("%s: fake time %.1f s\n", g_case, (double)s.now_us / 1e6);
+    int rc = xfail_done(&T);
+    fflush(NULL);
+    _exit(rc);                     /* the firmware thread is frozen mid-wait */
+}
+
+/* ---- Search ---------------------------------------------------------------- */
+
+/* The ring: A-Z, 0-9, SPACE, DEL, DONE (ui/search.h); a fresh boot starts
+ * it on 'A'. One wheel row is one cell. */
+#define RING_N    39
+#define CELL_DONE 38
+static int g_cell;
+
+static void ring_to(int cell)
+{
+    int d = (cell - g_cell + RING_N) % RING_N;
+    if (d > RING_N / 2) d -= RING_N;
+    if (d) {
+        hl_scroll(d);
+        hl_run_ms((uint32_t)(d < 0 ? -d : d) * 150 + 400);
+    }
+    g_cell = cell;
+}
+
+/* Boot to the main menu, Music > Search, type `q` (upper-case letters),
+ * DONE: the results, the first hit selected. */
+static void boot_to_results(const char *disk, const char *ranges, const char *q)
+{
+    CHECK("image: the pre-allocated files' extents are known", load_ranges(ranges) >= 3);
+    if (hl_boot(disk, 12000) != 0) {
+        fprintf(stderr, "hl_boot failed\n");
+        _exit(2);
+    }
+    tap(HL_BTN_SELECT);                               /* main menu -> Music */
+    CHECK("nav: Music > Search", select_row("Search"));
+    tap(HL_BTN_SELECT);
+    CHECK("nav: the Search screen", hl_run_until(pred_header, "Search", 100, 3000));
+    shot("search");
+    g_cell = 0;
+    size_t mark = hl_log_len();
+    for (const char *c = q; *c; c++) {
+        ring_to(*c - 'A');
+        tap(HL_BTN_SELECT);
+    }
+    char want[64];
+    snprintf(want, sizeof want, "core: search %u chars ", (unsigned)strlen(q));
+    CHECK("search: the scan ran for the whole query", log_has_since(mark, want));
+    ring_to(CELL_DONE);
+    tap(HL_BTN_SELECT);
+    shot("results");
+}
+
+/* Select the hit titled `name` in the results. */
+static void pick_hit(const char *name)
+{
+    char l[96];
+    snprintf(l, sizeof l, "results: the %s hit", name);
+    CHECK(l, header("Search") && select_row(name));
+}
+
+/* MENU from wherever the hit led: back on the results, `name` still the
+ * selected row, the ring not up (RESULTS, not PICK). */
+static void back_to_results(const char *what, const char *name)
+{
+    tap(HL_BTN_MENU);
+    shot("back");
+    char l[128];
+    snprintf(l, sizeof l, "%s: MENU returns to the Search results", what);
+    CHECK(l, header("Search") && in_list(name) && !on_screen("DONE"));
+    snprintf(l, sizeof l, "%s: ...with the hit still selected", what);
+    CHECK(l, selected(name));
+}
+
+/* PLAY on the selected hit; Now Playing names `title` at position n of m. */
+static void play_hit(const char *what, const char *title, int n, int of)
+{
+    tap(HL_BTN_PLAY);
+    hl_run_until(pred_header, "Now Playing", 100, 4000);
+    hl_run_ms(500);
+    shot("played");
+    char l[128];
+    snprintf(l, sizeof l, "%s: PLAY pushes Now Playing", what);
+    CHECK(l, header("Now Playing"));
+    snprintf(l, sizeof l, "%s: ...playing %s", what, title);
+    CHECK(l, on_screen(title));
+    snprintf(l, sizeof l, "%s: ...TRACK %d OF %d", what, n, of);
+    CHECK(l, eyebrow(n, of));
+    snprintf(l, sizeof l, "%s: ...the DAC is running", what);
+    CHECK(l, hl_stats().audio_running);
+}
+
+/* ---- the cases --------------------------------------------------------------- */
+
+static void artist_open(void)
+{
+    pick_hit("Low Rate");
+    tap(HL_BTN_SELECT);
+    hl_run_ms(1000);
+    shot("opened");
+    CHECK("artist: SELECT opens the artist's album list", header("Low Rate"));
+    CHECK("artist: ...All Songs, then the album", in_list("All Songs") && in_list("Mono Mix"));
+    CHECK("artist: ...on its first row (All Songs)",
+          selected("All Songs") && !selected("Mono Mix"));
+    CHECK("artist: ...and plays nothing", !hl_stats().audio_running);
+    back_to_results("artist", "Low Rate");
+}
+
+static void artist_play(void)
+{
+    pick_hit("Low Rate");
+    play_hit("artist", "Mono Flac", 1, 2);
+    back_to_results("artist play", "Low Rate");
+}
+
+static void album_open(void)
+{
+    pick_hit("Long Player");
+    tap(HL_BTN_SELECT);
+    hl_run_ms(1500);
+    shot("opened");
+    CHECK("album: SELECT opens the tracklist",
+          in_list("Long Player") && in_list("Long One") && in_list("Long Two"));
+    CHECK("album: ...on its first track", selected("Long One") && !selected("Long Two"));
+    CHECK("album: ...and plays nothing", !hl_stats().audio_running);
+    back_to_results("album", "Long Player");
+}
+
+static void album_play(void)
+{
+    pick_hit("Long Player");
+    play_hit("album", "Long One", 1, 2);
+    back_to_results("album play", "Long Player");
+}
+
+static void song_open(void)
+{
+    /* Something playing first: only then does the present throttle apply,
+     * which is what np_first (search_open_hit's return) exists to skip. */
+    pick_hit("Long One");
+    play_hit("song (setup)", "Long One", 1, 2);
+    tap(HL_BTN_MENU);
+    pick_hit("Long Two");
+
+    /* SELECT, and a detent of wheel just before the release: the list
+     * repaints under the finger (the recorded row still acts — the tap is
+     * resolved on release), so the release lands inside the present-throttle
+     * window (present_gap_us, 20 ms here) that repaint opened. */
+    size_t ev0 = hl_events_mark();
+    hl_press(HL_BTN_SELECT, 200);
+    hl_run_ms(190);
+    hl_scroll(-1);
+    hl_run_ms(1200);
+    shot("opened");
+    CHECK("song: SELECT opens Now Playing", header("Now Playing"));
+    CHECK("song: ...playing Long Two", on_screen("Long Two"));
+    CHECK("song: ...in its album, at that song (TRACK 2 OF 2)", eyebrow(2, 2));
+    CHECK("song: ...the DAC is running", hl_stats().audio_running);
+    {
+        /* The new track starts and Now Playing is presented in the same
+         * pass: search_open_hit said "Now Playing was pushed", so the first
+         * frame skips the throttle (np_first) instead of waiting out the
+         * window the list repaint opened. */
+        size_t n;
+        const hl_ev_t *e = hl_events(&n);
+        uint64_t list_us = 0, start_us = 0, np_us = 0;
+        for (size_t k = ev0; k < n; k++) {
+            int present = e[k].kind == HL_EV_PRESENT_FULL ||
+                          e[k].kind == HL_EV_PRESENT_RECT;
+            if (!start_us && present) list_us = e[k].t_us;
+            if (!start_us && e[k].kind == HL_EV_AUDIO_START) start_us = e[k].t_us;
+            if (start_us && !np_us && e[k].kind == HL_EV_PRESENT_FULL) np_us = e[k].t_us;
+        }
+        CHECK("song: (setup) the list repainted inside the throttle window",
+              list_us && start_us && start_us - list_us < 20000);
+        CHECK("song: ...and Now Playing is presented with the track's start, "
+              "not a throttle window later",
+              np_us && np_us - start_us < 1000);
+        if (T.fails) {
+            printf("  list %llu start %llu np %llu\n", (unsigned long long)list_us,
+                   (unsigned long long)start_us, (unsigned long long)np_us);
+        }
+    }
+    back_to_results("song", "Long Two");
+}
+
+static void song_play(void)
+{
+    pick_hit("Long Two");
+    play_hit("song", "Long Two", 2, 2);
+    back_to_results("song play", "Long Two");
+}
+
+static void playlist_open_case(void)
+{
+    pick_hit("Mixed");
+    size_t mark = hl_log_len();
+    tap(HL_BTN_SELECT);
+    hl_run_ms(1500);
+    shot("opened");
+    CHECK("playlist: SELECT opens the playlist", header("Mixed"));
+    CHECK("playlist: ...its rows read (UART)",
+          log_has_since(mark, "core: playlist rows "));
+    CHECK("playlist: ...on its first entry", selected("Allegro"));
+    CHECK("playlist: ...and plays nothing", !hl_stats().audio_running);
+    back_to_results("playlist", "Mixed");
+}
+
+static void playlist_play_case(void)
+{
+    pick_hit("Mixed");
+    play_hit("playlist", "Allegro", 1, 5);
+    back_to_results("playlist play", "Mixed");
+}
+
+typedef struct {
+    const char *name, *query;
+    void (*run)(void);
+} case_t;
+
+static const case_t CASES[] = {
+    { "artist_open",   "LO", artist_open },
+    { "artist_play",   "LO", artist_play },
+    { "album_open",    "LO", album_open },
+    { "album_play",    "LO", album_play },
+    { "song_open",     "LO", song_open },
+    { "song_play",     "LO", song_play },
+    { "playlist_open", "MI", playlist_open_case },
+    { "playlist_play", "MI", playlist_play_case },
+};
+
+int main(int argc, char **argv)
+{
+    if (argc < 3) {
+        fprintf(stderr, "usage: %s DISK.img DISK.img.ranges [SHOT_DIR]\n", argv[0]);
+        return 2;
+    }
+    g_shots = argc > 3 ? argv[3] : NULL;
+    int ok = 1;
+    for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; i++) {
+        char disk[] = "/tmp/search_walk_XXXXXX";
+        int fd = mkstemp(disk);
+        if (fd < 0 || copy_disk(argv[1], disk) != 0) {
+            fprintf(stderr, "cannot copy %s\n", argv[1]);
+            return 2;
+        }
+        close(fd);
+        fflush(NULL);
+        pid_t p = fork();
+        if (p == 0) {
+            g_case = CASES[i].name;
+            T.suite = CASES[i].name;
+            boot_to_results(disk, argv[2], CASES[i].query);
+            CASES[i].run();
+            session_end();
+        }
+        int st = 0;
+        waitpid(p, &st, 0);
+        unlink(disk);
+        if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
+            fprintf(stderr, "search-walk: %s FAILED\n", CASES[i].name);
+            ok = 0;
+        }
+    }
+    return ok ? 0 : 1;
+}

@@ -6,7 +6,7 @@
  * WHAT AN ENTRY IS. A pair of folded name hashes — (folder_hash, file_hash) —
  * and nothing else. That pair is exactly the locator CORELIB.IDX already uses
  * to bind a record to the file on the disk (the index record carries
- * folder_hash at offset 248 and file_hash at 252, and kernel/main.c's
+ * folder_hash at offset 248 and file_hash at 252, and app/library.c's
  * resolve_art_cb binds by file_hash within the folder's cluster). Using the
  * same locator means an entry survives an index rebuild and a re-sync that
  * keeps names, and it costs EIGHT BYTES — the whole 512-entry list is one
@@ -17,7 +17,7 @@
  * library/otg_slot.c — which is where it belongs.
  *
  * WHAT THIS MODULE IS NOT. It does not bind entries to songs: g_songs and the
- * folder map live in kernel/main.c, which the host cannot compile, so the
+ * folder map live in app/library.c, which the host cannot compile, so the
  * binding stays there (as library/playlist.c leaves its row binding there).
  * It does not sort, de-duplicate or touch the disk. It is an ordered array
  * with a mutation counter, which is all a list the user builds by hand needs,

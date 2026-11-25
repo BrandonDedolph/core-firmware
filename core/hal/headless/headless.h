@@ -71,7 +71,7 @@ typedef enum {
 /* Timeline of the hardware-visible actions, for ORDER assertions ("on wake the
  * first full present came before the backlight"). */
 typedef enum {
-    HL_EV_PRESENT_FULL = 1,
+    HL_EV_PRESENT_FULL = 1, /* arg = pixels of the frame that are not white  */
     HL_EV_PRESENT_RECT,
     HL_EV_PRESENT_REFUSED,  /* a present while the panel was slept            */
     HL_EV_BACKLIGHT,        /* arg = level                                     */

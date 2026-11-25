@@ -339,7 +339,14 @@ void lcd_present_fb(const uint16_t *fb)
     }
     memcpy(g_panel, fb, sizeof g_panel);
     g_pres_full++;
-    ev(HL_EV_PRESENT_FULL, 0);
+    /* The frame's non-white pixel count rides on the event, so a test can
+     * tell which frame a present carried after the panel has moved on (the
+     * suspend's white frame is 0; the wake's first frame must not be). */
+    uint32_t ink = 0;
+    for (size_t i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
+        ink += g_panel[i] != 0xFFFFu;
+    }
+    ev(HL_EV_PRESENT_FULL, ink);
 }
 
 void lcd_present_rect(const uint16_t *fb, int x, int y, int w, int h)

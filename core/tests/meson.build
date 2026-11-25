@@ -1862,6 +1862,23 @@ if target == 'sim'
          depends: [headless_disk_az],
          timeout: 180,
          suite: 'unit')
+    # suspend: suspend_to_ram() and enter_standby() off the idle path — the
+    # PLAY hold under a playing, lit device with changes pending (forced
+    # commits, park, white frame, the first frame after the wake), the idle
+    # loop's drained-press wake, battery sample and jack watch, the 30-minute
+    # and 5 s-hold escalations, and the refused-standby recovery the headless
+    # PMU always takes (headless/suspend_test.c).
+    suspend_test = executable(
+      'suspend_test',
+      sources: ['headless/suspend_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('suspend', suspend_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 300,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

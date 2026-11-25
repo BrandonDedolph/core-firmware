@@ -204,7 +204,7 @@ enum {
 static const char *const BATT_L[1] = { "Charge Rate" };
 /* Resume is back on this list: it was pulled with the other placeholders while
  * nothing could persist it, and it is now the switch that decides whether boot
- * re-opens the track you left off on (kernel/main.c resume_restore). Sleep
+ * re-opens the track you left off on (app/resume.c resume_restore). Sleep
  * Timer sits last: it is the only row here that does not change how music
  * plays, and the one you reach for at night. */
 static const char *const PLAY_L[4] = { "Shuffle", "Repeat", "Resume",

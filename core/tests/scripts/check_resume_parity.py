@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """check_resume_parity.py — keep the resume matcher's test copy honest.
 
-resume_find_song() in core/kernel/main.c decides which library song the boot
+resume_find_song() in core/app/resume.c decides which library song the boot
 path may re-open for a saved resume position. It is `static` inside a file that
 also pulls in the UI, the FAT reader, the player and the HAL, so it cannot be
 linked into a host test; core/tests/kernel/resume_test.c therefore holds a
@@ -11,10 +11,10 @@ VERBATIM COPY and tests that.
 A copy that drifts is worse than no test — it passes while the shipped function
 does something else. So this script asserts two things:
 
-  A. the copy is byte-identical to main.c's;
+  A. the copy is byte-identical to app/resume.c's;
   B. RESUME_DUR_SLOP, the one tunable the body reads, has the same value in
      both files (it is a #define, not part of the copied text, so a change in
-     main.c alone would silently re-tune the shipped rule while the test kept
+     app/resume.c alone would silently re-tune the shipped rule while the test kept
      asserting the old one).
 
 Same pattern, and the same reasoning, as check_name_hash_parity.py.
@@ -28,7 +28,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve()
 CORE = HERE.parent.parent.parent            # <repo>/core
 
-MAIN_C = CORE / "kernel" / "main.c"
+MAIN_C = CORE / "app" / "resume.c"
 TEST_C = CORE / "tests" / "kernel" / "resume_test.c"
 
 SIG = "static int resume_find_song("
@@ -74,7 +74,7 @@ def main():
               "      The copy is what the host test compiles, so it must be "
               "re-pasted verbatim.", file=sys.stderr)
         for line in difflib.unified_diff(orig.split("\n"), copy.split("\n"),
-                                         "main.c", "resume_test.c",
+                                         "app/resume.c", "resume_test.c",
                                          lineterm=""):
             print("      " + line, file=sys.stderr)
     else:

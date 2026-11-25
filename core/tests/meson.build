@@ -1754,6 +1754,21 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 120,
          suite: 'unit')
+    # low-battery: the REAL battery_refresh() on the headless PMU ADC — the
+    # DISKSAFE flush + park + modal, the write gate's deferrals, the 3600 mV
+    # hysteresis, and the SHUTOFF goodbye + PMU standby
+    # (headless/low_battery_test.c).
+    low_battery_test = executable(
+      'low_battery_test',
+      sources: ['headless/low_battery_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('low-battery', low_battery_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 120,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

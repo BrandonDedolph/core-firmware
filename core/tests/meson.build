@@ -1769,6 +1769,22 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 120,
          suite: 'unit')
+    # otg-walk: On-The-Go through the UI — hold-to-add (album and track),
+    # the On-The-Go screen, remove, Save into a slot, the slot opened from
+    # Playlists (right files, right order), Delete, and the live list bound
+    # again after a second power-on. The app-level code the otg / otg-slot /
+    # otg-store unit tests do not link (headless/otg_walk_test.c).
+    otg_walk_test = executable(
+      'otg_walk_test',
+      sources: ['headless/otg_walk_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('otg-walk', otg_walk_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

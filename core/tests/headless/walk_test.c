@@ -20,7 +20,7 @@
  *                    Playing, the DAC opened at
  *                    44.1 kHz and fed real decoded PCM, the clock moving
  *   4. bars          the tracklist's now-playing bars MOVE while playing,
- *                    and while paused (v0.2.2, bars_clock in main.c) they do
+ *                    and while paused (v0.2.2, bars_clock in app/albums.c) they do
  *                    not move, are not re-pushed, and a full repaint redraws
  *                    the SAME frozen shape; they move again on resume
  *   5. settings      Settings > About / Battery / Boot Details render
@@ -352,7 +352,7 @@ static _Noreturn void session_walk(const char *disk, const char *ranges)
         /* Row 1 ("Long Two", unselected): its track number (regular 9) and
          * run time (bold 12) each centre their own figures on the row, as the
          * title's caps do (UI_ROW_BASE_FOR) — on the title's baseline they
-         * hung 1.5 px and 1 px low. DET_LIST_Y0 = 108, ROW_H = 24 (main.c). */
+         * hung 1.5 px and 1 px low. DET_LIST_Y0 = 108, ROW_H = 24 (app/albums.h, app/layout.h). */
         int ry = 108 + 24, row2 = 2 * ry + 24 - 1;
         hl_text_hit_t hn, hd;
         int fn = hl_find_text_in(hl_panel(), "2", ry, ry + 24, &hn);

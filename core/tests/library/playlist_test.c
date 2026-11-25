@@ -458,7 +458,7 @@ static void test_resolve(void)
 
 static int g_lk_calls;
 
-/* Answers one path, as main.c's pl_index_lookup would for an indexed track,
+/* Answers one path, as app/playlists.c's pl_index_lookup would for an indexed track,
  * with a cluster no file on the image has, so a row it filled is
  * recognisable. Everything else misses and is walked. */
 static int lk_song1(void *ud, const char *path, playlist_track_t *t)
@@ -577,7 +577,7 @@ int main(void)
     build_image();
     check("mount", fat32_mount(&g_fs, mem_read, 0, 0) == 0);
 
-    /* The scratch is one static in main.c; keep its size honest. */
+    /* The scratch is one static in app/playlists.c; keep its size honest. */
     check("playlist_scratch_t stays under 140 KB",
           sizeof(playlist_scratch_t) <= 140u * 1024u);
     printf("sizeof(playlist_scratch_t) = %u\n", (unsigned)sizeof(playlist_scratch_t));

@@ -22,7 +22,7 @@
  * and carrying the locator (file_hash) that binds a row to its CORELIB.IDX
  * record. It does NOT bind to the library itself: g_songs lives in
  * app/library.c, which the host cannot compile, so this module hands back
- * (dir_clus, file cluster, file_hash) and main.c does the lookup with the
+ * (dir_clus, file cluster, file_hash) and app/playlists.c does the lookup with the
  * same test resolve_art_cb applies. It does NOT touch the player.
  *
  * WHY A SEPARATE FILE. Same reason as idx.c and names.c: this is the code
@@ -63,7 +63,7 @@
  * row — so the cap is simply its own number now.
  *
  * The cost is .bss at the one call site: the scratch's entry array is
- * 512 * sizeof(m3u_entry_t) = 135 KB, and kernel/main.c's row array and
+ * 512 * sizeof(m3u_entry_t) = 135 KB, and app/playlists.c's row array and
  * binding array another 44 KB.
  */
 #define PLAYLIST_TRACKS_MAX ((int)OTG_MAX)
@@ -166,7 +166,7 @@ int playlist_resolve(fat32_t *fs, const playlist_t *pl, const char *base_dir,
  * The same, with an INDEX LOOKUP tried before each entry's walk. The walk is
  * a handful of uncached directory reads per album folder, and on a playlist
  * that mixes albums that was over a thousand ATA commands with the UI
- * frozen. main.c knows where every indexed track is (bound at boot), so it
+ * frozen. app/playlists.c knows where every indexed track is (bound at boot), so it
  * can answer most entries from RAM.
  *
  * `lookup(ud, path, t)` gets the entry's canonical root-relative path. It

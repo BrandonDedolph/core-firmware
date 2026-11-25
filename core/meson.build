@@ -453,7 +453,7 @@ if target == 'hw'
   # path: the .m3u8 files under <library root>/Playlists, and one of them
   # parsed (fs/m3u.c) and resolved (fat32_resolve_path) into playable rows
   # named and located exactly as browse rows are; the record binding stays
-  # in main.c. Same playlist.c the host playlist test compiles against an
+  # in app/playlists.c. Same playlist.c the host playlist test compiles against an
   # in-RAM volume.
   #
   # otg.c is the On-The-Go LIVE list: a fixed 512-entry array of

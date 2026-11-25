@@ -3578,7 +3578,7 @@ static void playlists_load(fat32_t *fs)
      * disk error would otherwise leave Search with no playlist hits until the
      * next boot, while Music > Playlists — which re-reads on every entry —
      * recovered on the next look. */
-    if (n >= 0) g_playlists_scanned = 1;
+    g_playlists_scanned = (n >= 0);
     if (g_pl_sel >= g_playlists_n + 1) {      /* + the pinned On-The-Go row */
         g_pl_sel = 0;                     /* the row under the cursor is gone */
     }
@@ -5719,6 +5719,9 @@ static int otg_delete_slot(fat32_t *fs)
     uart_putc('\n');
     if (rc != 0) {
         otg_flash(0, "Could not delete", 0);
+        /* The rewrite may have stopped partway: read the folder afresh on
+         * the next entry rather than trust the list from before. */
+        g_playlists_scanned = 0;
         return 1;
     }
     otg_flash(-1, "Deleted", 0);
@@ -6395,6 +6398,20 @@ static int list_repaint_partial(void)
  * Without them every newly revealed row waited for its read and then
  * re-presented its band when the cover landed: two paints per detent. */
 #define CHIP_AHEAD_ROWS        LIST_ROWS2
+
+/* The drive's two timeouts after the last input, tuned from the park log
+ * (`parks`/`quick` in the core: ui line): nothing playing, the idle spin-down;
+ * playing, how long the player is held off parking between bursts. */
+#define DISK_IDLE_US           10000000u
+#define DISK_BROWSE_HOLD_US     5000000u
+/* The last UI disk read (a cover batch), and how long after it the drive is
+ * still kept up: see the spin-down block in run_ui. */
+#define UI_DISK_GRACE_US       5000000u
+static uint32_t g_ui_disk_us;
+/* A refused STANDBY, and when: retried at most this often. */
+#define DISK_STANDBY_RETRY_US  10000000u
+static int      g_standby_failed;
+static uint32_t g_standby_fail_us;
 
 /* ---------------------------------------------------------------------------
  * The A-Z locator: which letter a row is under, on whichever list is up
@@ -10151,14 +10168,31 @@ _Noreturn static void run_ui(fat32_t *fs)
          * usually land on a spin-up (the next read after browsing is most
          * often Play), short enough that a put-down device is not spinning
          * for nothing. The park log below says whether that holds. */
-        const uint32_t disk_idle_us = 10000000u;
         /* The hold switch is the user saying they are done navigating: park
          * now rather than after the idle timeout, unless the player is still
          * reading (a refill burst, or a paused buffer not yet stocked). */
+        /* A UI read (a cover batch) in the last few seconds means more may
+         * be coming: parking between batches spun the drive up and down
+         * once per batch. Neither park fires until the reads have stopped. */
+        uint32_t now_d = mmio_read32(USEC_TIMER_ADDR);
+        int ui_reading = (uint32_t)(now_d - g_ui_disk_us) < UI_DISK_GRACE_US;
         int lock_park = g_locked && !player_disk_busy();
-        if (!player_playing() && !ata_is_parked() &&
-            (idle > disk_idle_us || lock_park)) {
-            ata_standby();
+        /* A STANDBY the drive refused is not re-issued every pass: each try
+         * can block for the ready wait. Once per DISK_STANDBY_RETRY_US. */
+        int may_standby = !g_standby_failed ||
+                          (uint32_t)(now_d - g_standby_fail_us) >= DISK_STANDBY_RETRY_US;
+        if (!player_playing() && !ata_is_parked() && may_standby &&
+            ((idle > DISK_IDLE_US && !ui_reading) || lock_park)) {
+            if (lock_park) {
+                /* The idle path waits out a 3 s debounce and never wakes a
+                 * parked drive, so a setting changed just before the lock
+                 * would sit pending until the next spin-up. Write it while
+                 * the platters still turn. */
+                settings_commit(CFG_COMMIT_SOFT);
+                otg_commit(CFG_COMMIT_SOFT);
+            }
+            g_standby_failed  = (ata_standby() != 0);
+            g_standby_fail_us = now_d;
         }
         /* While playing, a shorter hold: the player parks between refill
          * bursts, and without this a menu opened mid-song read from a
@@ -10167,10 +10201,9 @@ _Noreturn static void run_ui(fat32_t *fs)
          * that long the player parks as it always has. Shorter than the
          * idle spin-down above because the music is what is in use now,
          * and every second held is the drive's ~100 mA on top of it. */
-        const uint32_t browse_hold_us = 5000000u;
         /* Locked: nobody is browsing, so no hold (the player parks between
          * bursts as it always has, and its reads are never held back). */
-        player_hold_drive(!g_locked && idle <= browse_hold_us);
+        player_hold_drive(!g_locked && (idle <= DISK_BROWSE_HOLD_US || ui_reading));
         disk_park_track(player_playing());
 
         /*
@@ -10659,7 +10692,12 @@ _Noreturn static void run_ui(fat32_t *fs)
             uint32_t since_wheel = nowc - wheel_last_us();
             int moving = since_wheel < CHIP_WHEEL_SETTLE_US;
             int budget;
-            if (ata_is_parked() && since_wheel < CHIP_SPINUP_QUIET_US) {
+            if (ata_is_parked() && g_locked) {
+                /* Locked: the user has said they are done with the menus,
+                 * and the lock parks the drive. Waking it for a cover here
+                 * was a spin-up and a park per batch. */
+                budget = 0;
+            } else if (ata_is_parked() && since_wheel < CHIP_SPINUP_QUIET_US) {
                 budget = 0;
                 g_ui_art_held++;
             } else if (moving) {
@@ -10719,6 +10757,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 }
                 t_art = mmio_read32(USEC_TIMER_ADDR) - t_art;
                 g_ui_art_reads += (uint32_t)loaded;
+                if (loaded) g_ui_disk_us = mmio_read32(USEC_TIMER_ADDR);
                 if (loaded && t_art > g_ui_art_max_us) g_ui_art_max_us = t_art;
                 for (int r = 0; r < LIST_ROWS2; r++) {
                     const uint16_t *now_px = (want[r] >= 0) ? artcache_peek(want[r]) : 0;

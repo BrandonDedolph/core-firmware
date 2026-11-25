@@ -1622,6 +1622,18 @@ int main(void)
         }
         xpect(&c, "...and is parked again once they go quiet, once",
               stub_ata_standbys == sb0 + 1);
+
+        /* A drive that refuses STANDBY: one try per park, not one per pass
+         * (each try can block on the ready wait). */
+        stub_set_ata_parked(0);
+        stub_set_ata_standby_ok(0);
+        sb0 = stub_ata_standbys;
+        for (int i = 0; i < 400; i++) {
+            player_pump();
+        }
+        xpect(&c, "a refused STANDBY is not re-issued every pass",
+              stub_ata_standbys == sb0 + 1);
+        stub_set_ata_standby_ok(1);
     }
     stub_set_track_frames(8192u);
 

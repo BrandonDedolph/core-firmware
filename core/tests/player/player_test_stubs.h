@@ -143,6 +143,7 @@ extern int stub_disk_pumps;     /* diskbuf_pump() calls (refill bursts)     */
 /* Force the HAL's parked flag, modelling a park the main loop made (its idle
  * spin-down under a pause) that the player's own bookkeeping never saw. */
 void stub_set_ata_parked(int parked);
+void stub_set_ata_standby_ok(int ok);   /* 0: STANDBY is refused (-1)   */
 extern int stub_meta_reads;     /* tag parses                               */
 
 #endif /* CORE_TESTS_PLAYER_STUBS_H */

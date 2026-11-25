@@ -97,14 +97,25 @@ int main(int argc, char **argv)
     uint32_t under0 = hl_stats().audio_underruns_total;
     hl_tap(HL_BTN_SELECT, 1000);
     CHECK("playing", hl_stats().audio_running);
+    hl_run_ms(30000);                             /* the first fill is done */
+    /* Wake the drive with a menu read, input fresh: the browsing hold is
+     * on, so unlocked it stays up; locked, the hold goes and the player parks
+     * well inside the 5 s the hold would otherwise have lasted. */
+    hl_tap(HL_BTN_MENU, 400);                     /* Now Playing -> tracklist */
+    hl_tap(HL_BTN_MENU, 400);                     /* -> Albums */
+    hl_tap(HL_BTN_SELECT, 600);                   /* the folder is read */
+    CHECK("playing: a menu read has the drive up", !hl_stats().ata_parked);
+    hl_run_ms(1000);
+    CHECK("playing, unlocked, input fresh: the browsing hold keeps it up",
+          !hl_stats().ata_parked);
     hl_set_hold(1);
     int parked = 0;
-    for (int i = 0; i < 60 && !parked; i++) {
+    for (int i = 0; i < 6 && !parked; i++) {
         hl_run_ms(500);
         parked = hl_stats().ata_parked;
     }
-    CHECK("playing and locked: the drive parks between bursts (no browsing hold)",
-          parked);
+    CHECK("playing and locked: the hold is dropped and the drive parks "
+          "within 3 s, not after the 5 s hold", parked);
     hl_run_ms(20000);
     CHECK("...and the music never underruns for it",
           hl_stats().audio_underruns_total == under0 && hl_stats().audio_running);

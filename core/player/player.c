@@ -157,6 +157,7 @@ static decoder_source_t g_dec_src;       /* buffered source handed to the codec 
 static decoder_arena_t  g_arena;
 static int              g_drive_parked;  /* 1 while the HDD is spun down (idle burst) */
 static int              g_drive_hold;    /* 1 while the UI is in use: do not park  */
+static int              g_park_ok;       /* the pump's last STANDBY succeeded      */
 
 static void fat_src_open(fat_src_t *s, fat32_t *fs, uint32_t clus, uint32_t sz)
 {
@@ -2036,12 +2037,18 @@ void player_pump(void)
      * on its own flag alone the pump left them spinning until its next
      * refill burst (up to a minute at FLAC rates). After a STANDBY both flags
      * are set and only a read clears the HAL's, so this still issues one
-     * STANDBY per park, never one per pass. */
+     * STANDBY per park, never one per pass. The main loop keeps the hold on
+     * for a few seconds after its own reads (cover batches), so a run of
+     * them is one spin-up, not one per batch. */
     if (g_dbuf.filling) {
         g_drive_parked = 0;                      /* a burst is reading -> head up */
-    } else if (!g_drive_hold && (!g_drive_parked || !ata_is_parked()) &&
+    } else if (!g_drive_hold &&
+               (!g_drive_parked || (g_park_ok && !ata_is_parked())) &&
                diskbuf_fill_ahead(&g_dbuf) > DISK_LOW) {
-        ata_standby();                           /* topped up + idle -> park it */
+        /* topped up + idle -> park it. A STANDBY the drive refused leaves
+         * the HAL flag clear; g_park_ok stops that being retried every pass
+         * (each try can block on the ready wait) until the next burst. */
+        g_park_ok      = (ata_standby() == 0);
         g_drive_parked = 1;
     }
     fill = pcm_ring_fill(&g_ring);

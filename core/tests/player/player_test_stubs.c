@@ -71,6 +71,7 @@ int  stub_audio_inits_while_running;
 int  stub_audio_drains;
 int  stub_audio_drained_while_running;  /* drains issued BEFORE the stop      */
 int  stub_ata_standbys;
+static int g_ata_standby_ok = 1;   /* 0: STANDBY refused */
 int  stub_ata_wakeups;
 int  stub_disk_pumps;
 static int g_ata_parked;
@@ -174,6 +175,7 @@ void stub_reset(void)
     stub_audio_suspends_while_running = 0;
     stub_audio_inits_while_running = 0;
     stub_ata_standbys = stub_ata_reads = stub_meta_reads = 0;
+    g_ata_standby_ok = 1;
     stub_ata_wakeups = stub_disk_pumps = 0;
     g_ata_parked = 0;
     stub_seeks = 0;
@@ -631,9 +633,14 @@ int ata_read_sectors(uint32_t lba, uint32_t count, void *buf)
 int ata_standby(void)
 {
     stub_ata_standbys++;
+    if (!g_ata_standby_ok) {
+        return -1;                     /* refused: the HAL flag stays clear */
+    }
     g_ata_parked = 1;
     return 0;
 }
+
+void stub_set_ata_standby_ok(int ok) { g_ata_standby_ok = ok; }
 
 /* The HAL's "shared truth" for the platter state: set by a STANDBY, cleared
  * by any read (the real ata_read_raw clears it as the command goes out) and

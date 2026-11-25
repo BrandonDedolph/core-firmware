@@ -136,7 +136,7 @@ void player_set_repeat(int mode);
  * The MODE is the third input: the same pair under ALBUMS deals album groups
  * where under SONGS it deals tracks. Nothing stores it alongside the pair
  * because the record already carries the mode as a setting, and the boot path
- * pushes that before it deals (kernel/main.c: settings_apply, then
+ * pushes that before it deals (app/settings_glue.c: settings_apply, then
  * resume_restore).
  */
 #define PLAYER_KEEP_NONE   (-1)

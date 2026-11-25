@@ -70,7 +70,7 @@ A screenshot here is a claim about what the device draws. So:
     `settings_about_render`, Boot Details `settings_diag_render`) and the
     row tables in `core/ui/settings.c` (`ROOT_L`, `PLAY_L`, `SOUND_L`,
     `DISP_L`, `THEME_L`, `CLICK_L`). Those painters leave the top band clear;
-    `main.c`'s `settings_render_cur` paints the ordinary status strip over it,
+    `settings_glue.c`'s `settings_render_cur` paints the ordinary status strip over it,
     so Settings carries the same strip as the lists;
   - low-battery screens and the charging screen: `core/ui/screen_battery.c`,
     `core/ui/screen_charging.c`;

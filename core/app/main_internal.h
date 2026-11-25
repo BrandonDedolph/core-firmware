@@ -22,7 +22,6 @@
 #include "util.h"
 
 extern int g_menu_accum;                   /* until lists moves */
-void settings_leave(void);                 /* until settings_glue moves */
 void resume_capture(void);                 /* until resume moves */
 int enter_standby(void);                   /* until power moves */
 extern uint32_t g_present_cost_us;         /* until paint moves */

@@ -28,7 +28,7 @@ inside the audio, ...). The store harnesses (`config`, `evlog`, `otg_store`,
 fuzzer mutates the file, not the filesystem, and their control byte can
 re-sign a record's CRC-32 so mutations get past the check to the decoder.
 
-`idx` has a known gap: `library_load_index()` lives in `kernel/main.c`,
+`idx` has a known gap: `library_load_index()` lives in `app/library.c`,
 which the host cannot compile, so its per-record field decode is not fuzzed —
 only the header, the CRC and the stream shape it uses.
 

@@ -45,9 +45,9 @@ static void check(const char *label, int cond)
 /* ---- the environment the copied function reads -------------------------- */
 
 /*
- * A stand-in for main.c's g_songs[]/g_songs_n, carrying only the fields
+ * A stand-in for app/library.c's g_songs[]/g_songs_n, carrying only the fields
  * resume_find_song() touches — under the same names, so the copy needs no
- * edits. main.c's lib_song_t has more, and none of it is consulted here.
+ * edits. app/library.h's lib_song_t has more, and none of it is consulted here.
  *
  * stem_hash is what the matcher compares: main.c fills it from the file's
  * DIRECTORY ENTRY when the record binds (resolve_art_cb), not from file[],

@@ -1587,7 +1587,7 @@ if target == 'sim'
                 'check_resume_parity.py'],
          suite: 'unit')
 
-    # hw-index-loader: library_load_index() in kernel/main.c must actually
+    # hw-index-loader: library_load_index() in app/library.c must actually
     # call the validator idx_test covers (idx_header_parse with the directory
     # entry's size, crc32_update, a refusal on IDX_ECRC) — a validator the
     # loader does not consult tests nothing.

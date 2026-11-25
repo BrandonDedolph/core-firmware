@@ -27,7 +27,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve()
 CORE = HERE.parent.parent.parent            # <repo>/core
 
-MAIN_C = CORE / "kernel" / "main.c"
+MAIN_C = CORE / "app" / "library.c"
 LOADER = "static int library_load_index("
 
 

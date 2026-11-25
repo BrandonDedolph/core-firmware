@@ -66,7 +66,7 @@ DEFAULT_GENRE_MAP = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # The firmware's hard cap on index records, read from the firmware rather than
 # duplicated here — see read_lib_max_songs().
 MAIN_C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                      "..", "core", "kernel", "main.c")
+                      "..", "core", "app", "library.h")
 
 REC_FMT = "<IHH64s64s48s40s24sII"        # 256 bytes (…24s + folder_hash + file_hash)
 assert struct.calcsize(REC_FMT) == 256
@@ -120,12 +120,12 @@ def load_genre_map(path):
 
 
 def read_lib_max_songs(path=MAIN_C):
-    """The firmware's LIB_MAX_SONGS, read out of kernel/main.c.
+    """The firmware's LIB_MAX_SONGS, read out of app/library.h.
 
     The device stops loading records at this cap, silently — songs past it just
     are not in the library, with no error anywhere. Nothing checked that the
     index we write fits, and duplicating the number here would only move the
-    drift. Returns None if main.c can't be read (running outside the repo),
+    drift. Returns None if library.h can't be read (running outside the repo),
     which downgrades the cap check to a warning."""
     try:
         with open(path, encoding="utf-8") as fh:
@@ -329,7 +329,7 @@ def parse_args(argv=None):
                         "genres in the files' own tags (default: %(default)s)")
     p.add_argument("--max-songs", type=int, default=None,
                    help="override the firmware's LIB_MAX_SONGS cap check "
-                        "(default: read from core/kernel/main.c)")
+                        "(default: read from core/app/library.h)")
     p.add_argument("-q", "--quiet", action="store_true",
                    help="don't print a line per album")
     p.add_argument("--show-drift", action="store_true",
@@ -437,14 +437,14 @@ def main(argv=None):
     # a too-large index is a message here rather than a mystery on the device.
     cap = args.max_songs if args.max_songs is not None else read_lib_max_songs()
     if cap is None:
-        print("warning: could not read LIB_MAX_SONGS from core/kernel/main.c; "
+        print("warning: could not read LIB_MAX_SONGS from core/app/library.h; "
               "the record-count check was skipped", file=sys.stderr)
     elif len(recs) > cap:
         raise SystemExit(
             f"{len(recs)} records exceeds the firmware's LIB_MAX_SONGS ({cap}).\n"
             f"The device would load the first {cap} and silently drop "
             f"{len(recs) - cap} tracks — no error, they just would not appear "
-            f"in the library.\nRaise LIB_MAX_SONGS in core/kernel/main.c — it "
+            f"in the library.\nRaise LIB_MAX_SONGS in core/app/library.h — it "
             f"costs roughly 180 bytes of .bss per song (lib_song_t plus the "
             f"two index arrays), and .bss is budgeted, so check "
             f"core/tests/scripts/check_size.sh — or reduce the source tree.")

@@ -1588,6 +1588,17 @@ if target == 'sim'
                 'check_build_index.py'],
          suite: 'unit')
 
+    # check-move: the move checker a split PR runs (scripts/check_move.py,
+    # docs/testing-split.md), against a throwaway git history: a verbatim
+    # move passes; an edited, reordered or dropped line is reported.
+    git_prog = find_program('git', required: false)
+    if git_prog.found()
+      test('check-move', py,
+           args: [meson.current_source_dir() / 'scripts' /
+                  'check_move_test.py'],
+           suite: 'unit')
+    endif
+
     # make-log: the host half of the on-disk event log (tools/make_log.py).
     # Round-trips a synthesized ring through --dump: blocks come back in
     # sequence order regardless of the slot the ring put them in, an

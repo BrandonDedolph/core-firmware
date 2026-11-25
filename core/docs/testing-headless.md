@@ -161,9 +161,14 @@ cp build-sim/tests/headless_disk.img /tmp/d.img        # it WRITES to the disk
 Commands: `run:MS`, `sel` `menu` `play` `right` `left` (tap), `hold:BTN:MS`,
 `down:N` / `up:N` (wheel rows), `holdsw:0|1` (Hold switch), `jack:0|1`,
 `shot:PATH` (24-bit BMP), `find:TEXT`, `stats`, `log` (UART since the last
-`log`), `evs` (the hardware timeline). `HL_VERBOSE=1` echoes the UART as it
-happens; `HL_DUMP_LOG=1` makes a failing `firmware_walk_test` print the
-transcript.
+`log`), `evs` (the hardware timeline), `echo:TEXT` (a marker line for
+scripts). `HL_VERBOSE=1` echoes the UART as it happens; `HL_DUMP_LOG=1` makes
+a failing `firmware_walk_test` print the transcript.
+
+`tests/scripts/headless_transcript.py BUILD OUT` runs one fixed session
+through it (browse, play, pause, Hold, About, suspend, wake) and writes the
+UART, the timeline and a screenshot per step to `OUT`, for `diff -r` between
+two commits: [testing-split.md](testing-split.md).
 
 ## Not covered
 

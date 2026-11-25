@@ -125,6 +125,21 @@ jobs:
         working-directory: core
         run: make ipod
 
+      # A report, not a gate: section sizes, every symbol by size, and each
+      # function's stack frame, so a PR (a main.c split above all,
+      # docs/testing-split.md) can be compared with its base. The frames come
+      # from a SECOND build with -fstack-usage in build-hw-stack; build-hw is
+      # not touched, and the script checks the two core.bin are identical.
+      - name: Size, symbol and stack-usage report
+        working-directory: core
+        run: python3 tests/scripts/hw_size_report.py build-hw hw-report --stack-build build-hw-stack
+
+      - name: Upload the size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: hw-size-report-pinned
+          path: core/hw-report/
+
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

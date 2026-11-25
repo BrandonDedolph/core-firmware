@@ -5637,6 +5637,9 @@ static int otg_save_to_slot(fat32_t *fs)
     uart_putc('\n');
     if (rc != 0) {
         otg_flash(0, "Could not save", 0);
+        /* As a failed delete: the slot may be half-written, so read the
+         * Playlists folder afresh on the next entry. */
+        g_playlists_scanned = 0;
         return 1;                        /* the screen changed: repaint */
     }
 

@@ -372,6 +372,7 @@ static uint32_t g_list_epoch;
  * backing out of an album returns the cursor to that album in the list rather
  * than jumping to the top. */
 static int g_br_sel, g_br_accum;      /* album list (depth 0)  */
+static int g_chip_last_sel, g_chip_dir = 1;  /* cover look-ahead's direction */
 /* This tracklist was opened straight from a Search hit, so the album list
  * underneath it was never on screen: MENU must go back to the results, not
  * reveal a list the user did not ask for. Cleared by every other push. */
@@ -6358,6 +6359,11 @@ static int list_repaint_partial(void)
  * detent scroll (~300 ms apart) never trips a spin-up mid-gesture. */
 #define CHIP_WHEEL_SETTLE_US   150000u
 #define CHIP_SPINUP_QUIET_US   500000u
+/* Rows past the window the cover pump also loads, once every visible row is
+ * resident: a screen ahead in the direction of travel and a screen behind.
+ * Without them every newly revealed row waited for its read and then
+ * re-presented its band when the cover landed: two paints per detent. */
+#define CHIP_AHEAD_ROWS        LIST_ROWS2
 
 /* ---------------------------------------------------------------------------
  * The A-Z locator: which letter a row is under, on whichever list is up
@@ -10623,8 +10629,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * through g_lp.rows, so a landed cover costs one row band, not a
                  * cleared panel and a full-frame push (see list_repaint_partial). */
                 const uint16_t *before[LIST_ROWS2];
-                int want[LIST_ROWS2];
-                int vtop = ui_scroll_window(g_br_sel, albumlist_count(), LIST_ROWS2);
+                int want[LIST_ROWS2 + 2 * CHIP_AHEAD_ROWS];
+                int nlist = albumlist_count();
+                int vtop = ui_scroll_window(g_br_sel, nlist, LIST_ROWS2);
                 /* PEEK, not get: this loop is only observing. artcache_get
                  * claims a way and re-stamps the LRU, so using it here (12
                  * times a pass, always in row order) is what pinned the top
@@ -10637,9 +10644,30 @@ _Noreturn static void run_ui(fat32_t *fs)
                     want[r]   = albumlist_album_at(vtop + r);
                     before[r] = (want[r] >= 0) ? artcache_peek(want[r]) : 0;
                 }
+                /* Then the look-ahead, after the window so it never delays a
+                 * visible chip: a screen in the direction the selection last
+                 * moved, then a screen the other way. Only from a drive that
+                 * is already turning: rows nobody is looking at are not worth
+                 * a spin-up (or, idle, the battery a spin-up costs). */
+                int nwant = LIST_ROWS2;
+                if (g_br_sel != g_chip_last_sel) {
+                    g_chip_dir = (g_br_sel > g_chip_last_sel) ? 1 : -1;
+                    g_chip_last_sel = g_br_sel;
+                }
+                if (!ata_is_parked()) {
+                    for (int pass = 0; pass < 2; pass++) {
+                        int dir = pass == 0 ? g_chip_dir : -g_chip_dir;
+                        for (int k = 0; k < CHIP_AHEAD_ROWS; k++) {
+                            int row = dir > 0 ? vtop + LIST_ROWS2 + k
+                                              : vtop - 1 - k;
+                            if (row < 0 || row >= nlist) break;
+                            want[nwant++] = albumlist_album_at(row);
+                        }
+                    }
+                }
                 uint32_t t_art = mmio_read32(USEC_TIMER_ADDR);
                 int loaded = 0;
-                while (loaded < budget && artcache_pump_for(fs, want, LIST_ROWS2)) {
+                while (loaded < budget && artcache_pump_for(fs, want, nwant)) {
                     loaded++;
                 }
                 t_art = mmio_read32(USEC_TIMER_ADDR) - t_art;

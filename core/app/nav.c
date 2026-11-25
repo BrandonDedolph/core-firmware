@@ -8,6 +8,7 @@
 #include "hw/uart.h"
 #include "../ui/wheel.h"
 #include "main_internal.h"
+#include "settings_glue.h"
 #include "albums.h"
 #include "nav.h"
 #include "nowplaying.h"

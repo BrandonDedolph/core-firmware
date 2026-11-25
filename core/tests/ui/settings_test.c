@@ -567,7 +567,7 @@ int main(void)
           settings_adjust(SETTINGS_SOUND, &s, 0, -1) == 1 && s.volume == 39);
 
     /* Lowering the ceiling under the current volume pulls the volume down in
-     * the SAME call — main.c's single settings_apply() then pushes both. */
+     * the SAME call — settings_glue.c's single settings_apply() then pushes both. */
     settings_defaults(&s);                          /* volume 70, limit 100 */
     check("limit-down-moves",
           settings_adjust(SETTINGS_SOUND, &s, 1, -40) == 1 &&

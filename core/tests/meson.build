@@ -1785,6 +1785,22 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 180,
          suite: 'unit')
+    # settings-leave: leaving the Settings root commits the pending change
+    # (settings_leave, CFG_COMMIT_SOFT) — a power cut well inside the 3 s
+    # debounce keeps it — and, playing with the drive parked, defers it
+    # without a spin-up until the platters next turn
+    # (headless/settings_leave_test.c).
+    settings_leave_test = executable(
+      'settings_leave_test',
+      sources: ['headless/settings_leave_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('settings-leave', settings_leave_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

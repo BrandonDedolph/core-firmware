@@ -12,7 +12,7 @@
  * said "charging" through every one of those hours.
  *
  * This module keeps that record. It is fed once per battery sample by
- * kernel/main.c (battery_refresh) and read by the Battery page and the
+ * app/battery_ui.c (battery_refresh) and read by the Battery page and the
  * charging screen's caption. Pure: no hardware, no clock of its own, no
  * allocation — the caller passes the 1 MHz USEC_TIMER and every difference
  * is unsigned, so the 71-minute wrap is a non-event. Host-tested in

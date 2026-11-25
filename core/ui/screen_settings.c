@@ -50,7 +50,7 @@
 #define S_TRK      g_pal[PAL_TRK]      /* slider track                           */
 #define S_SB_TRK   g_pal[PAL_SB_TRK]   /* scrollbar track                        */
 #define S_SB_THMB  g_pal[PAL_SB_THMB]  /* scrollbar thumb                        */
-/* Warning red. Same literal as kernel/main.c's BATT_LOW_RED — deliberately a
+/* Warning red. Same literal as app/battery_ui.h's BATT_LOW_RED — deliberately a
  * fixed colour and not a palette slot: it must stay legible as a WARNING in
  * every theme, which is exactly what a themed palette entry would not. */
 #define S_WARN     0xE125u

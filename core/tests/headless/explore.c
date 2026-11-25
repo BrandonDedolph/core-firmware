@@ -19,6 +19,8 @@
  *   stats         one line of hl_stats()
  *   log           the UART output since the last `log`
  *   evs           the hardware timeline (rect presents omitted)
+ *   echo:TEXT     print TEXT on a line of its own (a marker for scripts:
+ *                 tests/scripts/headless_transcript.py splits on it)
  *
  *   ./build-sim/tests/headless_explore copy.img sel sel shot:albums.bmp
  */
@@ -81,6 +83,8 @@ int main(int argc, char **argv)
             } else {
                 printf("find '%s': not on screen\n", a + 5);
             }
+        } else if (!strncmp(a, "echo:", 5)) {
+            printf("%s\n", a + 5);
         } else if (!strcmp(a, "stats")) {
             hl_stats_t s = hl_stats();
             printf("t=%.3f presents full %u rect %u refused %u | bl %d lcd_slept %d"

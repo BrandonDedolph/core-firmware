@@ -12,7 +12,7 @@
  * It is a module rather than another block of kernel/main.c because almost
  * all of it is judgement that has to be pinned: what a keystroke does to the
  * query, which of two matches comes first, what "no matches" looks like,
- * and where every pixel of an entirely new screen goes. main.c contributes
+ * and where every pixel of an entirely new screen goes. app/search_glue.c contributes
  * exactly two things it alone knows — WHAT to scan (search_source_t, over the
  * library arrays) and how a hit reads as a row (search_row_fn) — and both are
  * injected, the same seam ui/wheel.c and ui/chrome.c already use.
@@ -23,7 +23,7 @@
  * compare. At 80 MHz that is tens of milliseconds, once per SELECT — not per
  * detent — and it happens while the user's thumb is still on the wheel. A
  * cache of folded titles would cost 288 KB of .bss to save that; it is not
- * bought until a bench says the scan is felt. kernel/main.c times every scan
+ * bought until a bench says the scan is felt. app/search_glue.c times every scan
  * onto the UART (`core: search 3 chars 41 hits 27 ms`) so the bench can read
  * the real number instead of this paragraph's estimate.
  *
@@ -63,7 +63,7 @@ enum { SEARCH_PICK, SEARCH_RESULTS };
 
 /* `idx` indexes the source list for `type` — and for SEARCH_T_SONG it is the
  * SORTED position, not the song record, so song hits arrive in title order
- * and main.c's lookup is one array step. */
+ * and app/search_glue.c's lookup is one array step. */
 typedef struct { uint16_t idx; uint8_t type; uint8_t rank; } search_hit_t;
 
 /*

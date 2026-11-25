@@ -85,7 +85,7 @@ static const char *name_of(int type, int i)
 }
 
 /* library/names.c artist_key(), reproduced here so the suite does not have to
- * link the library for four characters. Artists only, as main.c does. */
+ * link the library for four characters. Artists only, as app/search_glue.c does. */
 static const char *key_of(int type, int i)
 {
     const char *s = name_of(type, i);

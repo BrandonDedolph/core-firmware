@@ -217,7 +217,10 @@ static void test_player_half(void)
           !drivepower_paused_stocking(0, 0, 0, 0, low));
     check("stock: end of file -> not busy",
           !drivepower_paused_stocking(1, 1, 0, 0, low));
+    /* diskbuf sets err = 1 on a failed read (codecs/diskbuf.c); test both signs. */
     check("stock: read error -> not busy",
+          !drivepower_paused_stocking(1, 0, 1, 0, low));
+    check("stock: negative error -> not busy",
           !drivepower_paused_stocking(1, 0, -5, 0, low));
 }
 

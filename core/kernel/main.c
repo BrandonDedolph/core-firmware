@@ -3556,9 +3556,11 @@ static const char *playlists_base_dir(void)
     return g_lib_root_clus ? "Music/" PLAYLIST_DIR : PLAYLIST_DIR;
 }
 
-/* (Re)read the Playlists folder into g_playlists. Every entry into the list
- * screen re-reads it — a playlist copied over USB should show up without a
- * reboot, and the folder is one directory read. */
+/* (Re)read the Playlists folder into g_playlists. The list screen reads it
+ * once a boot (playlists_ensure): a playlist copied over USB arrives through
+ * Disk Mode, which reboots, so the folder cannot change under a running
+ * firmware except by the On-The-Go save and delete below, and both re-read
+ * it here. */
 static void playlists_load(fat32_t *fs)
 {
     g_list_epoch++;
@@ -3580,6 +3582,19 @@ static void playlists_load(fat32_t *fs)
         g_pl_sel = 0;                     /* the row under the cursor is gone */
     }
     g_pl_accum = 0;
+}
+
+/* Entering the Playlists screen. The folder read used to happen on every
+ * entry, and with the drive parked that was a spin-up before the list
+ * appeared. Only a read that worked is kept (g_playlists_scanned), so a
+ * transient error is still retried on the next entry. */
+static void playlists_ensure(fat32_t *fs)
+{
+    if (!g_playlists_scanned) {
+        playlists_load(fs);
+        return;
+    }
+    g_pl_accum = 0;                       /* what the load would have reset */
 }
 
 /*
@@ -9205,7 +9220,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         g_set_editing = 0;
                         scr_push(SCR_SETTINGS);
                     } else if (g_main_sel == MM_PLAYLISTS) {
-                        playlists_load(fs);            /* same list as Music -> */
+                        playlists_ensure(fs);          /* same list as Music -> */
                         scr_push(SCR_PLAYLISTS);       /* Playlists; MENU pops here */
                     }
                     /* other items are greyed: SELECT does nothing yet */
@@ -9232,7 +9247,8 @@ _Noreturn static void run_ui(fat32_t *fs)
                     } else if (g_music_sel == MU_ARTISTS) {
                         library_ensure(fs);            /* index -> g_albums      */
                         g_artist_filter[0] = '\0';
-                        build_artists();
+                        /* No rebuild: library_ensure built the list when the
+                         * index loaded, and nothing changes g_albums after. */
                         g_artist_sel = g_artist_accum = 0;
                         scr_push(SCR_ARTISTS);
                     } else if (g_music_sel == MU_SONGS) {
@@ -9251,17 +9267,14 @@ _Noreturn static void run_ui(fat32_t *fs)
                         g_genre_sel = g_genre_accum = 0;
                         scr_push(SCR_GENRES);
                     } else if (g_music_sel == MU_PLAYLISTS) {
-                        playlists_load(fs);            /* Music/Playlists/NAME.m3u8 */
+                        playlists_ensure(fs);          /* Music/Playlists/NAME.m3u8 */
                         scr_push(SCR_PLAYLISTS);
                     } else if (g_music_sel == MU_SEARCH) {
                         library_ensure(fs);
-                        /* Artists are derived, not loaded: Search wants them
-                         * without making the user open the Artists list
-                         * first. Both this and the playlist folder read are
-                         * once a session — the disk cannot change under a
-                         * running firmware — so only the FIRST Search entry
-                         * can spin a parked drive. */
-                        if (g_artists_n == 0)     build_artists();
+                        /* Artists are built by library_ensure. The playlist
+                         * folder read is once a session — the disk cannot
+                         * change under a running firmware — so only the
+                         * first entry here or into Playlists reads it. */
                         if (!g_playlists_scanned) playlists_load(fs);
                         /* The query survives leaving the screen, so re-scan
                          * on the way back in: the hits then always name rows

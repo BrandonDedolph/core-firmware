@@ -260,7 +260,8 @@ volume root on a disk with no `Music/` folder. Entries may be absolute from
 the volume root (`/Music/Artist - Album/01 Song.flac`) or relative to that
 folder (`../Artist - Album/01 Song.flac`); `\` separators and a drive
 letter are tolerated. Music → Playlists lists them by filename (extension
-trimmed), A–Z, re-read on every entry; open one for its tracklist, SELECT
+trimmed), A–Z, read once a boot (Disk Mode reboots, and On-The-Go save
+and delete re-read it); open one for its tracklist, SELECT
 plays the whole playlist from that row; a playlist queue resumes at boot.
 
 `fs/m3u.c` parses (unit-tested against the malformed files real libraries

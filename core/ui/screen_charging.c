@@ -249,7 +249,7 @@ void screen_charging_note(const char *note)
 
 void screen_charging_lock_render(void)
 {
-    /* The same four rectangles as kernel/main.c draw_lock_glyph (body +
+    /* The same four rectangles as app/statusbar.c draw_lock_glyph (body +
      * two posts + arch). A private copy for the reason screen_battery.c
      * gives for its toast battery: the original is a static in main.c,
      * which this file cannot reach and must not pull in. */

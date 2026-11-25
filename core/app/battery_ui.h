@@ -14,7 +14,7 @@
 
 #include "../kernel/chargestat.h"
 
-/* The gauge's low-battery fill colour; draw_battery_c (main.c) uses it too. */
+/* The gauge's low-battery fill colour; draw_battery_c (app/statusbar.c) uses it too. */
 #define BATT_LOW_RED 0xE125u        /* distinct warning red (RGB ~226,40,44)    */
 
 extern chargestat_t g_chg;

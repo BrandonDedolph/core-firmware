@@ -1573,6 +1573,53 @@ int main(void)
               stub_ata_reads - reads_before == 6);
         stub_set_ata_read_ok(1);
     }
+
+    /* ---- 13f. the menus hold the drive up ------------------------------
+     *
+     * Every list, album and cover the UI opens is a synchronous read on the
+     * main loop. Parked between refill bursts, each one waited out a 1-3 s
+     * spin-up with the screen frozen. While the main loop reports the user
+     * active (player_hold_drive), the topped-up pump leaves the drive alone;
+     * once they go quiet it parks as before. A menu read that woke a parked
+     * drive (the HAL's flag cleared, the player's own still set) is parked
+     * again then, not left spinning until the next burst. */
+    stub_reset();
+    stub_set_track_frames(44100u * 60u);
+    make_entries(ents, 1, 0);
+    player_play_queue(ents, 1, 0, 0, 0);
+    set_usec(0);
+    stub_set_disk_ahead(64u * 1024u * 1024u);
+    player_hold_drive(1);
+    {
+        int sb0 = stub_ata_standbys;
+        for (int i = 0; i < 400; i++) {
+            player_pump();
+        }
+        xpect(&c, "held: a topped-up, idle pump does not park the drive",
+              stub_ata_standbys == sb0);
+        player_hold_drive(0);
+        for (int i = 0; i < 400; i++) {
+            player_pump();
+        }
+        xpect(&c, "released: the pump parks the drive, once",
+              stub_ata_standbys == sb0 + 1);
+        
+        /* A menu read spins the platters up behind the player's back. */
+        stub_set_ata_parked(0);
+        sb0 = stub_ata_standbys;
+        player_hold_drive(1);
+        for (int i = 0; i < 400; i++) {
+            player_pump();
+        }
+        xpect(&c, "a drive a menu read woke stays up while the user is active",
+              stub_ata_standbys == sb0);
+        player_hold_drive(0);
+        for (int i = 0; i < 400; i++) {
+            player_pump();
+        }
+        xpect(&c, "...and is parked again once they go quiet, once",
+              stub_ata_standbys == sb0 + 1);
+    }
     stub_set_track_frames(8192u);
 
     /* ---- 13b. a pause keeps the anti-skip buffer stocked ---------------

@@ -279,6 +279,12 @@ uint32_t    player_buf_pct(void);
  * present so the buffer-health readout tracks the last frame's low point. */
 void player_note_presented(void);
 
+/* 1 = the UI is in use: keep the drive spinning between refill bursts so a
+ * menu read does not wait out a spin-up. The main loop sets it every pass
+ * from its idle timer; 0 lets the pump park the drive as soon as the
+ * anti-skip buffer is topped up, as before. */
+void player_hold_drive(int hold);
+
 /* The playback queue (the folder a track was launched from), for the queue view.
  * player_jump switches to entry `i` and plays it (no-op for folders/out-of-range). */
 int         player_queue_len(void);

@@ -1583,6 +1583,9 @@ int main(void)
      * once they go quiet it parks as before. A menu read that woke a parked
      * drive (the HAL's flag cleared, the player's own still set) is parked
      * again then, not left spinning until the next burst. */
+    player_stop();
+    xpect(&c, "nothing loaded: the player never needs the drive",
+          !player_disk_busy());
     stub_reset();
     stub_set_track_frames(44100u * 60u);
     make_entries(ents, 1, 0);
@@ -1647,6 +1650,15 @@ int main(void)
         player_pump();
         xpect(&c, "...and leaves it alone once stocked",
               stub_disk_pumps == pumps_before);
+        /* The hold switch parks early only when the player says it is
+         * done with the drive (player_disk_busy): a paused buffer still
+         * being stocked is not done. */
+        xpect(&c, "paused and stocked: the player does not need the drive",
+              !player_disk_busy());
+        stub_set_disk_ahead(0);
+        xpect(&c, "paused and shallow: it does (the stock is still due)",
+              player_disk_busy());
+        stub_set_disk_ahead(64u * 1024u * 1024u);
         stub_set_ata_parked(1);                /* the main loop's idle park */
         stub_set_disk_ahead(0);
         pumps_before = stub_disk_pumps;

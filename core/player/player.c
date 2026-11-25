@@ -2134,6 +2134,20 @@ void player_note_presented(void) { g_pl_low_fill = pcm_ring_fill(&g_ring); }
 
 void player_hold_drive(int hold) { g_drive_hold = hold ? 1 : 0; }
 
+int player_disk_busy(void)
+{
+    if (!player_active()) {
+        return 0;
+    }
+    if (g_dbuf.filling) {
+        return 1;                        /* a refill burst is reading */
+    }
+    /* Paused: the same test the paused pump stocks the buffer by, so a park
+     * the UI asks for never cuts that short. */
+    return g_pl_paused && !g_dbuf.eos && diskbuf_error(&g_dbuf) == 0 &&
+           diskbuf_fill_ahead(&g_dbuf) < DISK_LOW;
+}
+
 /* ---- Queue inspection + jump (the "Now Playing" queue view) --------------- */
 int player_queue_len(void)      { return g_queue_n; }
 int player_queue_current(void)  { return g_queue_idx; }

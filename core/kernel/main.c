@@ -6025,6 +6025,33 @@ static uint32_t g_ui_art_held;         /* passes that refused to wake a parked p
 
 static uint32_t present_gap_us(void);  /* defined just below, with the throttle */
 
+/*
+ * Was each park worth it? A park followed by a read within DISK_PARK_QUICK_US
+ * paid a spin-up (power, and a wait if it was a menu) to save a few seconds
+ * of spinning: the idle timeout and the browsing hold are tuned by how often
+ * that happens in real use. Counted separately for parks made while playing
+ * (the player's, between bursts) and while not (the idle timeout, the hold
+ * switch), cumulative for the boot, in the 5 s `core: ui` line.
+ */
+#define DISK_PARK_QUICK_US 15000000u
+static uint32_t g_park_n[2], g_park_quick[2];   /* [0] not playing, [1] playing */
+static uint32_t g_park_at_us;
+static int      g_park_was, g_park_kind;
+static void disk_park_track(int playing)
+{
+    int parked = ata_is_parked();
+    if (parked == g_park_was) return;
+    uint32_t now = mmio_read32(USEC_TIMER_ADDR);
+    if (parked) {
+        g_park_kind  = playing ? 1 : 0;
+        g_park_at_us = now;
+        g_park_n[g_park_kind]++;
+    } else if ((uint32_t)(now - g_park_at_us) < DISK_PARK_QUICK_US) {
+        g_park_quick[g_park_kind]++;
+    }
+    g_park_was = parked;
+}
+
 static void ui_stats_emit(void)
 {
     if (g_ui_full + g_ui_partial == 0 && g_ui_art_reads == 0 && g_ui_art_held == 0) {
@@ -6042,6 +6069,10 @@ static void ui_stats_emit(void)
     uart_puts(" max_us ");              uart_dec((int)g_ui_art_max_us);
     uart_puts(" held ");                uart_dec((int)g_ui_art_held);
     uart_puts(" parked ");              uart_dec(ata_is_parked());
+    uart_puts(" parks ");               uart_dec((int)g_park_n[0]);
+    uart_puts(" quick ");               uart_dec((int)g_park_quick[0]);
+    uart_puts(" parks_play ");          uart_dec((int)g_park_n[1]);
+    uart_puts(" quick ");               uart_dec((int)g_park_quick[1]);
     /* BCM health, cumulative: handshakes that ran out of budget (a post-wake
      * absorb that never retired lands here) and presents refused because the
      * panel was slept. A healthy device reads 0 0 forever. */
@@ -10116,8 +10147,17 @@ _Noreturn static void run_ui(fat32_t *fs)
          * parked drive; at most one block per pass. */
         evlog_commit(CFG_COMMIT_IDLE);
 
-        const uint32_t disk_idle_us = 20000000u;   /* 20 s: saves ~100 mA, no thrash */
-        if (!player_playing() && !ata_is_parked() && idle > disk_idle_us) {
+        /* 10 s: long enough that reading a list and picking a song does not
+         * usually land on a spin-up (the next read after browsing is most
+         * often Play), short enough that a put-down device is not spinning
+         * for nothing. The park log below says whether that holds. */
+        const uint32_t disk_idle_us = 10000000u;
+        /* The hold switch is the user saying they are done navigating: park
+         * now rather than after the idle timeout, unless the player is still
+         * reading (a refill burst, or a paused buffer not yet stocked). */
+        int lock_park = g_locked && !player_disk_busy();
+        if (!player_playing() && !ata_is_parked() &&
+            (idle > disk_idle_us || lock_park)) {
             ata_standby();
         }
         /* While playing, a shorter hold: the player parks between refill
@@ -10128,7 +10168,10 @@ _Noreturn static void run_ui(fat32_t *fs)
          * idle spin-down above because the music is what is in use now,
          * and every second held is the drive's ~100 mA on top of it. */
         const uint32_t browse_hold_us = 5000000u;
-        player_hold_drive(idle <= browse_hold_us);
+        /* Locked: nobody is browsing, so no hold (the player parks between
+         * bursts as it always has, and its reads are never held back). */
+        player_hold_drive(!g_locked && idle <= browse_hold_us);
+        disk_park_track(player_playing());
 
         /*
          * SELECT press-length arbitration on a LIST ROW: the tap acts on

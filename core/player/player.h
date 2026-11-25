@@ -285,6 +285,12 @@ void player_note_presented(void);
  * anti-skip buffer is topped up, as before. */
 void player_hold_drive(int hold);
 
+/* 1 while the player itself still needs the drive up: a refill burst is
+ * reading, or, paused, the anti-skip buffer is not yet stocked to its low
+ * mark. The main loop asks before parking the drive early (the hold switch);
+ * the player's own parking between bursts is not affected. */
+int player_disk_busy(void);
+
 /* The playback queue (the folder a track was launched from), for the queue view.
  * player_jump switches to entry `i` and plays it (no-op for folders/out-of-range). */
 int         player_queue_len(void);

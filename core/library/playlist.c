@@ -181,6 +181,15 @@ int playlist_resolve(fat32_t *fs, const playlist_t *pl, const char *base_dir,
                      playlist_track_t *out, int max,
                      playlist_scratch_t *scr, playlist_stats_t *st)
 {
+    return playlist_resolve_ex(fs, pl, base_dir, out, max, scr, st, 0, 0);
+}
+
+int playlist_resolve_ex(fat32_t *fs, const playlist_t *pl,
+                        const char *base_dir,
+                        playlist_track_t *out, int max,
+                        playlist_scratch_t *scr, playlist_stats_t *st,
+                        playlist_lookup_fn lookup, void *lookup_ud)
+{
     if (!st) {
         return M3U_EINVAL;
     }
@@ -221,6 +230,12 @@ int playlist_resolve(fat32_t *fs, const playlist_t *pl, const char *base_dir,
             break;
         }
         const char *path = scr->ent[i].path;
+        /* The index first: a hit is the walk's answer without the reads. A
+         * miss changes nothing below, including the folder cache. */
+        if (lookup && lookup(lookup_ud, path, &out[n])) {
+            n++;
+            continue;
+        }
         int plen = 0, cut = -1;
         for (; path[plen] != '\0' && plen <= (int)M3U_PATH_MAX; plen++) {
             if (path[plen] == '/' || path[plen] == '\\') {

@@ -454,6 +454,85 @@ static void test_resolve(void)
           st.missing == 5 && st.unplayable == 0);
 }
 
+/* ---- 2b. the index lookup ahead of the walk ----------------------------- */
+
+static int g_lk_calls;
+
+/* Answers one path, as main.c's pl_index_lookup would for an indexed track,
+ * with a cluster no file on the image has, so a row it filled is
+ * recognisable. Everything else misses and is walked. */
+static int lk_song1(void *ud, const char *path, playlist_track_t *t)
+{
+    (void)ud;
+    g_lk_calls++;
+    if (strcmp(path, "Music/Artist - Album/01 Song.flac") != 0) {
+        return 0;
+    }
+    strcpy(t->name, "01 Song");
+    t->clus      = 999;
+    t->size      = 1000;
+    t->dir_clus  = C_ALBUM;
+    t->file_hash = name_hash("01 Song.flac");
+    t->fmt       = 0;
+    return 1;
+}
+
+static int lk_never(void *ud, const char *path, playlist_track_t *t)
+{
+    (void)ud; (void)path;
+    g_lk_calls++;
+    memset(t, 0x5A, sizeof *t);         /* a miss may scribble: it is unused */
+    return 0;
+}
+
+static void test_lookup(void)
+{
+    uint32_t dir; int trunc;
+    int n = playlist_scan(&g_fs, C_MUSIC, g_pl, PLAYLIST_MAX, &dir, &trunc, 0);
+    const playlist_t *fav = find_pl(n, "Favourites");
+    playlist_stats_t st, st0;
+    static playlist_track_t walked[PLAYLIST_TRACKS_MAX];
+
+    int r0 = playlist_resolve(&g_fs, fav, "Music/Playlists",
+                              walked, PLAYLIST_TRACKS_MAX, &g_scr, &st0);
+
+    g_lk_calls = 0;
+    int r = playlist_resolve_ex(&g_fs, fav, "Music/Playlists", g_rows,
+                                PLAYLIST_TRACKS_MAX, &g_scr, &st, lk_never, 0);
+    int same = (r == r0);
+    for (int i = 0; same && i < r0; i++) {
+        same = strcmp(g_rows[i].name, walked[i].name) == 0 &&
+               g_rows[i].clus == walked[i].clus &&
+               g_rows[i].size == walked[i].size &&
+               g_rows[i].dir_clus == walked[i].dir_clus &&
+               g_rows[i].file_hash == walked[i].file_hash &&
+               g_rows[i].fmt == walked[i].fmt;
+    }
+    check("a lookup that always misses gives the walk's rows", same);
+    check("...and the walk's counts",
+          st.missing == st0.missing && st.unplayable == st0.unplayable &&
+          st.io_err == st0.io_err);
+    check("the lookup is asked once per parsed entry, before its walk",
+          g_lk_calls == (int)st.m3u.count);
+
+    r = playlist_resolve_ex(&g_fs, fav, "Music/Playlists", g_rows,
+                            PLAYLIST_TRACKS_MAX, &g_scr, &st, lk_song1, 0);
+    check("a hit is a row, in file order, with the lookup's fields",
+          r == r0 && g_rows[0].clus == 999 && g_rows[3].clus == 999 &&
+          strcmp(g_rows[0].name, "01 Song") == 0);
+    check("a miss beside a hit is walked as before",
+          g_rows[1].clus == C_SONG2 && g_rows[2].clus == C_ROOTFLAC);
+
+    /* A hit costs no read: with the album folder unreadable, the entry the
+     * lookup answers still resolves while its walked siblings fail. */
+    g_fail_lba = C_ALBUM;
+    r = playlist_resolve_ex(&g_fs, fav, "Music/Playlists", g_rows,
+                            PLAYLIST_TRACKS_MAX, &g_scr, &st, lk_song1, 0);
+    g_fail_lba = NO_FAIL;
+    check("a hit needs no directory read",
+          r >= 1 && g_rows[0].clus == 999);
+}
+
 /* ---- 3. the disk failing under the resolve ------------------------------ */
 
 static void test_errors(void)
@@ -505,6 +584,7 @@ int main(void)
 
     test_scan();
     test_resolve();
+    test_lookup();
     test_errors();
 
     printf("playlist_test: %s (%d failure%s)\n",

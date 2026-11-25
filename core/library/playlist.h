@@ -162,4 +162,27 @@ int playlist_resolve(fat32_t *fs, const playlist_t *pl, const char *base_dir,
                      playlist_track_t *out, int max,
                      playlist_scratch_t *scr, playlist_stats_t *st);
 
+/*
+ * The same, with an INDEX LOOKUP tried before each entry's walk. The walk is
+ * a handful of uncached directory reads per album folder, and on a playlist
+ * that mixes albums that was over a thousand ATA commands with the UI
+ * frozen. main.c knows where every indexed track is (bound at boot), so it
+ * can answer most entries from RAM.
+ *
+ * `lookup(ud, path, t)` gets the entry's canonical root-relative path. It
+ * returns 1 after filling *t with exactly what the walk would have produced
+ * for a playable file, or 0 when it cannot be sure, and then the entry is
+ * walked as before. A lookup must never return 1 for a path the walk would
+ * not find, or would find as something else: when in doubt, 0. NULL is
+ * playlist_resolve.
+ */
+typedef int (*playlist_lookup_fn)(void *ud, const char *path,
+                                  playlist_track_t *t);
+
+int playlist_resolve_ex(fat32_t *fs, const playlist_t *pl,
+                        const char *base_dir,
+                        playlist_track_t *out, int max,
+                        playlist_scratch_t *scr, playlist_stats_t *st,
+                        playlist_lookup_fn lookup, void *lookup_ud);
+
 #endif /* CORE_LIBRARY_PLAYLIST_H */

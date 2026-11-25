@@ -38,5 +38,8 @@ extern int      g_song_sel, g_song_accum;   /* until lists moves */
  * whenever the library is (library_ensure's tail). Defined with the rest of
  * the feature, below the Playlists section it shares state with. */
 void otg_bind_all(void);                    /* until otg moves */
+extern int8_t g_otg_flash_sign;             /* until otg moves */
+extern char   g_otg_flash_label[40];        /* until otg moves */
+extern char   g_otg_flash_token[16];        /* until otg moves */
 
 #endif /* CORE_APP_MAIN_INTERNAL_H */

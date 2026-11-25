@@ -6,7 +6,7 @@ All commands run from `core/`.
 
 | tool | what it proves |
 |---|---|
-| `tests/scripts/check_move.py` | the text moved, verbatim and in order |
+| `tests/scripts/check_move.py` | every line removed from `main.c` was added, in order within each destination file, and nothing was added (to `main.c` or a destination) that is not a moved line or scaffolding |
 | `tests/scripts/headless_transcript.py` | the firmware behaves identically, in fake time, down to the timer reads |
 | `tests/scripts/hw_size_report.py` (also a CI artifact) | the ARM image did not grow, and no inlining decision changed a stack frame |
 
@@ -28,16 +28,32 @@ BASE=/tmp/split-base/core
 python3 tests/scripts/check_move.py origin/main HEAD kernel/main.c app/foo.c app/foo.h
 ```
 
-Every line removed from `kernel/main.c` between the two commits must appear
-in the destination files at `HEAD`, in its original order (a subsequence; it
-may be shared between several destinations, each in order). Compared after
-dropping trailing whitespace and one leading `static `; blank lines are not
-checked. A removed `static X` whose `X` was added back to `main.c` is reported
-as "made non-static in place" (the `main_internal.h` case), not as a failure.
-Every line it could not place is printed as `NOT FOUND main.c:<line at base>:`
-and the exit status is 1. List the new header as a destination too, or the
-prototypes that moved into it are reported. It is greedy: a NOT FOUND is a
-reason to read the diff, which you should do anyway:
+Pass every file the PR adds or edits code in, headers included (the
+`main_internal.h` you added prototypes to as well). It reads
+`git diff BASE HEAD` of each, compares lines after dropping trailing
+whitespace and one leading `static `, and ignores blank lines. Two checks,
+each exits 1:
+
+- `NOT FOUND main.c:<line at base>:` is a line removed from `main.c` that
+  was not added to any destination. Each destination's added lines are
+  aligned with the removed lines as a sequence, so the lines that reached
+  one file keep their order there. The order *between* two destination
+  files is not checked.
+- `ADDED, not from SRC <file>:<line at head>:` is a line added to a
+  destination or to `main.c` that is neither a moved line nor scaffolding.
+  Scaffolding is: the file's leading comment block, any comment line in a
+  `.h`, a bare `/*` or `*/` line (git's diff can leave one behind in
+  `main.c` as context), include guards, `#include`, `extern` declarations,
+  function prototypes, and a declaration that copies a removed line. A line
+  added to `main.c` that is `X` for a removed `static X` is a symbol made
+  non-static in place.
+
+Listed but not failed: symbols made non-static in place, moved lines whose
+`static` was dropped (or added) in the destination, and per-kind counts of
+the scaffolding it skipped. What it cannot see: the order between
+destination files, the wording of a comment in a `.h`, and files you did not
+name. On #56 (state, layout, util) it reports 186 of 186 lines found and
+nothing added. Read the diff as well:
 
 ```sh
 git diff --color-moved=dimmed-zebra --color-moved-ws=allow-indentation-change origin/main

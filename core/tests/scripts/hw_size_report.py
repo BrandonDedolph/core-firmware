@@ -16,8 +16,9 @@ Writes to OUT_DIR, for comparing two commits (docs/testing-split.md):
 
 The stack numbers need a SECOND build of the image with -fstack-usage, in
 --stack-build (configured here if it is not, from the source tree BUILD_HW
-was configured from, with its cross/arm-none-eabi.txt and
-an overlay that appends -fstack-usage to its c_args and c_link_args; with
+was configured from, with its cross/arm-none-eabi.txt and an overlay,
+written into that dir as stack-usage.cross.txt, that appends -fstack-usage
+to its c_args and c_link_args; with
 b_lto the frames are only known at link time, so the .su files are the
 linker's ltrans units, core.elf.ltrans*.ltrans.su). -fstack-usage only writes
 a report: the second build's core.bin must be byte-identical to BUILD_HW's;
@@ -71,7 +72,10 @@ def stack_build(build, core):
             text = f.read()
         c_args = builtin_list(text, "c_args") + ["-fstack-usage"]
         link = builtin_list(text, "c_link_args") + ["-fstack-usage"]
-        overlay = os.path.abspath(build) + ".cross.txt"
+        # Inside the build dir, so nothing lands in the source tree (meson
+        # setup accepts a directory that is not yet a build dir).
+        os.makedirs(build, exist_ok=True)
+        overlay = os.path.join(os.path.abspath(build), "stack-usage.cross.txt")
         with open(overlay, "w") as f:
             f.write("# Written by tests/scripts/hw_size_report.py: the hw cross\n"
                     "# file's c_args/c_link_args plus -fstack-usage.\n"

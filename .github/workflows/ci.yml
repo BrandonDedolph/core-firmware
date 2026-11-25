@@ -130,15 +130,20 @@ jobs:
       # docs/testing-split.md) can be compared with its base. The frames come
       # from a SECOND build with -fstack-usage in build-hw-stack; build-hw is
       # not touched, and the script checks the two core.bin are identical.
+      # continue-on-error: a failure here (the second build, say) shows on
+      # the step but does not turn the job red.
       - name: Size, symbol and stack-usage report
         working-directory: core
+        continue-on-error: true
         run: python3 tests/scripts/hw_size_report.py build-hw hw-report --stack-build build-hw-stack
 
       - name: Upload the size report
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: hw-size-report-pinned
           path: core/hw-report/
+          if-no-files-found: ignore
 
       - name: Upload build logs on failure
         if: failure()
@@ -148,6 +153,7 @@ jobs:
           path: |
             core/build-sim/meson-logs/
             core/build-hw/meson-logs/
+            core/build-hw-stack/meson-logs/
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------

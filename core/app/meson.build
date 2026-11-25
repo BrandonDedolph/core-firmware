@@ -7,4 +7,4 @@
 # -DCORE_FREESTANDING; include dirs from hal_dep and codec_inc); on the host
 # it joins headless_fw_src in tests/meson.build. A new app/*.c is added here
 # and nowhere else.
-app_sources = files('state.c', 'util.c', 'marquee.c', 'bootscreen.c', 'clockui.c', 'persist.c')
+app_sources = files('state.c', 'util.c', 'marquee.c', 'bootscreen.c', 'clockui.c', 'persist.c', 'nav.c')

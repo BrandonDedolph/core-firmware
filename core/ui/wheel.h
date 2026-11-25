@@ -109,7 +109,7 @@ int wheel_accel_step(int delta);
 int wheel_letter_mode(void);
 
 /* Forget the gesture entirely (backlight off, panel wake, screen change —
- * kernel/main.c's scr_push/scr_pop, which is the only way letter mode can be
+ * app/nav.c's scr_push/scr_pop, which is the only way letter mode can be
  * made to end early now that it outlives a pause). */
 void wheel_accel_reset(void);
 

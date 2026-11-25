@@ -20,5 +20,11 @@
 #include "../library/otg.h"
 
 extern otg_list_t g_otg;                  /* until otg moves */
+extern int g_dir_depth;                    /* until albums moves */
+extern int g_menu_accum;                   /* until lists moves */
+extern int g_sel_pending;                  /* until nowplaying moves */
+int np_scrubbing(void);                    /* until nowplaying moves */
+void scrub_exit(void);                     /* until nowplaying moves */
+void settings_leave(void);                 /* until settings_glue moves */
 
 #endif /* CORE_APP_MAIN_INTERNAL_H */

@@ -59,7 +59,7 @@ typedef struct {
 } otg_entry_t;
 
 /*
- * The list. 4 + 4096 = 4100 bytes of .bss at the one instance kernel/main.c
+ * The list. 4 + 4096 = 4100 bytes of .bss at the one instance app/otg.c
  * holds.
  *
  * `gen` counts MUTATIONS, not entries. It is written into the disk slot's

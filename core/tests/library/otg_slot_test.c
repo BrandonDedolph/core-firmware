@@ -908,7 +908,7 @@ int main(void)
     build_image();
     check("mount", fat32_mount(&g_fs, mem_read, 0, PART_LBA) == 0);
 
-    /* The one instance lives in kernel/main.c's .bss; keep its size honest. */
+    /* The one instance lives in app/otg.c's .bss; keep its size honest. */
     printf("sizeof(otg_save_scratch_t) = %u\n", (unsigned)sizeof(otg_save_scratch_t));
     check("otg_save_scratch_t stays under 12 KB",
           sizeof(otg_save_scratch_t) <= 12u * 1024u);

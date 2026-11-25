@@ -211,7 +211,7 @@ int otg_slot_of(fat32_t *fs, const char *name, uint32_t clus, uint32_t size,
                 uint32_t listed, otg_slot_info_t *out);
 
 /*
- * One row to save: where the file is. kernel/main.c fills these from g_songs
+ * One row to save: where the file is. app/otg.c fills these from g_songs
  * (dir_clus / file_clus), because the NAMES it holds are not usable here —
  * lib_song_t.file has lost its extension and the folder map's name is capped
  * at 63 characters, and a path that is not byte-exact names nothing. The
@@ -237,7 +237,7 @@ typedef struct {
 
 /*
  * Caller-owned working memory for otg_slot_save. ~9.7 KB, one instance in
- * kernel/main.c — held here rather than on the stack so its cost is visible
+ * app/otg.c — held here rather than on the stack so its cost is visible
  * at the one place that pays it, exactly as playlist_scratch_t is.
  */
 typedef struct {

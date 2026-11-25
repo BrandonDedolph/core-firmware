@@ -23,6 +23,7 @@
 #include "playctx.h"
 #include "statusbar.h"
 #include "main_internal.h"
+#include "otg.h"
 #include "playlists.h"
 
 /* ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@
 #include "clockui.h"
 #include "nav.h"
 #include "battery_ui.h"
-#include "main_internal.h"
+#include "otg.h"
 #include "statusbar.h"
 
 /* Small padlock glyph (system-screens.jsx corner lock): body + shackle. */

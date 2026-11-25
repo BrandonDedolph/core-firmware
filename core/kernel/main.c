@@ -78,6 +78,7 @@
 #include "../app/marquee.h"
 #include "../app/clockui.h"
 #include "../app/persist.h"
+#include "../app/nav.h"
 #include "../app/main_internal.h"
 
 /*
@@ -126,14 +127,7 @@ static int            g_browse_n;
  * ever two levels: g_dir_depth is 0 (albums) or 1 (an album's tracks).
  * g_cur_dir is the cluster of the album whose tracks are currently listed. */
 static uint32_t g_cur_dir;
-static int      g_dir_depth;
-
-/* Bumped whenever a list's CONTENT is rebuilt or the screen stack moves. The
- * partial-repaint path (list_repaint_partial) compares it, so it can never
- * repaint two rows of a list that is no longer the one it last painted — the
- * screen identity and row count alone can coincide (two genres with the same
- * number of songs, reached faster than one throttled repaint window). */
-static uint32_t g_list_epoch;
+int      g_dir_depth;
 
 /* Browser view state (was local to the old browse loop). The album LIST (depth
  * 0) and a single album's TRACKLIST (depth 1) keep SEPARATE selections, so
@@ -324,9 +318,9 @@ static int      g_scrub_dirty;       /* target moved since the last commit     *
 #define PLAY_HOLD_US 2000000u
 
 static uint32_t g_sel_down_us;
-static int      g_sel_pending;
+int      g_sel_pending;
 
-static int np_scrubbing(void)
+int np_scrubbing(void)
 {
     return g_np_scrub;
 }
@@ -339,7 +333,7 @@ static void scrub_enter(void)
     g_scrub_dirty    = 0;
 }
 
-static void scrub_exit(void)
+void scrub_exit(void)
 {
     g_np_scrub    = 0;
     g_scrub_dirty = 0;
@@ -4186,7 +4180,7 @@ static const menu_item_t g_music_menu[MU_COUNT] = {
 static int g_music_sel;
 
 /* Shared wheel accumulator for the menu screens. */
-static int g_menu_accum;
+int g_menu_accum;
 
 /* Generic menu renderer over a {label, active} list. `back` draws the header
  * back chevron (off for the root menu). */
@@ -4246,53 +4240,6 @@ static void music_menu_render(void)
     menu_render_list("Music", NULL, g_music_menu, MU_COUNT, g_music_sel, 1);
 }
 
-/* ---------------------------------------------------------------------------
- * Screen stack
- * ------------------------------------------------------------------------- */
-typedef enum { SCR_MENU, SCR_MUSIC, SCR_ARTISTS, SCR_SONGS, SCR_GENRES,
-               SCR_PLAYLISTS, SCR_PLAYLIST, SCR_OTG, SCR_SEARCH,
-               SCR_BROWSER, SCR_NOWPLAYING, SCR_QUEUE, SCR_SETTINGS,
-               SCR_BATTERY, SCR_CHARGING } screen_t;
-/* The deepest legal path is 8: MENU, MUSIC, ARTISTS, BROWSER, SONGS,
- * NOWPLAYING, QUEUE, plus ONE modal (Search is no deeper: it sits where
- * ARTISTS does, and the BROWSER an album hit opens sits where BROWSER does;
- * On-The-Go is no deeper either — MENU, PLAYLISTS, OTG, NOWPLAYING, QUEUE
- * plus a modal is 6) (scr_push_modal replaces a modal with a
- * modal, so BATTERY and CHARGING never stack). The headroom is deliberate:
- * this used to be exactly 8 without SONGS counted, and a DISKSAFE edge at
- * the bottom of that path retried the push every pass with dirty set — a
- * full-repaint loop until a button cleared it. A new screen still deserves
- * a look at the arithmetic; the UART line is what says it was wrong. RIGHT
- * on a list pushes NOWPLAYING where a SELECT would have, so the jump adds no
- * depth beyond the path above. */
-#define SCR_STACK_MAX 12
-static screen_t g_scr[SCR_STACK_MAX];
-static int      g_scr_n;
-
-/* Both ends of the stack forget the wheel gesture, which is what ui/wheel.h
- * has always said a screen change does. It matters more now than it read:
- * letter mode survives a pause shorter than the plate's hold (1.2 s), so
- * without this a fast spin that ended in a SELECT would carry letter mode —
- * and the plate — onto the screen that SELECT opened, where one detent would
- * jump a letter on a list the user had not even seen yet. */
-static void      scr_push(screen_t s) { g_list_epoch++;
-                                        wheel_accel_reset();
-                                        if (g_scr_n < SCR_STACK_MAX) g_scr[g_scr_n++] = s;
-                                        else uart_puts("core: scr_push overflow, dropped\n"); }
-static void      scr_pop(void)        { g_list_epoch++;
-                                        wheel_accel_reset();
-                                        if (g_scr_n > 1) g_scr_n--; }
-static screen_t  scr_cur(void)        { return g_scr[g_scr_n - 1]; }
-static int       scr_is_modal(screen_t s) { return s == SCR_BATTERY || s == SCR_CHARGING; }
-/* A modal (BATTERY, CHARGING) over a modal takes its slot instead of a new
- * one: the two are alternatives for the same panel, and popping the top one
- * lands on the real screen underneath, which is what both auto-dismiss paths
- * expect. */
-static void      scr_push_modal(screen_t s) { if (scr_is_modal(scr_cur())) {
-                                                  g_list_epoch++;
-                                                  g_scr[g_scr_n - 1] = s;
-                                              } else scr_push(s); }
-
 /*
  * Leaving Settings: the bookkeeping that MENU does on the way out, without
  * the pop itself. Extracted so the MENU tap and the MENU hold (which jumps
@@ -4311,7 +4258,7 @@ static void      scr_push_modal(screen_t s) { if (scr_is_modal(scr_cur())) {
  * pending for the idle path or the next forced commit (suspend / power-off /
  * disk mode).
  */
-static void settings_leave(void)
+void settings_leave(void)
 {
     g_set_editing = 0;
     resume_capture();
@@ -4342,37 +4289,6 @@ static int theme_preview_sync(void)
                    : g_settings.theme;
     if (want == theme_current()) return 0;
     theme_set(want);
-    return 1;
-}
-
-/*
- * Hold MENU: home, from wherever you are. The tap already popped one screen
- * at the down-edge (that is what keeps every back zero-latency), so the hold
- * reads as "back, then home" — deliberate, and the second transition is the
- * one the gesture is for.
- *
- * Returns 1 if anything moved: at the root this is a true no-op, not even a
- * repaint. Everything dropped here is state that belongs to a screen the
- * stack no longer holds — the browser's depth, the root list's wheel
- * remainder, a SELECT press still being timed on Now Playing, the wheel
- * scrubber, and the wheel gesture itself (letter mode outlives a pause now,
- * so a spin that ended in this hold would otherwise arrive at the main menu
- * still stepping letters). The seek holds need nothing: `allowed` goes with
- * the screen and they cancel themselves on the next feed.
- */
-static int scr_pop_to_root(void)
-{
-    if (g_scr_n <= 1) {
-        return 0;
-    }
-    if (scr_cur() == SCR_SETTINGS) settings_leave();
-    g_scr_n = 1;
-    g_list_epoch++;
-    wheel_accel_reset();               /* a screen change, as scr_pop is */
-    g_dir_depth   = 0;
-    g_menu_accum  = 0;
-    g_sel_pending = 0;
-    if (np_scrubbing()) scrub_exit();
     return 1;
 }
 

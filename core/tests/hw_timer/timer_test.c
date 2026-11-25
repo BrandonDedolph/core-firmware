@@ -146,7 +146,7 @@ static int test_sleep_ms(void)
  * sleep_ms is reachable mid-track (player.c's disk-retry backoff), and
  * playback is a single-shot DMA re-kicked from its completion ISR with
  * only the 16-frame I2S FIFO — ~363 us at 44.1 kHz — covering a late
- * re-kick (kernel/main.c, cpu_wait_us). The doc describes PROC_WAIT_CNT
+ * re-kick (app/util.c, cpu_wait_us). The doc describes PROC_WAIT_CNT
  * as "Sleep until countdown" and does NOT promise an early wake on an
  * interrupt, so the halt length IS the worst-case ISR latency. This
  * decodes every CPU_CTL write the sleep emits — unit bit and 8-bit

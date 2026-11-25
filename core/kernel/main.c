@@ -70,6 +70,10 @@
 #include "timesync.h"
 #include "wallclock.h"
 #include "hw/volume.h"
+#include "../app/state.h"
+#include "../app/layout.h"
+#include "../app/util.h"
+#include "../app/main_internal.h"
 
 /*
  * The Settings shuffle row and the player's playback order are the same three
@@ -99,56 +103,6 @@ _Static_assert((int)SHUFFLE_ALBUMS == PLAYER_SHUFFLE_ALBUMS,
  * is the point: an image built from an uncommitted tree says so. */
 const char core_version_marker[] __attribute__((used, section(".rodata.core_version"))) =
     "CORE-FW-VERSION:" CORE_VERSION "|" CORE_BUILD_ID "\0";
-
-/*
- * Idle-task CPU sleep. Program the per-core countdown to wake this core
- * after ~`ms` milliseconds and halt until then (01-soc-pp5022.md, "Sleep
- * / wake"). We use PROC_WAIT_CNT (self-wakes on the countdown), NOT
- * PROC_SLEEP — with no interrupt controller installed yet, sleep-until-
- * interrupt would never wake. Only the CPU runs the kernel in Phase 1,
- * so CPU_CTL is correct. Three NOPs after the write per the doc's
- * pipeline rule.
- */
-static void cpu_wait_ms(uint8_t ms) {
-    mmio_write32(CPU_CTL_ADDR, PROC_WAIT_CNT | PROC_CNT_MSEC | ms);
-    __asm__ volatile("nop\n\tnop\n\tnop");
-}
-
-/* Same halt, in MICROseconds (the counter field is 8 bits, so <= 255 us). The
- * doc describes PROC_WAIT_CNT as "sleep until countdown" and does NOT promise an
- * interrupt wake, so anything used while AUDIO IS PLAYING must stay inside the
- * DMA ISR's deadline: the transfer is single-shot and re-kicked in the ISR, and
- * only the 16-frame I2S FIFO (~363 us) covers a late one. */
-static void cpu_wait_us(uint8_t us) {
-    mmio_write32(CPU_CTL_ADDR, PROC_WAIT_CNT | PROC_CNT_USEC | us);
-    __asm__ volatile("nop\n\tnop\n\tnop");
-}
-
-/* ---------------------------------------------------------------------------
- * Timed UI windows (volume overlay, Hold banner, low-battery toast)
- *
- * USEC_TIMER is a free-running 1 MHz counter, so it WRAPS every ~71.6 min. An
- * absolute "now < deadline" compare is wrong across that wrap (the deadline
- * looks like it's in the distant past, or a stale one springs back to life), so
- * every timed check in this file stores a START stamp and compares an ELAPSED
- * difference — (uint32_t)(now - t0) < span — which is wrap-correct. An expired
- * window disarms itself so a later wrap can never re-open it.
- * ------------------------------------------------------------------------- */
-typedef struct { uint32_t t0; int armed; } ui_window_t;
-
-static void ui_window_arm(ui_window_t *w)
-{
-    w->t0    = mmio_read32(USEC_TIMER_ADDR);
-    w->armed = 1;
-}
-
-static int ui_window_up(ui_window_t *w, uint32_t span, uint32_t now)
-{
-    if (!w->armed) return 0;
-    if ((uint32_t)(now - w->t0) < span) return 1;
-    w->armed = 0;                     /* expired: can't reopen on the next wrap */
-    return 0;
-}
 
 /* ---------------------------------------------------------------------------
  * Linen theme + Nunito faces
@@ -447,49 +401,6 @@ static int         g_lib_orphaned;
 static int         g_lib_load_err;
 static uint32_t     g_lib_load_ms;   /* boot library load time, shown on About */
 
-/*
- * Boot phase breakdown, all milliseconds, all shown on the About screen. The
- * library load already had a number; the other 8-ish seconds of a cold boot
- * did not, so "make it boot faster" had nowhere to aim. Same reasoning as
- * g_lib_load_ms: a number on the panel is what makes a change here verifiable
- * instead of a matter of impression.
- *
- * g_boot_t0_us is stamped once, as early as the timer allows, and every phase
- * is measured against the live USEC_TIMER rather than accumulated, so a phase
- * we forget to instrument shows up as the gap in the total rather than
- * silently vanishing.
- */
-static uint32_t     g_boot_t0_us;    /* stamped right after timer_init        */
-static uint32_t     g_boot_lcd_ms;   /* lcd_init(): cold BCM bring-up         */
-static uint32_t     g_boot_disk_ms;  /* ata_init + first read + FAT32 mount   */
-static uint32_t     g_boot_resume_ms;/* resume_restore(): readdir + open+seek */
-/*
- * ...of which. MS_NA (see ui/screen_settings.c) means "this step did not run"
- * — NOT "it took 0 ms". Conflating those made the screen lie exactly when it
- * mattered: after the FLAC seek fix an instant seek looked identical to a
- * skipped one. Seeded to MS_NA before resume_restore(), overwritten by each
- * step that actually executes.
- */
-#define BOOT_MS_NA 0xFFFFFFFFu
-static uint32_t     g_boot_res_dir_ms  = BOOT_MS_NA; /* album readdir        */
-static uint32_t     g_boot_res_open_ms = BOOT_MS_NA; /* open + art + prime   */
-static uint32_t     g_boot_res_seek_ms = BOOT_MS_NA; /* player_seek_to()     */
-static uint32_t     g_boot_total_ms; /* to the first UI paint                 */
-
-/* Boot Details' locator: CORECFG.DAT's two slot LBAs and the event log's
- * header / next-flush LBAs, as probed at boot with the drive spinning. The
- * page re-probes only while the drive is up: config_probe_lba and the evlog
- * probes walk the FAT chain (disk reads), so opening the page with the drive
- * parked used to spin it up for 1-3 s before its first paint. */
-static uint32_t     g_diag_cfg_lba[2], g_diag_log_lba[2];
-
-/* ms since g_boot_t0_us (USEC_TIMER wraps; the subtraction is unsigned so a
- * wrap mid-boot still yields the right delta). */
-static uint32_t boot_ms_now(void)
-{
-    return (mmio_read32(USEC_TIMER_ADDR) - g_boot_t0_us) / 1000u;
-}
-
 /* Album art (folder.art) location captured while enumerating the current
  * folder; handed to player_play_queue so the player owns/validates it. */
 static uint32_t g_art_clus, g_art_size;
@@ -498,41 +409,6 @@ static uint32_t g_art_clus, g_art_size;
  * name has this artist prefix — the Artists → one-artist's-albums drill-down.
  * Empty means the plain "Albums" list (every folder). */
 static char g_artist_filter[NAME_MAX + 1];
-
-/* Output volume (WM8758 codec gain, 0..100) + how long the on-screen volume
- * overlay stays up after the last wheel tick (volume-demo.jsx: ~1.5 s then fade).
- * The window is START-stamped, not deadline-stamped — see ui_window_t. */
-static int         g_volume = 70;
-static ui_window_t g_vol_show;
-#define VOL_SHOW_US 1500000u
-
-/* The live Settings state (ui/settings.h model). Declared up here because the
- * library/playback helpers below read it (shuffle, clicker); the navigation and
- * rendering that own it live in the Settings section further down. */
-static settings_t g_settings;
-
-/*
- * The sleep timer's running countdown (ui/sleeptimer.h). Two sides, one
- * truth: g_settings.sleep_timer_min is what the Settings row SHOWS, g_sleep
- * is what RUNS, and the INVARIANT is
- *
- *     sleeptimer_total_min(&g_sleep) == g_settings.sleep_timer_min
- *
- * at every top of the main loop. Only sleep_timer_apply() below moves the
- * right side to match the left. The FIRE branch only disarms the countdown;
- * it is the shared suspend block, which every FIRE lands in, that zeroes the
- * row as well, so both sides are 0 by the next pass. .bss starts it disarmed, and
- * nothing in the boot path arms it, so the invariant holds from the first
- * pass (config_decode zeroes the field for exactly that reason).
- */
-static sleeptimer_t g_sleep;
-/* The idle-sleep policy (kernel/idlesleep.h): nothing playing and no input
- * for two minutes -> the same suspend a PLAY hold enters, and so its
- * 30-minute escalation to a PMU standby. Device, 2026-09-24: a paused iPod
- * sat awake for twelve hours at ~35 mA because nothing ever took it out of
- * this loop. Fed once per pass next to the sleep timer; latched off for the
- * session by a refused standby. */
-static idlesleep_t  g_idlesleep;
 
 /* fat32_readdir callback: collect music subdirectories + playable files into
  * g_browse. Directories named like iPod/OS system folders (or dotfolders) are
@@ -602,68 +478,9 @@ static int browse_collect(void *ud, const fat32_dirent_t *e)
     return 0;
 }
 
-/* Vertical layout (menus.jsx): a status strip up top, a titled header with a
- * divider, then the scrolling list. */
-#define STATUS_Y0  0                      /* status strip band (battery/track)    */
-#define STATUS_H   15                     /* strip height                         */
-#define HDR_BASE   30                     /* header title text baseline           */
-#define HDR_DIV_Y  38                     /* header divider row                    */
-#define LIST_Y0    42                     /* first list row top                   */
-#define ROW_H      24                     /* px per single-line list row          */
-#define LIST_ROWS  8                       /* visible rows: (240-42)/24 ~= 8       */
-/* Two-line rows (album/song list: title + artist sub) get a taller row so the
- * bold title (bold_13, 19px ink) and the artist line (regular_9, 14px) don't
- * vertically overlap — 32px clears both so the marquee is cleanly title-only
- * (no artist repaint, no clipping of descenders). Fewer fit on screen. */
-#define ROW_H2     32
-#define LIST_ROWS2 6                       /* (240-42)/32 ~= 6                     */
-
 /* ---------------------------------------------------------------------------
  * Design-matched list chrome (menus.jsx): status strip, header, rows, scrollbar
  * ------------------------------------------------------------------------- */
-
-/* Hold-switch lock state. While g_locked, all wheel/button input is swallowed
- * (playback keeps running); a brief banner takes the top chrome on the
- * engage/disengage edge and on a refused button press (lock_banner_render),
- * and a small padlock stays in the status strip while held. The dark modals
- * (charging, low battery) have no chrome and get neither: only the corner
- * padlock, painted with the screen (banner_hosted). */
-static int         g_locked;
-
-/* Pause-on-unplug (ui/jackwatch.c): the believed jack level, the raw-edge
- * count the About footer shows, and whether this module owns the last pause.
- * Reset in run_ui() beside the PLAY keyhold — zero is not its "nothing known
- * yet" state. */
-static jackwatch_t g_jack;
-static ui_window_t g_lock_flash;
-
-/*
- * THE CLOCK (kernel/wallclock.h, kernel/datetime.h, hal/hw/rtc.h).
- *
- * g_wclock is the software clock: anchored from the PMIC's RTC at boot, after
- * a manual set, after a suspend wake and every RTC_RESYNC_S, and carried in
- * between on the same USEC_TIMER everything else here is timed by — so the
- * displayed time costs no I2C traffic per frame. g_clock_min is the last
- * minute painted, which is the whole repaint rule: one comparison per pass.
- *
- * g_settime is the Date & Time editor's model while that screen is up.
- */
-static wallclock_t g_wclock;
-static settime_t   g_settime;
-static uint32_t    g_clock_min;          /* last painted minute; 0 = none yet */
-static uint32_t    g_clock_tick_us;      /* when the software clock last ticked */
-static uint32_t    g_clock_resync_us;    /* when it was last anchored from the chip */
-static int         g_clock_retry;        /* the last read got no answer: ask again soon */
-
-/* Half an hour between RTC reads. Long enough that the bus is effectively
- * untouched, short enough that the USEC_TIMER's ~71.6-minute wrap cannot be
- * missed even if the 5 s cadence stalls (wallclock.h's feed contract). */
-#define RTC_RESYNC_S    1800u
-/* ...but a read that got no answer is retried in a minute rather than in half
- * an hour: the bus is shared with the codec and a single collision should not
- * cost the clock its correction for a whole cadence. */
-#define RTC_RETRY_S     60u
-#define CLOCK_TICK_US   5000000u         /* fold the elapsed µs in every 5 s   */
 
 /*
  * Now-Playing scrub (seek) state.
@@ -799,19 +616,6 @@ static int g_standby_refused;
  * repaint throttle has always been guessing at becomes observable. */
 static uint32_t g_present_cost_us;
 
-/* Decimal to UART. Signed, because every battery field reads -1 on a bus
- * failure and printing that as 4294967295 would defeat the purpose. */
-static void uart_dec(int v)
-{
-    char b[12];
-    if (v < 0) {
-        uart_putc('-');
-        v = -v;
-    }
-    u32_to_dec(b, (unsigned)v);
-    uart_puts(b);
-}
-
 /*
  * The jack probe's narration. These lines go through the evlog tap into
  * CORELOG.BIN, so a bench session on a cable-less device leaves a written
@@ -846,10 +650,6 @@ static void jack_narrate_raw(int raw, unsigned edges)
 _Static_assert(ABOUT_JACK_PIN_ENABLED == HEADPHONE_PIN_ENABLED &&
                ABOUT_JACK_PIN_OUTPUT  == HEADPHONE_PIN_OUTPUT,
                "ui/settings.h mirrors hal/hw/headphone.h's pin-config bits");
-
-/* Volume capacity / free (MB), computed once from the FS after mount for the
- * About screen. g_free_mb == 0xFFFFFFFF means the FSInfo free count was absent. */
-static uint32_t g_total_mb, g_free_mb = 0xFFFFFFFFu;
 
 /*
  * Push Settings > Battery > Charge Rate to the LTC4066. Called at run_ui's

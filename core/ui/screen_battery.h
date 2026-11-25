@@ -156,7 +156,7 @@ battwarn_kind_t battwarn_screen(void);
 /*
  * 1 while the LOW toast should be painted. Elapsed-time compare against the
  * show stamp, and the toast DISARMS ITSELF on expiry, so a clock wrap 71 min
- * later can never bring a stale one back (the ui_window_t rule in main.c).
+ * later can never bring a stale one back (the ui_window_t rule in app/util.h).
  * Until the caller has reported a paint (below) it stays 1 regardless of the
  * clock: an unseen toast has not started its 4 s.
  */

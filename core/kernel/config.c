@@ -709,7 +709,7 @@ static int config_slot_lba(uint32_t slot, uint32_t *out)
 /*
  * The boot reads — the root walk that finds the file and the two slot reads —
  * happen while the drive may still be settling from spin-up, which is exactly
- * when the library loader's directory walks were seen to fail (main.c,
+ * when the library loader's directory walks were seen to fail (app/library.c,
  * lib_readdir). A read error there is NOT the same thing as a slot that
  * decoded invalid, and until this was told apart it was treated the same
  * way: `have` stayed 0, the module stayed writable with seq 0, and the first
@@ -756,7 +756,7 @@ static int cfg_read_slot_raw(fat32_t *fs, uint32_t lba)
 }
 
 /* Root-directory scan: capture CORECFG.DAT's cluster + size. Mirrors how
- * CORELIB.IDX is located in main.c — the file is found by ENUMERATION, never
+ * CORELIB.IDX is located in app/library.c — the file is found by ENUMERATION, never
  * by a hardcoded address. */
 static int cfg_root_cb(void *ud, const fat32_dirent_t *e)
 {

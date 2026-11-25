@@ -28,7 +28,7 @@
  * COPIES with a script diffing them against the original. They read a file
  * off the user's disk and decide whether to trust it, which is exactly the
  * code that must be testable directly. The stream reads and the record
- * decode stay in main.c's library_load_index; this is the pure part — bytes
+ * decode stay in app/library.c's library_load_index; this is the pure part — bytes
  * in, verdict out. No hw/, no MMIO, no globals beyond the CRC table.
  */
 

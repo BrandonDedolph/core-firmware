@@ -21,7 +21,7 @@
  * which rows are PLAYABLE, named exactly as a browse row would name them,
  * and carrying the locator (file_hash) that binds a row to its CORELIB.IDX
  * record. It does NOT bind to the library itself: g_songs lives in
- * kernel/main.c, which the host cannot compile, so this module hands back
+ * app/library.c, which the host cannot compile, so this module hands back
  * (dir_clus, file cluster, file_hash) and main.c does the lookup with the
  * same test resolve_art_cb applies. It does NOT touch the player.
  *

@@ -2,19 +2,19 @@
 /*
  * tests/fuzz/fuzz_idx.c — CORELIB.IDX, the host-built library index: the
  * header validation and the record CRC (library/idx.c), streamed off a
- * FAT32 volume through fat32_stream_read exactly the way kernel/main.c's
+ * FAT32 volume through fat32_stream_read exactly the way app/library.c's
  * library_load_index() streams it.
  *
  * WHAT IS NOT COVERED, AND WHY. library_load_index() itself lives in
- * kernel/main.c, which only the ARM build compiles (it pulls in the whole
+ * app/library.c, which only the ARM build compiles (it pulls in the whole
  * UI and HAL), and its record decode — field_copy(), genre_intern(),
  * album_intern(), folder_clus_h() — are statics there. This harness
  * reproduces the loader's STREAM SHAPE (12 bytes, then 4 more only when the
  * version word says 2, then 64-record batches, the CRC fed batch by batch)
  * so idx.c sees the calls it sees on the device, but the per-record field
- * copy is not exercised. Moving those helpers out of main.c (as idx.c was
+ * copy is not exercised. Moving those helpers out of app/library.c (as idx.c was
  * moved) is what would let a harness reach them.
- * tests/scripts/check_index_loader.py is what pins main.c to this shape.
+ * tests/scripts/check_index_loader.py is what pins app/library.c to this shape.
  *
  * FEEDS: byte 0 is a control byte, the rest is the FILE's content, placed
  * in the root of a correct in-RAM volume (fuzz_vol.c) as CORELIB.IDX.

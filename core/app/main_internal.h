@@ -17,6 +17,8 @@
 #ifndef CORE_APP_MAIN_INTERNAL_H
 #define CORE_APP_MAIN_INTERNAL_H
 
+#include <stdint.h>
+
 #include "../library/otg.h"
 
 extern otg_list_t g_otg;                  /* until otg moves */
@@ -26,5 +28,12 @@ extern int g_sel_pending;                  /* until nowplaying moves */
 int np_scrubbing(void);                    /* until nowplaying moves */
 void scrub_exit(void);                     /* until nowplaying moves */
 void settings_leave(void);                 /* until settings_glue moves */
+
+extern int      g_song_sel, g_song_accum;   /* until lists moves */
+
+/* The On-The-Go list binds its locator pairs to songs, so it is re-bound
+ * whenever the library is (library_ensure's tail). Defined with the rest of
+ * the feature, below the Playlists section it shares state with. */
+void otg_bind_all(void);                    /* until otg moves */
 
 #endif /* CORE_APP_MAIN_INTERNAL_H */

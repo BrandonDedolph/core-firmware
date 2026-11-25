@@ -8,6 +8,7 @@
 #include "hw/uart.h"
 #include "../ui/wheel.h"
 #include "main_internal.h"
+#include "albums.h"
 #include "nav.h"
 
 /* Bumped whenever a list's CONTENT is rebuilt or the screen stack moves. The

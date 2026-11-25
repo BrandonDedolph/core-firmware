@@ -23,7 +23,6 @@
 #include "util.h"
 
 extern otg_list_t g_otg;                  /* until otg moves */
-extern int g_dir_depth;                    /* until albums moves */
 extern int g_menu_accum;                   /* until lists moves */
 extern int g_sel_pending;                  /* until nowplaying moves */
 int np_scrubbing(void);                    /* until nowplaying moves */

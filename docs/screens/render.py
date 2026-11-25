@@ -858,7 +858,7 @@ def screen_albums(sel=ALBUMS_SEL, title_offset=0):
     header(sc, "Albums", "%d / %d" % (sel + 1, len(ALBUMS)), back=True)
     for r, (t, a, art) in enumerate(ALBUMS):
         s = (r == sel)
-        # main.c albumlist_row_draw: list_row_tall(..., chevron=1, right=0) —
+        # app/albums.c albumlist_row_draw: list_row_tall(..., chevron=1, right=0) —
         # a disclosure chevron, no per-row right value.
         list_row(sc, LIST_Y0, r, t, sub=a, chevron=True, selected=s, chip=art,
                  rh=ROW_H2, title_offset=title_offset if s else 0)

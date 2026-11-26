@@ -1967,6 +1967,23 @@ if target == 'sim'
          depends: [headless_disk_az],
          timeout: 180,
          suite: 'unit')
+    # browse-input: the state the album browser, Playlists, a saved playlist
+    # and On-The-Go reset or keep on the --library az disk: the browser's two
+    # wheel remainders kept apart across an album, MENU from a Search-opened
+    # album back to Search, On-The-Go's entry cursor and free-slot verdict, and
+    # the Clear / Delete questions gone after a scroll or a re-entry
+    # (headless/browse_input_test.c).
+    browse_input_test = executable(
+      'browse_input_test',
+      sources: ['headless/browse_input_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('browse-input', browse_input_test,
+         args: [headless_disk_az[0].full_path(), headless_disk_az[1].full_path()],
+         depends: [headless_disk_az],
+         timeout: 180,
+         suite: 'unit')
     # suspend: suspend_to_ram() and enter_standby() off the idle path — the
     # PLAY hold under a playing, lit device with changes pending (forced
     # commits, park, white frame, the first frame after the wake), the idle

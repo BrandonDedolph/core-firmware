@@ -29,7 +29,7 @@ core/
 │   ├── library.c     in-RAM library: CORELIB.IDX load or tag scan, lookups, views
 │   ├── battery_ui.c  battery sampling, DISKSAFE/SHUTOFF reactions, modals
 │   ├── playctx.c     queue building from library songs, queue context
-│   ├── statusbar.c   status strip, list-row wrappers, Hold / On-The-Go banners
+│   ├── statusbar.c   status strip, list-row wrappers, Hold / On-The-Go banners + pass
 │   ├── playlists.c   Music > Playlists and one playlist's tracklist
 │   ├── albums.c      album list, album detail, folder browse data, cover pump
 │   ├── coverpump.c   how many covers the album list may read per pass
@@ -40,7 +40,9 @@ core/
 │   ├── lists.c       main menu, Music menu, Artists, Songs, Genres, Queue
 │   ├── resume.c      capture/restore of the playback position
 │   ├── search_glue.c Music > Search's binding to the library and navigation
-│   ├── paint.c       damage-only present, partial list repaint, paint dispatch
+│   ├── paint.c       damage-only present, partial list repaint, paint dispatch,
+│   │                 run_ui's render pass
+│   ├── presentpace.c how far apart UI presents go, and whether one is due
 │   ├── az.c          A-Z locator glue, wheel clock, piezo click
 │   ├── actions.c     what PLAY and SELECT (tap / hold) do on a list row
 │   ├── ui_loop.h     ui_loop_t, the state run_ui's loop carries between passes

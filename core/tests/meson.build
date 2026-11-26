@@ -1454,6 +1454,19 @@ if target == 'sim'
   )
   test('animpace', animpace_test, suite: 'unit')
 
+  # presentpace: how far apart run_ui's UI presents must be while a song is
+  # loaded (4x the last present's cost, clamped to 20-150 ms) and whether the
+  # next one is due (core/app/presentpace.c), at the boundary microsecond and
+  # across the 32-bit timer wrap. Pure, so the host runs the SAME source the
+  # ARM build links.
+  presentpace_test = executable(
+    'presentpace_test',
+    sources: ['app/presentpace_test.c', '../app/presentpace.c'],
+    include_directories: include_directories('../app', '.'),
+    override_options: test_opts,
+  )
+  test('presentpace', presentpace_test, suite: 'unit')
+
   # timesync: what the firmware does at boot with the clock stamp the host
   # leaves in CORECFG.DAT (core/kernel/timesync.c), and the software clock that
   # carries the time between the rare RTC reads (core/kernel/wallclock.c) —

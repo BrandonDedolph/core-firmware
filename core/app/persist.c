@@ -143,7 +143,7 @@ void evlog_commit(int mode)
 /*
  * The On-The-Go live list's commit, through the SAME gate with the same
  * inputs — its cfg_commit_t lives inside kernel/otg_store.c, as the event
- * log's lives inside evlog.c, so this is the whole of main.c's share.
+ * log's lives inside evlog.c, so this is the whole of app/persist.c's share.
  * `mode` as settings_commit's.
  */
 void otg_commit(int mode)

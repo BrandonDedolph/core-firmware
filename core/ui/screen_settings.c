@@ -12,9 +12,9 @@
  *
  * These painters leave the top band (rows 0..STATUS_H-1) clear — the jsx
  * Settings screens carry no status strip of their own — and place the header at
- * main.c's header baseline, so the header stays put when you cross from the
+ * app/layout.h's header baseline, so the header stays put when you cross from the
  * main menu into Settings. The firmware paints the ordinary status strip (track
- * name, battery, Hold padlock) over that clear band afterwards, in main.c's
+ * name, battery, Hold padlock) over that clear band afterwards, in app/settings_glue.c's
  * settings_render_cur(), so Settings carries the same strip as the lists.
  *
  * Pure rendering: integer-only, no libc/libm/malloc, no hardware access, no
@@ -305,7 +305,7 @@ static void theme_render(const settings_t *s, int sel)
 void settings_render(int screen, const settings_t *s, int sel)
 {
     if (screen == SETTINGS_ABOUT) {
-        /* main.c should call settings_about_render() with live values; this
+        /* app/settings_glue.c should call settings_about_render() with live values; this
          * placeholder path keeps settings_render total over every screen. */
         settings_about_render(-1, -1, -1, 0, 0xFFFFFFFFu, 0, 0, 0, 0, ABOUT_LOG_OFF,
                               0, "v0.0.0", NULL);

@@ -33,7 +33,7 @@
  * artist's), Playlists and Genres.
  *
  * What differs per screen is the KEY the list is sorted BY, and that is the
- * only thing main.c has to answer: Artists sort past a leading "The " (so
+ * only thing app/az.c has to answer: Artists sort past a leading "The " (so
  * "The Kid LAROI" is under K), Albums by the album half of the folder name,
  * Songs/Playlists/Genres by the name itself. Returning 0 for a row (or for a
  * whole screen) is what keeps the queue, the tracklists, the menus and

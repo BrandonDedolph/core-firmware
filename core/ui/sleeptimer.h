@@ -74,7 +74,7 @@ void sleeptimer_arm(sleeptimer_t *t, int minutes, uint32_t now_us);
 
 int sleeptimer_armed(const sleeptimer_t *t);
 
-/* The duration it was armed with; 0 when off. main.c compares this against
+/* The duration it was armed with; 0 when off. app/settings_glue.c compares this against
  * g_settings.sleep_timer_min to decide whether the two sides have drifted. */
 int sleeptimer_total_min(const sleeptimer_t *t);
 

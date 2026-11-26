@@ -5,7 +5,7 @@
  * A self-contained Settings subsystem for the Linen menu UI
  * (design_reference/menus.jsx SettingsMenu/SettingsPlayback/SettingsSound/
  * SettingsAbout + system-screens.jsx ThemePicker). The state lives in a plain
- * settings_t owned by the caller (kernel/main.c); this module is a pure,
+ * settings_t owned by the caller (app/state.c); this module is a pure,
  * freestanding model over it plus a matching renderer:
  *
  *   - settings_count / settings_label / settings_kind / settings_value give
@@ -22,7 +22,7 @@
  * FUNCTIONAL fields drive real hardware once main.c wires them: shuffle, repeat
  * (player), volume + volume_limit (mirrors hal_volume), eq / bass / treble /
  * balance (the codec's 5-band EQ and output gains), backlight_secs +
- * backlight_bright (backlight HAL), resume_on_startup (kernel/main.c re-opens
+ * backlight_bright (backlight HAL), resume_on_startup (app/resume.c re-opens
  * the saved track at boot), sleep_timer_min (kernel/main.c arms
  * ui/sleeptimer.c from it, and sleeps the device when it runs out). Crossfade
  * is the one field left that nothing consumes: it is still carried in the
@@ -285,7 +285,7 @@ typedef enum {
      * locator. Diagnostics, deliberately on their own page — About is the
      * "what is this device" screen a user reads, and hex LBAs were crowding
      * it (they collided with the stat columns outright). Non-interactive,
-     * rendered wholly by main.c, which is the only place that has the numbers.
+     * rendered wholly by app/settings_glue.c, which is the only place that has the numbers.
      */
     SETTINGS_DIAG,
     /*
@@ -301,7 +301,7 @@ typedef enum {
      * Battery: one row (Charge Rate) over a live dashboard — the charge
      * trend, the supply, the charger's pins as the SoC reads them back. The
      * row is the ordinary list machinery; the dashboard under it is painted
-     * by settings_battery_render() from values only main.c has, the way About
+     * by settings_battery_render() from values only app/settings_glue.c has, the way About
      * and Boot Details are. Appended so no existing screen id moves.
      */
     SETTINGS_BATTERY,
@@ -446,7 +446,7 @@ int settings_volume_clamp(const settings_t *s, int v);
 /*
  * THE CLOCK, INJECTED. Settings > Date & Time's first row shows the time it
  * would edit ("10:42 AM", "22:42", or "Not set"), and this module is pure — it
- * has no RTC, no software clock and no idea what time it is. main.c hands the
+ * has no RTC, no software clock and no idea what time it is. app/settings_glue.c hands the
  * current LOCAL epoch in once per Settings paint, the way ui/chrome.c is handed
  * a marquee clock through ui_set_scroll_text.
  *
@@ -511,7 +511,7 @@ int settings_adjust(int screen, settings_t *s, int idx, int delta);
 
 /*
  * Render the full 320x240 panel for `screen` into the console framebuffer
- * (matches the jsx). For SETTINGS_ABOUT this draws placeholder dashes — main.c
+ * (matches the jsx). For SETTINGS_ABOUT this draws placeholder dashes — app/settings_glue.c
  * should call settings_about_render() directly with the live device values.
  */
 void settings_render(int screen, const settings_t *s, int sel);
@@ -556,7 +556,7 @@ typedef struct {
  * `version` is the release tag ("v0.1.0"), drawn in the firmware chip as
  * "Core v0.1.0". It is a PARAMETER rather than a #include because this file
  * is host-built (the settings unit test links it) and CORE_VERSION lives in a
- * meson-generated header that only the firmware build produces; main.c passes
+ * meson-generated header that only the firmware build produces; app/settings_glue.c passes
  * CORE_VERSION, everything else passes "v0.0.0". NULL or "" renders the bare
  * "Core" chip. Long strings are fine — the chip is sized from text_width.
  *
@@ -604,7 +604,7 @@ void settings_diag_render(uint32_t total_ms, uint32_t lcd_ms, uint32_t disk_ms,
                           const char *build_id);
 
 /*
- * THE BATTERY PAGE'S LIVE VALUES. main.c fills one of these per paint from
+ * THE BATTERY PAGE'S LIVE VALUES. app/settings_glue.c fills one of these per paint from
  * the gauge, the charger's GPIOs and kernel/chargestat.c; this file is
  * host-built and cannot read any of them. Every field has a "not known"
  * value the painter draws as a dash rather than as a number.

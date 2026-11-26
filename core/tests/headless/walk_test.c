@@ -158,7 +158,7 @@ static int ev_count(size_t from, int kind, uint32_t arg, int match_arg)
     return c;
 }
 
-/* The tracklist's now-playing glyph on row 0 of the album detail: main.c
+/* The tracklist's now-playing glyph on row 0 of the album detail: app/albums.c
  * paints it at (15, DET_LIST_Y0 + 6) in a 9x9 box and partial-presents the
  * box one pixel wider. */
 #define BARS_X 15

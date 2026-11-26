@@ -101,7 +101,7 @@ Centered transient overlay shown when the user spins the wheel during playback. 
 *Firmware note (2026-09-14):* the jsx Settings screens carry no status strip,
 but the firmware **keeps the strip on every Settings screen** — playing track
 name, battery, Hold padlock — exactly as the lists have it. `screen_settings.c`
-still leaves the top band clear; `main.c`'s `settings_render_cur()` paints the
+still leaves the top band clear; `app/settings_glue.c`'s `settings_render_cur()` paints the
 strip over it after the painter returns. Crossing from a list into Settings no
 longer drops the battery and the track off the top of the screen.
 
@@ -110,7 +110,7 @@ longer drops the battery and the track off the top of the screen.
 
 > *Firmware note (2026-09-14):* implemented **stacked** — the click-wheel mark,
 > "Core", the device line, and a 2 px hairline bar along the bottom with the
-> phase in small caps under it (`boot_screen_render` in `core/kernel/main.c`);
+> phase in small caps under it (`boot_screen_render` in `core/app/bootscreen.c`);
 > see `docs/screens/boot.png` and `docs/screens/loading.png`. It is one painter
 > for the whole boot: the pre-mount splash is the same screen with no bar. The
 > first paint is the default palette (the saved theme lives on the disk being
@@ -177,7 +177,7 @@ pill in the selection bar's colours. `core/ui/search.h` carries the geometry.
 
 **In the design but not the firmware** — Playlists, Podcasts, Audiobooks and
 Composers exist as *greyed-out* menu entries (`active = 0` in
-`core/kernel/main.c`) and lead nowhere. An M3U8 parser exists in
+`core/app/lists.c`) and lead nowhere. An M3U8 parser exists in
 `core/fs/m3u.c` but is wired to nothing, and playlist *writing* is impossible
 today because the FAT driver is read-only. There is no EQ: the Sound settings
 expose bass / treble / balance / crossfade as **cosmetic** controls with no

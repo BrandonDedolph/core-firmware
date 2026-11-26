@@ -39,7 +39,7 @@ typedef struct {
     uint8_t  is_dir;                     /* 1 = subdirectory                     */
     /*
      * What Shuffle Albums groups and orders by. Filled by whoever builds the
-     * row (kernel/main.c, at every queue builder); the player only reads them.
+     * row (core/app/, at every queue builder); the player only reads them.
      *
      * album is a group id, not a name: the library's album index + 1 for a
      * library-built queue, 1 for a folder listing (one folder is one album),

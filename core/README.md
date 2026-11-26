@@ -13,8 +13,35 @@ core/
 ├── boot/        crt0.S, .ipod image header, linker script
 ├── kernel/      cooperative scheduler, IRQ, timer, clock, cache,
 │                framebuffer console, PCM ring, panic/fault handlers,
-│                CORECFG.DAT settings store, the CORELOG.BIN event log
-│                — and main.c (the UI)
+│                CORECFG.DAT settings store, the CORELOG.BIN event log,
+│                drivepower.c (when the drive may park)
+│                — and main.c (kernel_main, run_ui: the UI's boot and main loop)
+├── app/         the UI's application layer, split out of kernel/main.c:
+│   ├── state.c       app-wide singletons (Settings record, volume, Hold, clock)
+│   ├── util.c        idle-task CPU wait, timed UI windows, UART decimal
+│   ├── layout.h      list screens' vertical geometry
+│   ├── marquee.c     the one scrolling-text slot (selected row / NP title)
+│   ├── bootscreen.c  boot / loading screen and its progress bars
+│   ├── clockui.c     local time, title-strip clock text, RTC re-anchor
+│   ├── persist.c     settings / event-log / On-The-Go commits (cfg_commit gate)
+│   ├── nav.c         the screen stack and g_list_epoch
+│   ├── library.c     in-RAM library: CORELIB.IDX load or tag scan, lookups, views
+│   ├── battery_ui.c  battery sampling, DISKSAFE/SHUTOFF reactions, modals
+│   ├── playctx.c     queue building from library songs, queue context
+│   ├── statusbar.c   status strip, list-row wrappers, Hold / On-The-Go banners
+│   ├── playlists.c   Music > Playlists and one playlist's tracklist
+│   ├── albums.c      album list, album detail, folder browse data
+│   ├── nowplaying.c  Now Playing, transport band, volume plate, seek state
+│   ├── otg.c         On-The-Go live list, its screen, Save/Delete
+│   ├── settings_glue.c Settings state, apply, per-page render, Theme preview
+│   ├── lists.c       main menu, Music menu, Artists, Songs, Genres, Queue
+│   ├── resume.c      capture/restore of the playback position
+│   ├── search_glue.c Music > Search's binding to the library and navigation
+│   ├── paint.c       damage-only present, partial list repaint, paint dispatch
+│   ├── az.c          A-Z locator glue, wheel clock, piezo click
+│   ├── actions.c     what PLAY and SELECT (tap / hold) do on a list row
+│   ├── ui_loop.h     ui_loop_t, the state run_ui's loop carries between passes
+│   └── main_internal.h transitional decls for symbols still in kernel/main.c
 ├── hal/
 │   ├── hal.h    hardware contract shared by both backends
 │   ├── hw/      ARM drivers: lcd, ata, i2c, i2s, wm8758, dma, audio,
@@ -42,8 +69,8 @@ core/
 ```
 
 The player UI lives in `kernel/main.c` (the menu / browser / now-playing
-loop) on top of the `ui/` primitives and `player/`; there is no separate
-app layer.
+loop) and `app/` (the screens and services it calls) on top of the `ui/`
+primitives and `player/`.
 
 ## Prerequisites
 

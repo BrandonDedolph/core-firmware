@@ -1,5 +1,7 @@
 # iPod 5G feature-parity job, 2026-09-16
 
+> File paths in these documents predate the `kernel/main.c` split: most of what they place in `main.c` now lives in `core/app/` (see `core/README.md`).
+
 The plans, review transcripts and agent briefs from the day fourteen features from the
 Apple iPod (5th generation) manual were planned, implemented on `feat/*` branches in git
 worktrees, reviewed to a 10/10 bar and merged one at a time. Line numbers inside the

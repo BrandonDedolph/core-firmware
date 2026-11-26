@@ -66,7 +66,7 @@ default); only its first 4 logical sectors (2 slots) are ever written.
 
 ## LBA resolution (device)
 
-Mirrors how `CORELIB.IDX` is already found (`index_root_cb` in `main.c`):
+Mirrors how `CORELIB.IDX` is already found (`index_root_cb` in `app/library.c`):
 
 1. At mount, `fat32_readdir(fs, fs->root_clus, cb, …)`; the callback matches
    `CORECFG.DAT` (case-insensitive) and captures `first_clus` + `size`.

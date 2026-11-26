@@ -8,7 +8,7 @@
  * function reading the clock, the drive, the player and the battery directly
  * and therefore uncompilable on the host. Every input it needs is handed in
  * (cfg_commit_env_t), so the decision is pure — state in, verdict out — and
- * main.c keeps only the thin wrapper that gathers the inputs, wakes the
+ * app/persist.c keeps only the thin wrapper that gathers the inputs, wakes the
  * drive when told to, calls config_save() and reports the result back. The
  * precedent is ui/wheel.c and library/idx.c.
  *

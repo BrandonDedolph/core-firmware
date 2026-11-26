@@ -78,7 +78,7 @@ static int u_to_str(char *dst, int v)
 }
 
 /* Draw a NUL-terminated string; thin wrapper over text_draw with the panel
- * dimensions baked in (mirrors kernel/main.c's ui_text). `y` is the baseline. */
+ * dimensions baked in (mirrors ui/chrome.c's ui_text). `y` is the baseline. */
 static int chg_text(int x, int y, const char *s, const text_font_t *font,
                     uint16_t ink)
 {

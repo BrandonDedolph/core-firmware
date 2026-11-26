@@ -160,7 +160,7 @@ void battwarn_feed(int filt_mv, int level, int external, uint32_t now_us)
     battwarn_t *b = &g_bw;
 
     /* SHUTOFF first, before the external-power check: the policy has decided
-     * to power off and kernel/main.c is about to do it, cable or no cable.
+     * to power off and app/battery_ui.c is about to do it, cable or no cable.
      * External power suppresses the two warnings a cable can still answer;
      * it does not un-happen a shutdown. */
     if (level >= 2) {

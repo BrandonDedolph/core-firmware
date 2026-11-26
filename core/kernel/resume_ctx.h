@@ -36,7 +36,7 @@ static inline int resume_kind_of_view(int genre, const char *artist)
  * by a tiny LCG started at `seed`. PURE — the same (seed, n) is the same
  * order, which is how a saved seed brings a Shuffle Songs queue back after a
  * power cut. The low bit of an LCG is the least random, hence the >> 1. The
- * caller draws the seed (main.c ORs the timer with 1 so it is never 0, which
+ * caller draws the seed (app/playctx.c ORs the timer with 1 so it is never 0, which
  * the record uses for "no seed").
  */
 static inline void lib_shuffle_order(uint16_t *ord, int n, uint32_t seed)

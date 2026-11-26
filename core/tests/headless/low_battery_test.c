@@ -3,7 +3,7 @@
  * tests/headless/low_battery_test.c — what the firmware does as the cell runs
  * down, end to end.
  *
- * The real kernel/main.c battery_refresh() and the real hal/hw/battery.c
+ * The real app/battery_ui.c battery_refresh() and the real hal/hw/battery.c
  * policy on the headless PMU ADC (hl_set_battery_mv), on the headless disk:
  *
  *   1. ARMED: nothing fires until the median filter is full, and a healthy

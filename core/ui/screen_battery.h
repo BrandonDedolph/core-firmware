@@ -22,7 +22,7 @@
  *   DISKSAFE  a full-screen modal on the policy's OK->DISKSAFE edge, sticky
  *             until any button, explaining that settings are not being saved.
  *   SHUTOFF   a full-screen goodbye on the SHUTOFF edge, not dismissable —
- *             kernel/main.c holds it on the panel for a moment before
+ *             app/battery_ui.c holds it on the panel for a moment before
  *             entering standby, so the last thing on the screen says why.
  *
  * THE LOAD-BEARING PART IS NOT THE DRAWING, IT IS THE FLAP PREVENTION. The

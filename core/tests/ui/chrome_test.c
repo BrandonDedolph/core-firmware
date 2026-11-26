@@ -472,7 +472,7 @@ int main(void)
           count_outside(LCD_WIDTH - 4, 0, 3, LCD_HEIGHT, LINEN_SB_THMB) == 0);
 
     /* ---- 6b. a row repaint must not eat the scrollbar --------------------- *
-     * The partial-repaint path (main.c list_repaint_partial) clears a row band
+     * The partial-repaint path (app/paint.c list_repaint_partial) clears a row band
      * and redraws the row for every cover chip that lands. It used to clear the
      * band edge to edge, and only redrew the bar on a selection MOVE — so on
      * the album list a fast scroll into a fresh window, whose six covers then

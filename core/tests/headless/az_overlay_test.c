@@ -4,7 +4,7 @@
  * spin on the real firmware's long lists.
  *
  * ui/wheel.c (the letter-mode latch) and ui/letterindex.c (the run index)
- * have unit tests. What they never run is kernel/main.c's half: the per-screen
+ * have unit tests. What they never run is app/az.c's half: the per-screen
  * initial (screen_initial_raw: a title on Songs, the name past a leading
  * "The " on Artists), the index kept up to date with whatever list is up
  * (letters_ensure, keyed on screen, depth, row count AND g_list_epoch), the

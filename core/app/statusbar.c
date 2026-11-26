@@ -306,7 +306,7 @@ static void top_banner_render(int inverted, const uint16_t *bm, int bn, int bm_d
     }
     console_fill_rect(0, 0, LCD_WIDTH, h, band);
     /* Strip row, recoloured (every screen with a strip — Settings included,
-     * where main.c paints one over the painter's clear band), then the header
+     * where app/settings_glue.c paints one over the painter's clear band), then the header
      * line as the announcement, then the divider in the band's own secondary
      * colour so the inverted block ends where the header does. */
     {

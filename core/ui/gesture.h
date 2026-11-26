@@ -67,7 +67,7 @@ uint32_t gesture_seek_step(uint32_t held_us);
 
 /*
  * One direction of "tap skips, hold seeks". Two instances live in
- * kernel/main.c, one per button; `dir` is the only thing that differs and it
+ * app/nowplaying.c, one per button; `dir` is the only thing that differs and it
  * is set at the definition (seekhold_reset deliberately keeps it, because the
  * Hold switch resets these mid-press).
  */

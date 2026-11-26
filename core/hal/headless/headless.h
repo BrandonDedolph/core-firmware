@@ -141,6 +141,9 @@ void hl_scroll(int rows);                            /* + = clockwise      */
  * fast enough (5000 us = 200 ticks/s) to reach the A-Z letter mode that
  * hl_scroll's one row per 150 ms never does. */
 void hl_spin(int ticks, uint32_t gap_us);
+/* `clicks` raw wheel steps in ONE event (|clicks| <= 8), then the finger
+ * lifts: less than a row leaves a remainder in the screen's accumulator. */
+void hl_wheel_clicks(int clicks);
 void hl_set_hold(int on);
 void hl_set_headphones(int present);
 void hl_set_external_power(int on);

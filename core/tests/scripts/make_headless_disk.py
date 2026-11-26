@@ -22,7 +22,10 @@ It also writes IMG.ranges: one "lba count path" line per pre-allocated file —
 the ONLY places the firmware may write. The harness refuses any other write,
 which is the guard every write path's first-flash procedure asks for.
 
-Usage: make_headless_disk.py --vectors DIR --out IMG [--library stock|az]
+With --stray, the Mono Mix album folder also holds "Stray.flac", a file the
+index has no record of (tests/headless/row_hold_test.c).
+
+Usage: make_headless_disk.py --vectors DIR --out IMG [--library stock|az] [--stray]
 
 --library az adds the long lists the A-Z plate test needs (az_library); the
 default, stock, is the disk every other headless test boots.
@@ -258,7 +261,7 @@ def load_build_index():
     return mod
 
 
-def build_tree(vectors, stage, library=None, genres=None):
+def build_tree(vectors, stage, library=None, genres=None, stray=False):
     library = LIBRARY if library is None else library
     genres = genres or {}
     src = os.path.join(stage, "_src")
@@ -297,6 +300,7 @@ def build_tree(vectors, stage, library=None, genres=None):
     magic, ver, rec_size, count, _crc = struct.unpack_from("<4sHHII", data, 0)
     assert magic == b"CIDX" and rec_size == 256, "unexpected index header"
     by_title = {t[0]: p for p, t in tags_of.items()}
+    dir_of = {}
     for i in range(count):
         rec = struct.unpack_from("<IHH64s64s48s40s24sII", data, 16 + i * 256)
         folder = rec[3].split(b"\0", 1)[0].decode()
@@ -305,6 +309,14 @@ def build_tree(vectors, stage, library=None, genres=None):
         dest = os.path.join(music, folder)
         os.makedirs(dest, exist_ok=True)
         shutil.copyfile(by_title[title], os.path.join(dest, fname))
+        dir_of[title] = dest
+    if stray:
+        # --stray: one audio file in an album folder that the index has no
+        # record of (copied in after the index was built), so the album's
+        # tracklist has a row bound to no song. Only the disk that asks for
+        # it has it; the default disk is unchanged.
+        shutil.copyfile(by_title["Sine"],
+                        os.path.join(dir_of["Mono Flac"], "Stray.flac"))
     shutil.rmtree(src)
     os.makedirs(os.path.join(music, "Playlists"))   # the importer makes it
 
@@ -559,10 +571,13 @@ def main():
     ap.add_argument("--library", choices=("stock", "az"), default="stock",
                     help="stock (default): the seven-song library every "
                          "headless test boots; az: plus the long A-Z lists")
+    ap.add_argument("--stray", action="store_true",
+                    help="add an audio file the index does not know to the "
+                         "Mono Mix album folder")
     a = ap.parse_args()
     lib, genres = az_library() if a.library == "az" else (None, None)
     with tempfile.TemporaryDirectory() as stage:
-        build_tree(a.vectors, stage, lib, genres)
+        build_tree(a.vectors, stage, lib, genres, stray=a.stray)
         pack(stage, a.out)
     return 0
 

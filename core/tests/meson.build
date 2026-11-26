@@ -1813,6 +1813,31 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 180,
          suite: 'unit')
+    # row-hold: holding SELECT on every kind of list row — Songs, a
+    # playlist (and a saved slot's Delete row), the album list's All Songs,
+    # an album's tracks, Search hits, On-The-Go — judged by what On-The-Go
+    # then holds, the banner and the cursor; and a press dropped by MENU or
+    # the Hold switch before the hold time (headless/row_hold_test.c). Its
+    # disk is the headless disk plus one file the index does not know.
+    row_hold_disk = custom_target('row-hold-disk',
+      output: ['row_hold_disk.img', 'row_hold_disk.img.ranges'],
+      command: [py_hl, files('scripts' / 'make_headless_disk.py'),
+                '--vectors', vectors_dir, '--out', '@OUTPUT0@', '--stray'],
+      depend_files: files('../../tools/build_index.py',
+                          '../../tools/make_config.py',
+                          '../../tools/make_log.py',
+                          '../../tools/make_otg.py'))
+    row_hold_test = executable(
+      'row_hold_test',
+      sources: ['headless/row_hold_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('row-hold', row_hold_test,
+         args: [row_hold_disk[0].full_path(), row_hold_disk[1].full_path()],
+         depends: [row_hold_disk],
+         timeout: 180,
+         suite: 'unit')
     # settings-leave: leaving the Settings root commits the pending change
     # (settings_leave, CFG_COMMIT_SOFT) — a power cut well inside the 3 s
     # debounce keeps it — and, playing with the drive parked, defers it

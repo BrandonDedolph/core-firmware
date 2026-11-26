@@ -686,10 +686,11 @@ static void tick_service(void)
         }
         switch (e.kind) {
         case IN_DOWN:
-            if (!g_hold) {
-                g_btn_live  |= (uint8_t)e.val;
-                g_latch_btn |= (uint8_t)e.val;
-            }
+            /* g_btn_live is the finger, Hold or not; what the firmware can
+             * READ of it is gated (clickwheel_buttons, the Hold-off edge in
+             * clickwheel_get_event). */
+            g_btn_live |= (uint8_t)e.val;
+            if (!g_hold) g_latch_btn |= (uint8_t)e.val;
             break;
         case IN_UP:
             g_btn_live &= (uint8_t)~e.val;
@@ -710,7 +711,7 @@ static void tick_service(void)
                 g_hold = e.val;
                 g_hold_edge = 1;
                 if (g_hold) {               /* OPTO gated: nothing reads */
-                    g_btn_live = g_latch_btn = 0;
+                    g_latch_btn = 0;
                     g_latch_delta = 0;
                 }
             }
@@ -729,7 +730,11 @@ bool clickwheel_get_event(wheel_event_t *e)
     if (!e || !g_cw_armed) return false;
     if (g_hold_edge) {
         g_hold_edge = 0;
-        g_latch_btn = 0;
+        /* As hal/hw/clickwheel.c: both edges zero the driver's button state
+         * (s_btn_live, s_btn_prev), and on Hold-off the wheel block restarts,
+         * so a button the finger is STILL on is a fresh down-edge on the
+         * first read after it. */
+        g_latch_btn = g_hold ? 0 : g_btn_live;
         *e = (wheel_event_t){ .hold = g_hold != 0 };
         return true;
     }
@@ -1052,6 +1057,12 @@ void hl_spin(int ticks, uint32_t gap_us)
         in_push(t, IN_WHEEL, dir);          /* one raw tick */
     }
     in_push(t + 100000u, IN_UNTOUCH, 0);
+}
+
+void hl_wheel_clicks(int clicks)
+{
+    in_push(g_now, IN_WHEEL, clicks);
+    in_push(g_now + 100000u, IN_UNTOUCH, 0);
 }
 
 void hl_tap(unsigned btn, uint32_t settle_ms)

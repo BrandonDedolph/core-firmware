@@ -115,7 +115,7 @@ int power_standby(void)
      * signal — but the caller has by now put the PANEL to sleep too, and light
      * behind a panel that is mid-init is the solid-white failure (02-lcd.md);
      * only the caller can wake the panel, present a frame, and THEN relight,
-     * in that order (kernel/main.c enter_standby). A -1 that is acted on is
+     * in that order (app/power.c enter_standby). A -1 that is acted on is
      * a better signal than a lamp.
      */
     return -1;

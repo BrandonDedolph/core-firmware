@@ -13,7 +13,7 @@
  * nothing", which is exactly what the owner reported. On the 600 mAh cell
  * that is 35-40 mA — the device is awake, it just has nothing to do.
  *
- * The suspend (suspend_to_ram, kernel/main.c) with its 30-minute escalation
+ * The suspend (suspend_to_ram, app/power.c) with its 30-minute escalation
  * to a PMU standby was reachable from exactly two places: a PLAY hold and the
  * sleep timer. Pause and put it down, and nothing ever took the device out of
  * the main loop. Apple's firmware sleeps a paused iPod after two minutes of

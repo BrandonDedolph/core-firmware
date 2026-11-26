@@ -64,8 +64,8 @@
  *   - battery_refresh (app/battery_ui.c), the DISKSAFE shutdown: parks unless
  *     the player is mid-stream (active and not paused), after the last
  *     commits.
- *   - enter_standby (kernel/main.c): STANDBY before the PMU rail cut.
- *   - suspend_to_ram (kernel/main.c): ata_sleep() on the way down, with a
+ *   - enter_standby (app/power.c): STANDBY before the PMU rail cut.
+ *   - suspend_to_ram (app/power.c): ata_sleep() on the way down, with a
  *     STANDBY fallback, and the re-park after a commit woke the drive inside
  *     the suspend loop.
  *   - run_ui's cover pump (app/albums.c, app/coverpump.c) refuses to wake a parked platter

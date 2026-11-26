@@ -22,7 +22,6 @@
 #include "util.h"
 #include "../kernel/drivepower.h"
 
-int enter_standby(void);                   /* until power moves */
 extern drivepower_t g_drivepower;          /* until the drive-power wiring leaves main.c */
 
 #endif /* CORE_APP_MAIN_INTERNAL_H */

@@ -1302,21 +1302,22 @@ if target == 'sim'
   test('name-hash', name_hash_test, suite: 'unit')
 
   # resume: which library song the boot path may re-open for a saved resume
-  # position (app/resume.c resume_find_song). The rest of the resume feature
+  # position (app/resume_match.c resume_find_song). The rest of the resume feature
   # degrades gracefully — a missed capture loses a position, a rejected record
   # means "start from the menu" — but this is the one answer that is ACTED ON,
   # so a wrong one wakes the device playing somebody else's track. Covers the
   # happy path, every stale case (deleted / unindexed / unresolved / empty
   # library / empty locator), and the ambiguity rules: duplicate filenames are
   # disambiguated by the saved track LENGTH, and decline outright when the
-  # length cannot choose. Compiles a verbatim copy of the static function;
-  # hw-resume-parity below diffs it against app/resume.c. The locator hash it
-  # calls is the real library/names.c, and the queue-context seam (which
+  # length cannot choose, at exactly the 2 s slop. Links the real function
+  # (app/resume_match.c, the same source core.elf links), the real
+  # library/names.c locator hash it is fed, and the queue-context seam (which
   # list a view is, the seeded Shuffle Songs order, what a capture stores)
   # is the real header-only kernel/resume_ctx.h.
   resume_test = executable(
     'resume_test',
-    sources: ['kernel/resume_test.c', '../library/names.c'],
+    sources: ['kernel/resume_test.c', '../app/resume_match.c',
+              '../library/names.c'],
     include_directories: include_directories('kernel', '.'),
     override_options: test_opts,
   )
@@ -1330,8 +1331,8 @@ if target == 'sim'
   # garbage. Covers the CRC against its published check value and
   # batch-splitting, every accepted header shape (v1 without CRC, v2 with),
   # and each refusal: magic, unknown version, record size, a truncated or
-  # padded file, a count that wraps the size arithmetic. hw-index-loader below
-  # checks that app/library.c's loader actually calls these.
+  # padded file, a count that wraps the size arithmetic. index-loader (the
+  # headless firmware) checks that app/library.c's loader actually uses these.
   idx_test = executable(
     'idx_test',
     sources: ['library/idx_test.c', '../library/idx.c'],
@@ -1578,24 +1579,6 @@ if target == 'sim'
                 'check_name_hash_parity.py'],
          suite: 'unit')
 
-    # hw-resume-parity: the same guard for the resume matcher — the copy in
-    # tests/kernel/resume_test.c must not drift from app/resume.c, and
-    # RESUME_DUR_SLOP must agree. A drifted copy is worse than no test: it
-    # passes while the device applies a different rule.
-    test('hw-resume-parity', py,
-         args: [meson.current_source_dir() / 'scripts' /
-                'check_resume_parity.py'],
-         suite: 'unit')
-
-    # hw-index-loader: library_load_index() in app/library.c must actually
-    # call the validator idx_test covers (idx_header_parse with the directory
-    # entry's size, crc32_update, a refusal on IDX_ECRC) — a validator the
-    # loader does not consult tests nothing.
-    test('hw-index-loader', py,
-         args: [meson.current_source_dir() / 'scripts' /
-                'check_index_loader.py'],
-         suite: 'unit')
-
     # build-index: the host tool that writes CORELIB.IDX, run over a synthetic
     # tree with ffprobe stubbed. Pins the v2 header and CRC the device
     # verifies, the filename enumeration the files on the device were named
@@ -1765,6 +1748,26 @@ if target == 'sim'
          args: [headless_disk[0].full_path()],
          depends: [headless_disk],
          timeout: 120,
+         suite: 'unit')
+    # index-loader: the REAL library_load_index() (app/library.c) on damaged
+    # copies of the A-Z disk's CORELIB.IDX — a directory entry padded or
+    # truncated against the header (refused: size, which only the entry's
+    # size passed to idx_header_parse can show), a flipped record byte
+    # (refused: crc), a cluster chain cut short (refused: read, never a
+    # partial library), a drive read error once (retried, loads) and for good
+    # (refused, a disk error: no scan fallback). idx_test covers the
+    # validators; this covers the loader using them
+    # (headless/index_loader_test.c).
+    index_loader_test = executable(
+      'index_loader_test',
+      sources: ['headless/index_loader_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('index-loader', index_loader_test,
+         args: [headless_disk_az[0].full_path()],
+         depends: [headless_disk_az],
+         timeout: 180,
          suite: 'unit')
     # low-battery: the REAL battery_refresh() on the headless PMU ADC — the
     # DISKSAFE flush + park + modal, the write gate's deferrals, the 3600 mV

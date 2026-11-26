@@ -52,8 +52,6 @@ verify-hw: hw
 	sh tests/scripts/check_version_marker.sh $(BUILD_HW)/core.bin
 	python3 tests/scripts/check_hw_consistency.py
 	python3 tests/scripts/check_name_hash_parity.py
-	python3 tests/scripts/check_resume_parity.py
-	python3 tests/scripts/check_index_loader.py
 	python3 tests/scripts/check_build_index.py
 
 # The fuzz harnesses (tests/fuzz, docs/testing-fuzz.md). A build directory of

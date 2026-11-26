@@ -14,7 +14,8 @@
  * so idx.c sees the calls it sees on the device, but the per-record field
  * copy is not exercised. Moving those helpers out of app/library.c (as idx.c was
  * moved) is what would let a harness reach them.
- * tests/scripts/check_index_loader.py is what pins app/library.c to this shape.
+ * The index-loader headless test (tests/headless/index_loader_test.c) runs the
+ * real app/library.c loader, which is what this shape is taken from.
  *
  * FEEDS: byte 0 is a control byte, the rest is the FILE's content, placed
  * in the root of a correct in-RAM volume (fuzz_vol.c) as CORELIB.IDX.

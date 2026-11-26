@@ -3,10 +3,8 @@
  * core/app/resume.c — capture and restore of the playback position (and the
  * queue it was in) across a power cycle. Moved verbatim out of kernel/main.c.
  *
- * resume_find_song() stays `static` with its text unchanged:
- * tests/scripts/check_resume_parity.py compares it byte for byte with the
- * copy in tests/kernel/resume_test.c, and reads RESUME_DUR_SLOP from this
- * file, so that #define stays here and not in resume.h.
+ * resume_find_song(), the one answer here that is acted on, is in
+ * resume_match.c, which the host test links (tests/kernel/resume_test.c).
  */
 
 #include <stdint.h>
@@ -31,6 +29,7 @@
 #include "otg.h"
 #include "lists.h"
 #include "resume.h"
+#include "resume_match.h"
 
 /* ---------------------------------------------------------------------------
  * Resume playback position across a power cycle.
@@ -95,12 +94,6 @@
  * the track for any purpose they'd notice, and it saves a seek. */
 #define RESUME_MIN_SECS    10u
 
-/* How far the library's indexed duration may differ from the decoder's before
- * we stop believing the two describe the same file. Both are truncated to
- * whole seconds from different sources, so they disagree by a second on
- * perfectly good matches. */
-#define RESUME_DUR_SLOP    2u
-
 uint32_t g_resume_open_seq;      /* player_open_seq() when last captured */
 uint32_t g_resume_last_us;       /* when we last considered capturing     */
 uint32_t g_resume_end_seq;       /* last seen player_end_seq()            */
@@ -150,52 +143,6 @@ void resume_capture(void)
     if (resume_ctx_store(&g_settings, &c)) {
         settings_touch();              /* something moved — schedule a write */
     }
-}
-
-/*
- * Find the library song whose on-disk stem folds to `hash`. Returns a
- * g_songs index, or -1 when there is no safe answer.
- *
- * "Safe" is the whole point. A name match that the duration also confirms is
- * taken immediately. A name match with no confirmation is taken only when the
- * name is UNIQUE across the library — otherwise we would be picking one of
- * several "01 Intro.flac" at random, and a coin-flip is not a resume.
- *
- * The name compared is stem_hash — the hash of the name the file HAS, taken
- * from its directory entry when the record bound, which is the same string
- * the queue shows and resume_capture hashed. It used to be name_hash(file)
- * over the index's copy of the filename, and for a filename past 63 bytes
- * that copy is a truncated string that hashes like nothing on the disk: the
- * track played, the position was saved, and the restore never found it. A
- * record that never bound keeps that provisional hash — exact for a short
- * name, matching nothing for a long one — so it can still count as a
- * same-named twin below, but can never be the song that is opened.
- *
- * One linear pass over g_songs at boot: ~6000 integer compares, well under a
- * millisecond, against a library load that already took seconds.
- */
-static int resume_find_song(uint32_t hash, uint32_t total_s)
-{
-    int best = -1, n_named = 0;
-
-    for (int i = 0; i < g_songs_n; i++) {
-        if (hash == 0 || g_songs[i].stem_hash != hash) {
-            continue;
-        }
-        n_named++;
-        if (!g_songs[i].file_clus) {
-            continue;                  /* indexed but not on the disk any more */
-        }
-        uint32_t d = g_songs[i].duration_s;
-        if (d != 0 && total_s != 0 &&
-            d + RESUME_DUR_SLOP >= total_s && total_s + RESUME_DUR_SLOP >= d) {
-            return i;                  /* name AND length agree — this is it */
-        }
-        if (best < 0) {
-            best = i;
-        }
-    }
-    return (n_named == 1) ? best : -1;
 }
 
 /*

@@ -9,8 +9,8 @@
  * header holds the parts of that which touch no device state — which list a
  * Songs view is, the one library-order draw that has to be repeatable, and
  * the settings_t bookkeeping — so tests/kernel/resume_test.c links the real
- * thing rather than a copy (contrast resume_find_song, which is pasted into
- * the test and diffed against app/resume.c by check_resume_parity.py).
+ * thing rather than a copy (as it links app/resume_match.c's
+ * resume_find_song).
  */
 #ifndef CORE_KERNEL_RESUME_CTX_H
 #define CORE_KERNEL_RESUME_CTX_H

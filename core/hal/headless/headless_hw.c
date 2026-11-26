@@ -587,6 +587,18 @@ int hl_allow_writes(uint32_t lba, uint32_t count)
     return 0;
 }
 
+/* hl_fail_reads: the next `n` reads touching [lba, lba+count) fail. */
+static uint32_t g_fail_lba, g_fail_count, g_fail_n;
+
+void hl_fail_reads(uint32_t lba, uint32_t count, uint32_t n)
+{
+    g_fail_lba   = lba;
+    g_fail_count = count;
+    g_fail_n     = n;
+}
+
+uint32_t hl_fail_reads_left(void) { return g_fail_n; }
+
 static void ata_spin_up(void)
 {
     if (!g_ata_parked) return;
@@ -604,6 +616,11 @@ int ata_read_sectors(uint32_t lba, uint32_t count, void *buf)
     if ((uint64_t)lba + count > g_disk_bytes / 512u) return -1;
     ata_spin_up();
     g_ata_reads++;
+    if (g_fail_n > 0 && lba < g_fail_lba + g_fail_count &&
+        g_fail_lba < lba + count) {
+        g_fail_n--;
+        return -2;                    /* the drive reported an error */
+    }
     size_t want = (size_t)count * 512u;
     ssize_t got = pread(g_disk_fd, buf, want, (off_t)lba * 512);
     if (got != (ssize_t)want) return -2;

@@ -1950,6 +1950,23 @@ if target == 'sim'
          depends: [headless_disk_az],
          timeout: 180,
          suite: 'unit')
+    # list-input: the plain list screens' input on rows other than the first
+    # (main menu, Music, Artists, Songs, Genres, Queue) on the --library az
+    # disk: the wheel clamps at both ends, SELECT opens or plays the row the
+    # cursor is on, MENU comes back to the screen beneath with its cursor
+    # where it was, and a Queue SELECT jumps playback and returns to Now
+    # Playing (headless/list_input_test.c).
+    list_input_test = executable(
+      'list_input_test',
+      sources: ['headless/list_input_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('list-input', list_input_test,
+         args: [headless_disk_az[0].full_path(), headless_disk_az[1].full_path()],
+         depends: [headless_disk_az],
+         timeout: 180,
+         suite: 'unit')
     # suspend: suspend_to_ram() and enter_standby() off the idle path — the
     # PLAY hold under a playing, lit device with changes pending (forced
     # commits, park, white frame, the first frame after the wake), the idle

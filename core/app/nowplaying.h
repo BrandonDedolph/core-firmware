@@ -4,7 +4,8 @@
  * once-a-second transport band, the volume plate, and the gesture state the
  * band reads (the wheel scrubber, the SELECT press timer, the RIGHT/LEFT seek
  * holds). run_ui feeds that state and uses the timing constants below.
- * Moved verbatim out of kernel/main.c.
+ * Moved verbatim out of kernel/main.c, plus the screen's input handler
+ * (nowplaying_input: the wheel's volume/scrub, SELECT's down-edge, MENU).
  */
 
 #ifndef CORE_APP_NOWPLAYING_H
@@ -12,7 +13,10 @@
 
 #include <stdint.h>
 
+#include "hw/clickwheel.h"
+#include "../fs/fat32.h"
 #include "../ui/gesture.h"
+#include "ui_loop.h"
 
 /*
  * Now-Playing scrub (seek) state.
@@ -50,5 +54,11 @@ void scrub_exit(void);
 void nowplaying_transport_render(uint32_t elapsed_s, uint32_t total_s);
 void nowplaying_render(const char *name, uint32_t elapsed_s,
                        uint32_t total_s, uint32_t buf_pct);
+
+/* SCR_NOWPLAYING's input: run_ui calls it with the drained event, its loop
+ * state, the mounted volume and the event's tick while Now Playing is on
+ * top. */
+void nowplaying_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                      uint32_t ev_us);
 
 #endif /* CORE_APP_NOWPLAYING_H */

@@ -17,11 +17,15 @@
 #include "../ui/chrome.h"
 #include "../ui/gesture.h"
 #include "../ui/sleeptimer.h"
+#include "../ui/wheel.h"
+#include "../ui/settings.h"
 #include "state.h"
 #include "util.h"
 #include "marquee.h"
 #include "battery_ui.h"
 #include "statusbar.h"
+#include "nav.h"
+#include "persist.h"
 #include "nowplaying.h"
 
 static int      g_np_scrub;          /* 1 = wheel seeks instead of volume      */
@@ -352,5 +356,82 @@ void nowplaying_render(const char *name, uint32_t elapsed_s,
     /* Volume overlay rides on top for ~1.5 s after a wheel adjustment. */
     if (ui_window_up(&g_vol_show, VOL_SHOW_US, mmio_read32(USEC_TIMER_ADDR))) {
         volume_overlay_render(g_volume, g_settings.volume_limit);
+    }
+}
+
+/* The input half of each screen: what run_ui's per-screen switch does with
+ * one drained wheel event while that screen is on top. Each body is the
+ * switch case it replaced, statement for statement, with run_ui's loop
+ * state reached through L (app/ui_loop.h). */
+
+void nowplaying_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                      uint32_t ev_us)
+{
+    (void)fs;
+    (void)ev_us;
+    /* Scrubbing: the wheel aims at a position instead of setting
+     * volume. Accelerates with the spin so a 70-minute track is
+     * crossable, but one deliberate detent is always SCRUB_STEP_S. */
+    if (ev->wheel_delta && np_scrubbing() && player_active()) {
+        int vel   = wheel_accel_step(ev->wheel_delta);
+        int units = ev->wheel_delta / CW_WHEEL_SENSITIVITY;
+        if (units == 0) {
+            units = (ev->wheel_delta > 0) ? 1 : -1;
+        }
+        int32_t  step  = (int32_t)units * SCRUB_STEP_S * vel;
+        int32_t  t     = (int32_t)g_scrub_target_s + step;
+        uint32_t total = player_total_s();
+        if (t < 0) t = 0;
+        if (total > 0 && t > (int32_t)total) t = (int32_t)total;
+        g_scrub_target_s = (uint32_t)t;
+        g_scrub_last_us  = mmio_read32(USEC_TIMER_ADDR);
+        g_scrub_dirty    = 1;
+        /* Only the transport band shows the target: force ITS
+         * repaint (the clock-tick path) — not `dirty`, which
+         * would re-render and push the whole frame. */
+        L->np_last          = 0xFFFFFFFFu;
+    } else if (ev->wheel_delta) {             /* wheel = volume        */
+        /* The wheel reports raw position units (~CW_WHEEL_SENSITIVITY
+         * per detent), which is why volume used to leap ~10 at a time.
+         * Quantise to whole detents: a single slow detent nudges the
+         * volume by exactly ±1, and spinning faster (more detents per
+         * event) accelerates so you can still sweep the whole range. */
+        /* The rule now lives in ui/wheel.c (wheel_value_step) and
+         * every value wheel shares it: 1 detent = 1, faster
+         * sweeps (2 -> 4, 3 -> 6), capped at 12. */
+        int step = wheel_value_step(ev->wheel_delta,
+                                    WHEEL_VALUE_STEP_MAX);
+        /* The Volume Limit is applied by the same helper the
+         * Settings slider uses — one rule, two wheels. No click
+         * either way: this is a slider, not navigation. */
+        int nv = settings_volume_clamp(&g_settings, g_volume + step);
+        if (nv != g_volume) {
+            g_volume = nv;
+            hal_volume_set(g_volume);
+            g_settings.volume = g_volume;     /* keep Settings in sync */
+            settings_touch(); /* debounced: one write per volume sweep */
+        }
+        /* Armed even when the wheel could not move: at a rail —
+         * and especially AT THE LIMIT, where the plate's triangle
+         * is the explanation — the user still needs to see why. A
+         * pinned wheel no longer earns a disk write, though. */
+        ui_window_arm(&g_vol_show);
+        /* The plate is its own present (see the Now Playing
+         * branch of the render step): not `dirty`, which would
+         * push all 38400 words for a 3200-word rect. */
+        L->np_vol_dirty = 1;
+    }
+    /* SELECT is now press-length sensitive here: a tap toggles the
+     * scrubber (what SELECT does on Now Playing on a real iPod, and
+     * far and away the more frequent action), a hold opens the queue
+     * view. Only the down-edge is recorded — the decision is made in
+     * the per-pass block below, once the press length is known. */
+    if ((ev->buttons & WHEEL_BTN_SELECT) && player_active()) {
+        g_sel_down_us = mmio_read32(USEC_TIMER_ADDR);
+        g_sel_pending = 1;
+    }
+    if (ev->buttons & WHEEL_BTN_MENU) {
+        scr_pop();                          /* back, keep playing */
+        L->dirty = 1;
     }
 }

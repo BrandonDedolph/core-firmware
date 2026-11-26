@@ -16,6 +16,7 @@
 #include "../ui/text.h"
 #include "../ui/chrome.h"
 #include "../ui/search.h"
+#include "../ui/wheel.h"
 #include "../library/names.h"
 #include "state.h"
 #include "nav.h"
@@ -341,4 +342,67 @@ play_tap_t search_play_hit(fat32_t *fs)
         break;
     }
     return PLAY_TAP_STARTED;
+}
+
+/* The input half of each screen: what run_ui's per-screen switch does with
+ * one drained wheel event while that screen is on top. Each body is the
+ * switch case it replaced, statement for statement, with run_ui's loop
+ * state reached through L (app/ui_loop.h). */
+
+void search_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                  uint32_t ev_us)
+{
+    if (ev->wheel_delta) {
+        if (g_search.mode == SEARCH_PICK) {
+            /* One cell a detent, wrapping; the click is ours
+             * because the ring is not a list and does not go
+             * through wheel_move. */
+            if (search_ring_move(&g_search, ev->wheel_delta)) {
+                L->dirty = 1;
+            }
+        } else if (g_search.nhit > 0) {
+            g_search.sel = wheel_move(g_search.sel, g_search.nhit,
+                                      ev->wheel_delta, &g_search.accum);
+            L->dirty = 1;
+        }
+    }
+    int act = SEARCH_ACT_NONE;
+    if (ev->buttons & WHEEL_BTN_SELECT) {
+        /* A hit is a row: the tap opens it, and a hold on a SONG
+         * hit adds it to On-The-Go like any other song row. The
+         * ring is not a list — its SELECT types a character — so
+         * search_hold_rows() reports no rows there and the press
+         * keeps the down-edge, as a key must. */
+        if (search_hold_rows(&g_search, 0, 0) > 0) {
+            rowsel_arm(g_search.sel, &L->row_key, ev_us);
+        } else {
+            act = search_key(&g_search, SEARCH_KEY_SELECT);
+        }
+    } else if (ev->buttons & WHEEL_BTN_MENU) {
+        act = search_key(&g_search, SEARCH_KEY_MENU);
+    } else if (ev->buttons & WHEEL_BTN_RIGHT) {
+        act = search_key(&g_search, SEARCH_KEY_RIGHT);
+    } else if (ev->buttons & WHEEL_BTN_LEFT) {
+        act = search_key(&g_search, SEARCH_KEY_LEFT);
+    }
+    switch (act) {
+    case SEARCH_ACT_RESCAN:
+        search_rescan();
+        L->dirty = 1;
+        break;
+    case SEARCH_ACT_TO_RESULTS:
+    case SEARCH_ACT_TO_PICK:
+        L->dirty = 1;
+        break;
+    case SEARCH_ACT_POP:
+        scr_pop();                          /* back to Music menu */
+        L->dirty = 1;
+        break;
+    case SEARCH_ACT_OPEN:
+        if (search_open_hit(fs)) L->np_first = 1;
+        L->dirty = 1;
+        break;
+    default:
+        break;
+    }
 }

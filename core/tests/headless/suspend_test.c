@@ -392,7 +392,12 @@ static _Noreturn void session_playhold(const char *disk, const char *ranges,
     size_t ev0 = hl_events_mark();
     uint64_t t_down = hl_stats().now_us;
     CHECK("suspend: a PLAY hold reaches the idle loop", play_hold_suspend(6000, log0));
-    hl_run_ms((uint32_t)((t_down + 6500000u - hl_stats().now_us) / 1000u));
+    {
+        uint64_t now = hl_stats().now_us, until = t_down + 6500000u;
+        CHECK("suspend: (the idle loop was reached inside the 6.5 s window)",
+              now <= until);
+        if (now < until) hl_run_ms((uint32_t)((until - now) / 1000u));
+    }
     s = hl_stats();
     hl_cfg.spinup_ms = 800;
 
@@ -598,8 +603,11 @@ static _Noreturn void session_idle(const char *disk, const char *ranges)
     long i_white = ev_last_before(ev0, i_pmu, HL_EV_PRESENT_FULL);
     long i_bye = ev_last_before(ev0, i_white, HL_EV_PRESENT_FULL);
     CHECK("d: the PMU is asked once", i_pmu >= 0 && ev_count(ev0, HL_EV_PMU_STANDBY) == 1);
+    long i_off = ev_last_before(ev0, i_pmu, HL_EV_BACKLIGHT);
     CHECK("d: the goodbye, then the white frame, then the PMU",
           i_bye >= 0 && ev_arg(i_bye) >= REAL_FRAME_INK && ev_arg(i_white) == 0);
+    CHECK("d: the goodbye's backlight goes out after the white frame, before the PMU",
+          i_off > i_white && ev_arg(i_off) == 0);
     CHECK("d: refused: the suspend wakes itself, no press",
           log_has_since(log_d, "core: suspend: wake (standby refused)"));
     CHECK("d: lit, the screen back", hl_stats().backlight == BRIGHT && !all_white());
@@ -637,10 +645,17 @@ static _Noreturn void session_standby(const char *disk, const char *ranges)
               i_wr >= 0 && log_has_since((size_t)at_sb, " final\n"));
         CHECK("standby: ...and the drive parked after it", i_park > i_wr);
     }
+    /* enter_standby's own frame: after its hal_audio_close (only it emits
+     * AUDIO_CLOSE here), not the suspend's earlier white present. Its
+     * backlight_set(0) is not looked for on this path: the suspend already
+     * went dark and the HAL logs changes only — session 3d, where the
+     * goodbye relit the panel, sees it. */
+    long i_close = ev_find(ev0, HL_EV_AUDIO_CLOSE);
     long i_white = ev_last_before(ev0, i_pmu, HL_EV_PRESENT_FULL);
-    long i_dark = ev_last_before(ev0, i_pmu, HL_EV_BACKLIGHT);
-    CHECK("standby: white frame, backlight off, then the PMU",
-          i_white >= 0 && ev_arg(i_white) == 0 && i_dark >= 0 && ev_arg(i_dark) == 0);
+    CHECK("standby: a white frame of its own, then the PMU",
+          i_close >= 0 && i_white > i_close && ev_arg(i_white) == 0 &&
+          s.backlight == BRIGHT /* relit by the refusal, below */ &&
+          ev_arg(ev_last_before(ev0, i_pmu, HL_EV_BACKLIGHT)) == 0);
     CHECK("standby: the PMU is asked ONCE", s.pmu_standby_calls == 1);
     CHECK("refused: narrated", log_has_since((size_t)at_sb, "core: standby REFUSED by the PMU"));
     long i_rp = ev_find((size_t)i_pmu + 1, HL_EV_PRESENT_FULL);

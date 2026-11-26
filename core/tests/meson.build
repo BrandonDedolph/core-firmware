@@ -1904,6 +1904,36 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 300,
          suite: 'unit')
+    # partial-repaint: the two paths that draw a screen WITHOUT the ordinary
+    # full render — list_repaint_partial (a selection move repaints two rows,
+    # the header value and the scrollbar; a landed cover repaints its row) and
+    # paint_current_screen (the screen behind the Hold banner, and the frame
+    # a wake lights) — judged against the full render of the same state, byte
+    # for byte. The album list's covers and a header title long enough to
+    # reach the "n / m" value come from a variant of the disk (--covers
+    # --long-playlist) (headless/partial_repaint_test.c).
+    headless_partial_disk = custom_target('headless-partial-disk',
+      output: ['headless_partial_disk.img', 'headless_partial_disk.img.ranges'],
+      command: [py_hl, files('scripts' / 'make_headless_disk.py'),
+                '--vectors', vectors_dir, '--out', '@OUTPUT0@', '--covers',
+                '--long-playlist'],
+      depend_files: files('../../tools/build_index.py',
+                          '../../tools/make_config.py',
+                          '../../tools/make_log.py',
+                          '../../tools/make_otg.py'))
+    partial_repaint_test = executable(
+      'partial_repaint_test',
+      sources: ['headless/partial_repaint_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('partial-repaint', partial_repaint_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
+                headless_partial_disk[0].full_path(),
+                headless_partial_disk[1].full_path()],
+         depends: [headless_disk, headless_partial_disk],
+         timeout: 300,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

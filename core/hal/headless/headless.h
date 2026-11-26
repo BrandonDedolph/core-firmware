@@ -190,6 +190,19 @@ size_t      hl_log_len(void);
 size_t         hl_events_mark(void);
 const hl_ev_t *hl_events(size_t *n);
 
+/* The panel as it was the last time the backlight went from off to on — the
+ * frame a wake actually shows, however soon the main loop paints over it —
+ * and (*n) how many times that has happened since boot. */
+const uint16_t *hl_lit_frame(uint32_t *n);
+
+/* While on, a USEC_TIMER read returns the current fake time WITHOUT moving
+ * it (normally every read advances it by 1 us and may hand the baton back).
+ * For a test that calls firmware code on its own thread while the firmware is
+ * frozen (a renderer, as an oracle): such a call must neither move the
+ * firmware's clock nor try to yield a baton the test thread already holds.
+ * Off by default; turn it off again before the next hl_run_ms(). */
+void hl_hold_time(int on);
+
 /* Dump the panel as a 24-bit BMP. 0 on success. */
 int hl_write_bmp(const char *path);
 

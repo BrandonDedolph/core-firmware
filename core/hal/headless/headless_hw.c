@@ -252,11 +252,16 @@ static uint32_t gpio_b_in(void)
     return charging ? 0u : 0x01u;
 }
 
+/* hl_hold_time(): set only by the test thread, between runs. */
+static int g_time_held;
+
+void hl_hold_time(int on) { g_time_held = on; }
+
 uint32_t mmio_read32(uintptr_t addr)
 {
     switch (addr) {
     case USEC_TIMER_ADDR:
-        advance(1);                        /* a spin on the counter ends */
+        if (!g_time_held) advance(1);      /* a spin on the counter ends */
         return (uint32_t)g_now;
     case PROCESSOR_ID_ADDR:
         return 0x55u;                      /* the CPU core */
@@ -320,6 +325,8 @@ void log_printf(const char *fmt, ...)
  * ==================================================================== */
 
 static uint16_t g_panel[LCD_WIDTH * LCD_HEIGHT];
+static uint16_t g_lit_panel[LCD_WIDTH * LCD_HEIGHT];  /* hl_lit_frame */
+static uint32_t g_lit_n;
 static int      g_lcd_slept;
 static uint32_t g_pres_full, g_pres_rect, g_pres_refused;
 
@@ -424,7 +431,18 @@ void backlight_set(int level)
     if (level < 0) level = 0;
     if (level > BACKLIGHT_MAX) level = BACKLIGHT_MAX;
     if (level != g_bl) ev(HL_EV_BACKLIGHT, (uint32_t)level);
+    if (level > 0 && g_bl == 0) {
+        /* What the light came on over (hl_lit_frame). */
+        memcpy(g_lit_panel, g_panel, sizeof g_lit_panel);
+        g_lit_n++;
+    }
     g_bl = level;
+}
+
+const uint16_t *hl_lit_frame(uint32_t *n)
+{
+    if (n) *n = g_lit_n;
+    return g_lit_panel;
 }
 void backlight_service(void) {}
 

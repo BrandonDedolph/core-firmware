@@ -1981,156 +1981,23 @@ _Noreturn static void run_ui(fat32_t *fs)
             }
             switch (scr_cur()) {
             case SCR_MENU:
-                if (ev.wheel_delta) {
-                    g_main_sel = wheel_move(g_main_sel, main_menu_count(),
-                                            ev.wheel_delta, &g_menu_accum);
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_SELECT) {
-                    if (g_main_sel == MM_MUSIC) {
-                        g_music_sel  = MU_ALBUMS;
-                        g_menu_accum = 0;
-                        scr_push(SCR_MUSIC);
-                    } else if (g_main_sel == MM_NOWPLAYING && player_active()) {
-                        scr_push(SCR_NOWPLAYING);
-                        L->np_first = 1;
-                    } else if (g_main_sel == MM_SETTINGS) {
-                        g_set_screen = SETTINGS_ROOT;
-                        g_set_sel = g_set_root_sel = g_set_accum = 0;
-                        g_set_editing = 0;
-                        scr_push(SCR_SETTINGS);
-                    } else if (g_main_sel == MM_PLAYLISTS) {
-                        playlists_ensure(fs);          /* same list as Music -> */
-                        scr_push(SCR_PLAYLISTS);       /* Playlists; MENU pops here */
-                    }
-                    /* other items are greyed: SELECT does nothing yet */
-                    L->dirty = 1;
-                }
+                main_menu_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_MUSIC:
-                if (ev.wheel_delta) {
-                    g_music_sel = wheel_move(g_music_sel, MU_COUNT,
-                                             ev.wheel_delta, &g_menu_accum);
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_SELECT) {
-                    if (g_music_sel == MU_ALBUMS) {
-                        library_ensure(fs);            /* index -> g_albums      */
-                        g_dir_depth = 0;
-                        g_artist_filter[0] = '\0';     /* all albums             */
-                        albumview_build(0);
-                        albumlist_queue_chips();       /* start loading covers   */
-                        g_br_sel = g_br_accum = 0;
-                        g_br_from_search = 0;
-                        scr_push(SCR_BROWSER);
-                    } else if (g_music_sel == MU_ARTISTS) {
-                        library_ensure(fs);            /* index -> g_albums      */
-                        g_artist_filter[0] = '\0';
-                        /* No rebuild: library_ensure built the list when the
-                         * index loaded, and nothing changes g_albums after. */
-                        g_artist_sel = g_artist_accum = 0;
-                        scr_push(SCR_ARTISTS);
-                    } else if (g_music_sel == MU_SONGS) {
-                        library_ensure(fs);
-                        songview_build(-1, 0);         /* all songs, all artists */
-                        scr_push(SCR_SONGS);
-                    } else if (g_music_sel == MU_SHUFFLE) {
-                        shuffle_songs_play(fs);        /* the library, shuffled */
-                        hal_volume_set(g_volume);      /* re-apply over codec re-init */
-                        if (player_active()) {
-                            scr_push(SCR_NOWPLAYING);
-                            L->np_first = 1;
-                        }
-                    } else if (g_music_sel == MU_GENRES) {
-                        library_ensure(fs);
-                        g_genre_sel = g_genre_accum = 0;
-                        scr_push(SCR_GENRES);
-                    } else if (g_music_sel == MU_PLAYLISTS) {
-                        playlists_ensure(fs);          /* Music/Playlists/NAME.m3u8 */
-                        scr_push(SCR_PLAYLISTS);
-                    } else if (g_music_sel == MU_SEARCH) {
-                        library_ensure(fs);
-                        /* Artists are built by library_ensure. The playlist
-                         * folder read is once a session — the disk cannot
-                         * change under a running firmware — so only the
-                         * first entry here or into Playlists reads it. */
-                        if (!g_playlists_scanned) playlists_load(fs);
-                        /* The query survives leaving the screen, so re-scan
-                         * on the way back in: the hits then always name rows
-                         * of the lists as they are now. */
-                        if (g_search.qlen > 0) search_rescan();
-                        scr_push(SCR_SEARCH);
-                    }
-                    /* other items are greyed: SELECT does nothing yet */
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back to main menu */
-                    g_menu_accum = 0;
-                    L->dirty = 1;
-                }
+                music_menu_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_ARTISTS:
-                if (ev.wheel_delta && g_artists_n > 0) {
-                    g_artist_sel = wheel_move(g_artist_sel, g_artists_n,
-                                              ev.wheel_delta, &g_artist_accum);
-                    L->dirty = 1;
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && g_artists_n > 0) {
-                    /* Filter the album list to the chosen artist's folders. */
-                    int k = 0;
-                    for (; g_artists[g_artist_sel].name[k] && k < NAME_MAX; k++) {
-                        g_artist_filter[k] = g_artists[g_artist_sel].name[k];
-                    }
-                    g_artist_filter[k] = '\0';
-                    g_dir_depth = 0;
-                    albumview_build(g_artist_filter);
-                    albumlist_queue_chips();
-                    g_br_sel = g_br_accum = 0;
-                    g_br_from_search = 0;
-                    scr_push(SCR_BROWSER);
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back to Music menu */
-                    L->dirty = 1;
-                }
+                artists_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_SONGS:
-                if (ev.wheel_delta && g_songview_n > 0) {
-                    g_song_sel = wheel_move(g_song_sel, g_songview_n,
-                                            ev.wheel_delta, &g_song_accum);
-                    L->dirty = 1;
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && g_songview_n > 0) {
-                    /* Tap plays, hold adds to On-The-Go: the press length
-                     * decides, in the block beside Now Playing's. */
-                    rowsel_arm(g_song_sel, &L->row_key, ev_us);
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back (Music or Genres) */
-                    L->dirty = 1;
-                }
+                songs_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_GENRES:
-                if (ev.wheel_delta && g_genres_n > 0) {
-                    g_genre_sel = wheel_move(g_genre_sel, g_genres_n,
-                                             ev.wheel_delta, &g_genre_accum);
-                    L->dirty = 1;
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && g_genres_n > 0) {
-                    songview_build(g_genre_sel, 0);     /* this genre's songs */
-                    scr_push(SCR_SONGS);
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back to Music menu */
-                    L->dirty = 1;
-                }
+                genres_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_PLAYLISTS:
@@ -2363,23 +2230,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 break;
 
             case SCR_QUEUE:
-                if (ev.wheel_delta && player_queue_len() > 0) {
-                    g_queue_sel = wheel_move(g_queue_sel, player_queue_len(),
-                                             ev.wheel_delta, &g_queue_accum);
-                    L->dirty = 1;
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && player_queue_len() > 0) {
-                    if (!player_queue_is_dir(g_queue_sel)) {
-                        player_jump(g_queue_sel);          /* play the chosen track */
-                        hal_volume_set(g_volume);          /* re-apply over re-init */
-                        scr_pop();                          /* back to Now Playing  */
-                    }
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();
-                    L->dirty = 1;
-                }
+                queue_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_SETTINGS: {

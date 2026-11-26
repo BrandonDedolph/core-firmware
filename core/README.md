@@ -31,7 +31,8 @@ core/
 │   ├── playctx.c     queue building from library songs, queue context
 │   ├── statusbar.c   status strip, list-row wrappers, Hold / On-The-Go banners
 │   ├── playlists.c   Music > Playlists and one playlist's tracklist
-│   ├── albums.c      album list, album detail, folder browse data
+│   ├── albums.c      album list, album detail, folder browse data, cover pump
+│   ├── coverpump.c   how many covers the album list may read per pass
 │   ├── nowplaying.c  Now Playing, transport band, volume plate, seek state
 │   ├── otg.c         On-The-Go live list, its screen, Save/Delete
 │   ├── settings_glue.c Settings state, apply, per-page render, Theme preview

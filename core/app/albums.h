@@ -52,6 +52,7 @@ void detail_row_draw(int r, int vi);
 int detail_sel_view(int sel);
 void chip_placeholder_init(void);
 void albumlist_queue_chips(void);
+uint32_t albumlist_pump_chips(fat32_t *fs, int locked, uint32_t *last_chip);
 int albumlist_count(void);
 int albumlist_album_at(int row);
 void albumlist_row_draw(int r, int idx);

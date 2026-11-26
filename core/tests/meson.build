@@ -1429,6 +1429,19 @@ if target == 'sim'
   )
   test('backlightpolicy', backlightpolicy_test, suite: 'unit')
 
+  # coverpump: how many album covers the album list may read this pass
+  # (core/app/coverpump.c) — parked and locked, parked under a recently
+  # moved wheel, moving, settled, the 60 ms rate limit with a song loaded,
+  # all across the 32-bit timer wrap. Pure, so the host runs the SAME
+  # source the ARM build links.
+  coverpump_test = executable(
+    'coverpump_test',
+    sources: ['app/coverpump_test.c', '../app/coverpump.c'],
+    include_directories: include_directories('../app', '.'),
+    override_options: test_opts,
+  )
+  test('coverpump', coverpump_test, suite: 'unit')
+
   # timesync: what the firmware does at boot with the clock stamp the host
   # leaves in CORECFG.DAT (core/kernel/timesync.c), and the software clock that
   # carries the time between the rare RTC reads (core/kernel/wallclock.c) —

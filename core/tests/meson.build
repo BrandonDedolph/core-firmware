@@ -1414,6 +1414,20 @@ if target == 'sim'
   )
   test('drivepower', drivepower_test, suite: 'unit')
 
+  # backlightpolicy: when an idle screen dims and goes out, and when the core
+  # drops to 30 MHz behind it (core/kernel/backlightpolicy.c) — run_ui's
+  # dim/off timing, the "never" setting, the wake on input, playback's hold
+  # on the clock, and the boost refcount's balance under a random walk of
+  # passes, inputs and suspends. Pure, so the host runs the SAME source the
+  # ARM build links, to the microsecond and across the 32-bit timer wrap.
+  backlightpolicy_test = executable(
+    'backlightpolicy_test',
+    sources: ['kernel/backlightpolicy_test.c', '../kernel/backlightpolicy.c'],
+    include_directories: include_directories('../kernel', '.'),
+    override_options: test_opts,
+  )
+  test('backlightpolicy', backlightpolicy_test, suite: 'unit')
+
   # timesync: what the firmware does at boot with the clock stamp the host
   # leaves in CORECFG.DAT (core/kernel/timesync.c), and the software clock that
   # carries the time between the rare RTC reads (core/kernel/wallclock.c) —
@@ -1694,7 +1708,7 @@ if target == 'sim'
       '../kernel/config.c', '../kernel/cfg_commit.c', '../kernel/evlog.c',
       '../kernel/otg_store.c', '../kernel/datetime.c', '../kernel/timesync.c',
       '../kernel/wallclock.c', '../kernel/chargestat.c', '../kernel/idlesleep.c',
-      '../kernel/drivepower.c',
+      '../kernel/drivepower.c', '../kernel/backlightpolicy.c',
       '../fs/fat32.c', '../fs/m3u.c',
       '../player/player.c',
       '../codecs/arena.c', '../codecs/readahead.c', '../codecs/diskbuf.c',

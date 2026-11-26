@@ -2923,74 +2923,19 @@ _Noreturn static void run_ui(fat32_t *fs)
          * pushed. */
         if (L->bl_state != BL_OFF && scr_cur() == SCR_BROWSER && g_dir_depth > 0
             && player_active() && !player_paused()) {
-            uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
-            if ((uint32_t)(nowb - L->last_bars) >= 110000u) {
-                int sv = 0;
-                for (int i = 0; i < g_det_view_n; i++)
-                    if (g_det_view[i] == (int16_t)g_det_sel) { sv = i; break; }
-                int top = ui_scroll_window(sv, g_det_view_n, DET_ROWS);
-                const char *pn = player_track_name();
-                for (int r = 0; r < DET_ROWS; r++) {
-                    int vi = top + r;
-                    if (vi >= g_det_view_n) break;
-                    int16_t v = g_det_view[vi];
-                    if (v < 0) continue;
-                    const browse_entry_t *e = &g_browse[v];
-                    if (e->is_dir || !name_eq_ci(e->name, pn)) continue;
-                    int ry = DET_LIST_Y0 + r * ROW_H;
-                    int is_sel = (v == g_det_sel);
-                    console_fill_rect(15, ry + 6, NP_BARS_W, NP_BARS_H,
-                                      is_sel ? LINEN_SEL_BG : LINEN_SURFACE);
-                    nowplaying_bars(15, ry + 6, is_sel ? LINEN_SEL_FG : LINEN_INK,
-                                    bars_clock());
-                    lcd_present_rect(console_framebuffer(),
-                                     15, ry + 6, NP_BARS_W + 1, NP_BARS_H);
-                    break;
-                }
-                L->last_bars = nowb;
-            }
+            detail_bars_tick(L);
         }
 
         /* Same animated bars on the queue view (the currently-playing row). */
         if (L->bl_state != BL_OFF && scr_cur() == SCR_QUEUE && player_active()
             && !player_paused()) {
-            uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
-            if ((uint32_t)(nowb - L->last_bars) >= 110000u) {
-                int n = player_queue_len();
-                int cur = player_queue_current();
-                int top = ui_scroll_window(g_queue_sel, n, LIST_ROWS);
-                int r = cur - top;
-                if (cur < n && r >= 0 && r < LIST_ROWS) {
-                    int ry = LIST_Y0 + r * ROW_H;
-                    int bx = LCD_WIDTH - 22, by = ry + 7;
-                    int is_sel = (cur == g_queue_sel);
-                    console_fill_rect(bx, by, NP_BARS_W, NP_BARS_H,
-                                      is_sel ? LINEN_SEL_BG : LINEN_SURFACE);
-                    nowplaying_bars(bx, by, is_sel ? LINEN_SEL_FG : LINEN_INK,
-                                    bars_clock());
-                    lcd_present_rect(console_framebuffer(),
-                                     bx, by, NP_BARS_W + 1, NP_BARS_H);
-                }
-                L->last_bars = nowb;
-            }
+            queue_bars_tick(L);
         }
 
         /* Scroll the marquee target (a selected long row, or the now-playing
          * title) in place — redraw just its band + partial-present it, ~16fps. */
         if (L->bl_state != BL_OFF && g_mq.active) {
-            uint32_t nowm = mmio_read32(USEC_TIMER_ADDR);
-            /* Phase clock (g_mq.t0) + target-change detection live in mq_set, so
-             * this just paces the redraw at the shared live offset. */
-            if ((uint32_t)(nowm - L->last_mq) >= 33000u) {   /* ~30fps               */
-                draw_marquee(g_mq.x, g_mq.y, g_mq.w, g_mq.text, g_mq.tw, g_mq.font,
-                             g_mq.ink, g_mq.bg, nowm - g_mq.t0, g_mq.cy0, g_mq.cy1);
-                int ptop = g_mq.y - text_ascent(g_mq.font);
-                int pbot = g_mq.y + text_descent(g_mq.font);
-                if (ptop < 0) ptop = 0;
-                lcd_present_rect(console_framebuffer(),
-                                 g_mq.x, ptop, g_mq.w, pbot - ptop);
-                L->last_mq = nowm;
-            }
+            marquee_tick(L);
         }
 
         /* Load album covers while on the album list: the budget rule is

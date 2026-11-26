@@ -53,6 +53,7 @@ void genres_row_draw(int r, int idx);
 void genres_render(int sel);
 void queue_row_draw(int r, int idx);
 void queue_render(int sel);
+void queue_bars_tick(ui_loop_t *L);
 void menu_row_draw(int r, int idx);
 int main_menu_count(void);
 void main_menu_render(void);

@@ -4,6 +4,9 @@
  */
 
 #include <stdint.h>
+#include "hw/pp5022.h"
+#include "hw/mmio.h"
+#include "hw/lcd.h"
 #include "hal.h"
 #include "../player/player.h"
 #include "../kernel/console.h"
@@ -26,6 +29,7 @@
 #include "search_glue.h"
 #include "settings_glue.h"
 #include "lists.h"
+#include "animpace.h"
 
 /* Slim right-edge scrollbar (menus.jsx Scrollbar); no-op when everything fits.
  * `y0` is the list origin (differs between the full list and the detail view). */
@@ -200,6 +204,34 @@ void queue_render(int sel)
         queue_row_draw(r, idx);
     }
     ui_scrollbar(LIST_Y0, top, LIST_ROWS, n);
+}
+
+/* The queue's half of run_ui's now-playing bar animation: redraw the playing
+ * row's bars box and partial-present just that, once BARS_STEP_US has passed
+ * since L->last_bars (shared with detail_bars_tick; app/animpace.h). run_ui
+ * calls it while the queue is up with a song playing (not paused) and the
+ * backlight on. */
+void queue_bars_tick(ui_loop_t *L)
+{
+    uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
+    if (bars_step_due(nowb, L->last_bars)) {
+        int n = player_queue_len();
+        int cur = player_queue_current();
+        int top = ui_scroll_window(g_queue_sel, n, LIST_ROWS);
+        int r = cur - top;
+        if (cur < n && r >= 0 && r < LIST_ROWS) {
+            int ry = LIST_Y0 + r * ROW_H;
+            int bx = LCD_WIDTH - 22, by = ry + 7;
+            int is_sel = (cur == g_queue_sel);
+            console_fill_rect(bx, by, NP_BARS_W, NP_BARS_H,
+                              is_sel ? LINEN_SEL_BG : LINEN_SURFACE);
+            nowplaying_bars(bx, by, is_sel ? LINEN_SEL_FG : LINEN_INK,
+                            bars_clock());
+            lcd_present_rect(console_framebuffer(),
+                             bx, by, NP_BARS_W + 1, NP_BARS_H);
+        }
+        L->last_bars = nowb;
+    }
 }
 
 /* ---------------------------------------------------------------------------

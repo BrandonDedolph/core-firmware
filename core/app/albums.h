@@ -50,6 +50,7 @@ void browse_load(fat32_t *fs, uint32_t dir_clus);
 void detail_load_meta(fat32_t *fs);
 uint32_t bars_clock(void);
 void nowplaying_bars(int x, int y, uint16_t c, uint32_t t_us);
+void detail_bars_tick(ui_loop_t *L);
 void detail_row_draw(int r, int vi);
 int detail_sel_view(int sel);
 void chip_placeholder_init(void);

@@ -19,10 +19,11 @@
  * (Until idx.c existed the functions were statics in kernel/main.c, which the
  * host cannot compile, and this file carried verbatim copies kept honest by a
  * diff script.) What a unit test of the validator cannot show is that the
- * loader consults it: tests/scripts/check_index_loader.py checks that
- * library_load_index() in app/library.c actually calls idx_header_parse() with the
- * directory entry's size and refuses on IDX_ECRC — a validator the loader
- * does not consult is decoration.
+ * loader consults it: the index-loader headless test
+ * (tests/headless/index_loader_test.c) runs the real library_load_index() in
+ * app/library.c on a CORELIB.IDX whose directory entry's size, CRC or cluster
+ * chain is wrong and checks each is refused — a validator the loader does not
+ * consult is decoration.
  */
 
 #include <stdio.h>

@@ -130,10 +130,7 @@ python3 core/tests/scripts/check_name_hash_parity.py
 ```
 
 `make verify-hw` runs this script, so a divergence fails the build rather
-than silently losing tracks. (Its sibling `check_resume_parity.py` guards the
-same *shape* of hazard entirely inside `core/` — the verbatim copy of
-`resume_find_song()` that the host test compiles — and is not about a host
-tool.)
+than silently losing tracks.
 
 `make_config.py` carries a third instance of the hazard with no script behind
 it: its default record must agree with `settings_defaults()` in

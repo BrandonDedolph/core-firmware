@@ -1883,7 +1883,6 @@ linked ARM image:
   `docs/hw/`.
 - `tests/scripts/check_name_hash_parity.py` — the host tool's name hash
   against the golden vectors the C side (`library/names.c`) is tested on.
-- `tests/scripts/check_resume_parity.py` — the resume matcher across C and host.
 
 Current image: **~298 KB text, 260 B data, ~11.45 MB bss** (budgets 1 MB /
 64 KB / 14 MB, image ceiling 30 MB inside the 32 MB SDRAM window). bss is at

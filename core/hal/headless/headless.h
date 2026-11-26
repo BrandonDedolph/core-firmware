@@ -119,6 +119,13 @@ extern hl_cfg_t hl_cfg;
  * Empty = no guard. Loaded from the image builder's .ranges file by the test. */
 int  hl_allow_writes(uint32_t lba, uint32_t count);
 
+/* Read-error injection: the next `n` ata_read_sectors calls that touch any of
+ * [lba, lba+count) fail as the drive would (an error status, no data) —
+ * BEFORE the firmware's own retries, so one failed fat32 read costs as many
+ * of these as player_disk_read makes attempts. Callable before hl_boot() or
+ * between runs; n = 0 turns it off. One range at a time. */
+void hl_fail_reads(uint32_t lba, uint32_t count, uint32_t n);
+
 /* Open `disk` (read-write) as the drive and start the firmware thread; it
  * runs until `ms` of fake time have passed. 0 on success. */
 int  hl_boot(const char *disk, uint32_t ms);

@@ -11,18 +11,15 @@
  * opens it. Resuming nothing is a shrug; resuming somebody else's track
  * because two albums both contain "01 Intro.flac" is the bug.
  *
- * WHY A COPY: resume_find_song() is `static` inside app/resume.c, which also
- * drags in the whole UI, the FAT reader, the player and the HAL — there is no
- * way to link the real one into a host test. So the function body below is a
- * VERBATIM COPY, diffed against app/resume.c by tests/scripts/check_resume_parity.py
- * (run from `meson test` and from `make verify-hw`). Do not reformat, re-indent
- * or rename anything between the BEGIN/END markers; if you change app/resume.c,
- * paste the new text in here. (The locator hash it calls is no longer a copy:
- * name_hash() lives in library/names.c and is linked here for real, and so
- * is the queue-context seam in kernel/resume_ctx.h — test 5 below.)
+ * THE REAL FUNCTION: resume_find_song() lives in app/resume_match.c, which
+ * reads nothing but the library's g_songs table, and is linked here as it is
+ * into core.elf (it used to be `static` inside a file that drags in the UI,
+ * the FAT reader and the player, and this test compiled a pasted copy). The
+ * locator hash it calls is the real library/names.c, and so is the
+ * queue-context seam in kernel/resume_ctx.h — test 5 below.
  *
- * The library it reads is stubbed below with the same field NAMES app/library.h's
- * lib_song_t uses, so the copied body compiles unchanged.
+ * The library it reads is app/library.h's own lib_song_t table, defined
+ * below (the device's is in app/library.c, which this test does not link).
  */
 
 #include <stdio.h>
@@ -31,6 +28,8 @@
 
 #include "../../library/names.h"
 #include "../../kernel/resume_ctx.h"   /* the REAL queue-context seam */
+#include "../../app/library.h"         /* lib_song_t, g_songs             */
+#include "../../app/resume_match.h"    /* the REAL resume_find_song       */
 
 static int g_fails;
 
@@ -42,62 +41,22 @@ static void check(const char *label, int cond)
     }
 }
 
-/* ---- the environment the copied function reads -------------------------- */
+/* ---- the library the matcher reads -------------------------------------- */
 
 /*
- * A stand-in for app/library.c's g_songs[]/g_songs_n, carrying only the fields
- * resume_find_song() touches — under the same names, so the copy needs no
- * edits. app/library.h's lib_song_t has more, and none of it is consulted here.
+ * app/library.c's g_songs[]/g_songs_n, defined here because the test does not
+ * link library.c. Only the fields resume_find_song() consults are set.
  *
  * stem_hash is what the matcher compares: app/library.c fills it from the file's
  * DIRECTORY ENTRY when the record binds (resolve_art_cb), not from file[],
- * which is the index's 63-byte copy of the name and is display only. The
- * fixture below sets both the way the device would.
+ * which is display only. The fixture below sets both the way the device would.
  */
-#define STUB_FILE_MAX 64
-#define STUB_SONGS    16
+lib_song_t g_songs[LIB_MAX_SONGS];
+int        g_songs_n;
 
-static struct {
-    char     file[STUB_FILE_MAX];    /* filename, extension trimmed (display)  */
-    uint32_t stem_hash;              /* name_hash of the ON-DISK stem; 0 = the  */
-                                     /* record never bound to a file            */
-    uint32_t file_clus;              /* 0 = indexed but not on disk */
-    uint32_t duration_s;
-} g_songs[STUB_SONGS];
-static int g_songs_n;
-
-/* Slop between the library's indexed duration and the decoder's, in seconds.
- * Restated here rather than shared: this file is the independent statement of
- * what the rule is, and check_resume_parity.py pins the value against app/resume.c. */
-#define RESUME_DUR_SLOP    2u
-
-/* ---- BEGIN VERBATIM COPY OF core/app/resume.c -------------------------- */
-
-static int resume_find_song(uint32_t hash, uint32_t total_s)
-{
-    int best = -1, n_named = 0;
-
-    for (int i = 0; i < g_songs_n; i++) {
-        if (hash == 0 || g_songs[i].stem_hash != hash) {
-            continue;
-        }
-        n_named++;
-        if (!g_songs[i].file_clus) {
-            continue;                  /* indexed but not on the disk any more */
-        }
-        uint32_t d = g_songs[i].duration_s;
-        if (d != 0 && total_s != 0 &&
-            d + RESUME_DUR_SLOP >= total_s && total_s + RESUME_DUR_SLOP >= d) {
-            return i;                  /* name AND length agree — this is it */
-        }
-        if (best < 0) {
-            best = i;
-        }
-    }
-    return (n_named == 1) ? best : -1;
-}
-
-/* ---- END VERBATIM COPY -------------------------------------------------- */
+/* The index record's filename field: 64 bytes, so at most 63 of the name
+ * (the library.c loader copies it into file[] at load). */
+#define IDX_FILE_FIELD 64
 
 /* ---- library fixture ---------------------------------------------------- */
 
@@ -121,7 +80,7 @@ static void lib_add_disk(const char *file, const char *disk_stem,
 {
     int i = g_songs_n++;
     size_t n = strlen(file);
-    memcpy(g_songs[i].file, file, n < STUB_FILE_MAX ? n : STUB_FILE_MAX - 1);
+    memcpy(g_songs[i].file, file, n < IDX_FILE_FIELD ? n : IDX_FILE_FIELD - 1);
     g_songs[i].stem_hash  = name_hash(disk_stem ? disk_stem : file);
     g_songs[i].file_clus  = clus;
     g_songs[i].duration_s = dur;
@@ -222,6 +181,16 @@ static void test_ambiguous(void)
           resume_find_song(H("01 Intro"), 130) == 2);
     check("duplicate names: and the first",
           resume_find_song(H("01 Intro"), 61) == 0);
+
+    /* The slop, exactly: with twins in the library the length is the only
+     * thing choosing, so this is where RESUME_DUR_SLOP (2 s) is visible — a
+     * unique name resolves whatever the length says. */
+    check("duplicate names: the length agrees within 2 s either way",
+          resume_find_song(H("01 Intro"), 97) == 1 &&
+          resume_find_song(H("01 Intro"), 93) == 1);
+    check("duplicate names: 3 s out is no longer a match",
+          resume_find_song(H("01 Intro"), 98) < 0 &&
+          resume_find_song(H("01 Intro"), 92) < 0);
 
     /* No length agrees: three candidates, no way to choose. Declining is the
      * requirement — a coin flip is not a resume. */

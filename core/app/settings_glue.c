@@ -13,10 +13,15 @@
 #include "hw/battery.h"
 #include "hw/headphone.h"
 #include "hw/volume.h"
+#include "hw/lcd.h"
+#include "hw/backlight.h"
+#include "hw/power.h"
 #include "../player/player.h"
 #include "../kernel/config.h"
 #include "../kernel/evlog.h"
 #include "../kernel/chargestat.h"
+#include "../kernel/console.h"
+#include "../kernel/backlightpolicy.h"
 #include "core_version.h"      /* CORE_BUILD_ID: meson vcs_tag, git describe   */
 #include "core_version_tag.h"  /* CORE_VERSION:  meson vcs_tag, nearest tag    */
 #include "../ui/settings.h"
@@ -24,6 +29,9 @@
 #include "../ui/palette.h"
 #include "../ui/sleeptimer.h"
 #include "../ui/settime.h"
+#include "../ui/text.h"
+#include "../ui/chrome.h"
+#include "../ui/wheel.h"
 #include "state.h"
 #include "clockui.h"
 #include "persist.h"
@@ -281,4 +289,287 @@ int theme_preview_sync(void)
     if (want == theme_current()) return 0;
     theme_set(want);
     return 1;
+}
+
+/* The input half of each screen: what run_ui's per-screen switch does with
+ * one drained wheel event while that screen is on top. Each body is the
+ * switch case it replaced, statement for statement, with run_ui's loop
+ * state reached through L (app/ui_loop.h). */
+
+void settings_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                    uint32_t ev_us)
+{
+    (void)fs;
+    (void)ev_us;
+    /*
+     * The Date & Time EDITOR is not a list: the wheel moves a
+     * field's value, SELECT confirms a field and the last one
+     * commits, MENU writes nothing at all. ui/settime.c owns every
+     * one of those decisions (and every calendar edge case in
+     * them); this arm is the wiring.
+     */
+    if (g_set_screen == SETTINGS_SETTIME) {
+        if (ev->wheel_delta) {
+            /* Detents, not raw ticks: one slow detent is one
+             * minute / hour / day (it was ~4). */
+            settime_adjust(&g_settime,
+                           wheel_value_step(ev->wheel_delta,
+                                            WHEEL_VALUE_STEP_MAX));
+            L->dirty = 1;
+        }
+        if (ev->buttons & WHEEL_BTN_SELECT) {
+            if (settime_next(&g_settime)) {
+                /* The last field: write the clock. The editor
+                 * shows LOCAL time and the chip holds UTC, so the
+                 * device's stored offset comes back off here. */
+                datetime_t civil;
+                settime_civil(&g_settime, &civil);
+                /* The editor shows WALL time; the device keeps
+                 * standard (Daylight Saving, kernel/datetime.h). */
+                uint32_t local = clock_dst_standard_from_wall(
+                                     datetime_to_epoch(&civil),
+                                     g_settings.dst_on);
+                uint32_t utc   = 0;
+                /* The editor clamps the YEAR to 2001..2099; the
+                 * zone can still push the UTC epoch off either end
+                 * (2001-01-01 00:30 at UTC+02:00 is 2000 in UTC).
+                 * datetime_utc_from_local refuses that rather than
+                 * wrapping, and the refusal takes the same path as
+                 * a failed write: the old time stands and the log
+                 * says so. */
+                int rc = datetime_utc_from_local(
+                             local, g_settings.utc_off_min, &utc)
+                         ? hal_rtc_set(utc) : -3;
+                uart_puts("core: rtc set ");
+                uart_put_hex32(utc);
+                uart_puts(" rc ");
+                uart_put_hex32((uint32_t)rc);
+                uart_putc('\n');
+                if (rc == 0) {
+                    wallclock_anchor(&g_wclock, 1, utc,
+                                     mmio_read32(USEC_TIMER_ADDR));
+                    g_clock_tick_us   = mmio_read32(USEC_TIMER_ADDR);
+                    g_clock_resync_us = g_clock_tick_us;
+                    g_clock_min       = 0;   /* repaint the strip */
+                }
+                /* A manual set NEVER touches applied_epoch: a
+                 * later host stamp is still news (timesync.h). */
+                g_set_screen = SETTINGS_DATETIME;
+                g_set_sel = g_set_accum = 0;
+            }
+            L->dirty = 1;
+        }
+        if (ev->buttons & WHEEL_BTN_MENU) {
+            g_set_screen = SETTINGS_DATETIME;   /* nothing written */
+            g_set_sel = g_set_accum = 0;
+            L->dirty = 1;
+        }
+        return;
+    }
+
+    int scount = settings_count(g_set_screen);
+    int slider = (settings_kind(g_set_screen, g_set_sel)
+                  == SETTINGS_KIND_SLIDER);
+    /* NB `slider` is re-read before the SELECT test below: one latched
+     * event can carry BOTH a wheel move and a button, and the move
+     * changes which row SELECT lands on. */
+    if (ev->wheel_delta) {
+        if (g_set_editing && slider) {         /* adjust the value  */
+            /* Detents, not raw ticks: this was the raw delta
+             * clamped to +/-4, so ONE slow detent (~4 ticks)
+             * moved every slider by four and no single value
+             * was reachable. The volume wheel's rule now. */
+            int dd = wheel_value_step(ev->wheel_delta,
+                                      WHEEL_VALUE_STEP_MAX);
+            /* Only a value that MOVED earns an apply and a disk
+             * write: a wheel pinned at a rail (volume 100,
+             * brightness 32) is not a change — settings_adjust
+             * says so, and a48510f made SELECT honour the same
+             * answer. */
+            if (settings_adjust(g_set_screen, &g_settings, g_set_sel, dd)) {
+                settings_apply();              /* live volume/etc.  */
+                settings_touch();              /* debounced save    */
+                /* Brightness slider: light up to the new level as
+                 * you turn, so the wheel drives the panel in real
+                 * time. */
+                if (g_set_screen == SETTINGS_DISPLAY && g_set_sel == 1) {
+                    if (!L->panel_slept) {   /* the Panel-wake block
+                                           * lights it after the
+                                           * first present, else
+                                           * a white flash */
+                        backlight_set(g_settings.backlight_bright);
+                    }
+                    L->bl_state = BL_FULL;
+                }
+            }
+        } else if (scount > 0) {               /* move selection    */
+            g_set_sel = wheel_move(g_set_sel, scount,
+                                   ev->wheel_delta, &g_set_accum);
+        }
+        L->dirty = 1;
+    }
+    if (ev->buttons & WHEEL_BTN_SELECT) {
+        slider = (settings_kind(g_set_screen, g_set_sel)
+                  == SETTINGS_KIND_SLIDER);    /* the CURRENT row   */
+        if (slider) {
+            /* A locked slider (Bass/Treble under an EQ preset) is
+             * a readout: the click happens, edit mode does not. */
+            if (!settings_row_locked(g_set_screen, &g_settings,
+                                     g_set_sel)) {
+                g_set_editing = !g_set_editing; /* enter/exit edit  */
+            }
+        } else {
+            int act = settings_activate(g_set_screen, &g_settings,
+                                        g_set_sel);
+            int target = -1;
+            switch (act) {
+            case SETTINGS_ENTER_PLAYBACK: target = SETTINGS_PLAYBACK; break;
+            case SETTINGS_ENTER_SOUND:    target = SETTINGS_SOUND;    break;
+            case SETTINGS_ENTER_DISPLAY:  target = SETTINGS_DISPLAY;  break;
+            case SETTINGS_ENTER_ABOUT:    target = SETTINGS_ABOUT;    break;
+            case SETTINGS_ENTER_THEME:    target = SETTINGS_THEME;    break;
+            case SETTINGS_ENTER_CLICKER:  target = SETTINGS_CLICKER;  break;
+            case SETTINGS_ENTER_DIAG:     target = SETTINGS_DIAG;     break;
+            case SETTINGS_ENTER_BATTERY:  target = SETTINGS_BATTERY;  break;
+            case SETTINGS_ENTER_DATETIME: target = SETTINGS_DATETIME; break;
+            case SETTINGS_ENTER_SETTIME:
+                /* Seed the editor from the best time we have —
+                 * the running clock, else the host's stamp, else
+                 * ui/settime.c's own fixed default — and enter it
+                 * WITHOUT touching g_set_root_sel: the root's
+                 * remembered row belongs to Date & Time, which is
+                 * where MENU comes back to. */
+                {
+                    datetime_t seed;
+                    int have = clock_local_now(&seed);
+                    if (!have && g_settings.host_epoch != 0) {
+                        have = datetime_local(g_settings.host_epoch,
+                                              g_settings.host_off_min,
+                                              &seed);
+                    }
+                    settime_begin(&g_settime, have, &seed,
+                                  !g_settings.time_24h);
+                }
+                g_set_screen = SETTINGS_SETTIME;
+                g_set_sel = g_set_accum = 0;
+                g_set_editing = 0;
+                break;
+            default: break;
+            }
+            if (target >= 0) {                 /* descend a screen  */
+                g_set_root_sel = g_set_sel;
+                g_set_screen = target;
+                /* A picker opens on the value in force. */
+                g_set_sel = settings_initial_sel(target, &g_settings);
+                g_set_accum = 0;
+                g_set_editing = 0;
+            } else if (act == SETTINGS_ACTION_DISKMODE) {
+                /* Reboot into the ROM's USB mass-storage mode. We
+                 * implement no USB ourselves, so this is the only
+                 * way onto a host from inside our own firmware —
+                 * the alternative is catching the ROM's Select+Play
+                 * window at boot, which is timing-sensitive and easy
+                 * to miss. Stop playback and blank the panel first
+                 * so we never reset mid-DMA or leave a half-drawn
+                 * screen; power_enter_disk_mode never returns. */
+                player_stop();
+                hal_audio_close();
+                /* Disk mode is where the log gets READ, so
+                 * what is still in RAM has to land first —
+                 * the reboot below is a ROM entry, nothing
+                 * of ours runs again. Same for a settings
+                 * change made a second ago. Both forced;
+                 * the drive is up (the ROM needs it anyway).
+                 * DEVICE 2026-09-13: a whole test session
+                 * arrived at the host as "prev unflushed". */
+                settings_commit(1);
+                otg_commit(CFG_COMMIT_FORCE);
+                uart_puts("core: disk mode: entering\n");
+                evlog_commit(CFG_COMMIT_FORCE);
+                console_clear(LINEN_SURFACE);
+                ui_text_centered(LCD_HEIGHT / 2 - 8, "Disk Mode",
+                                 FONT_TITLE, LINEN_INK);
+                lcd_present_fb(console_framebuffer());
+                power_enter_disk_mode();
+            } else if (act == SETTINGS_ACTION_RESET) {
+                /* THE CLOCK IS NOT A SETTING. settings_defaults()
+                 * zeroes all six of its fields (it is also the
+                 * pre-load state, where a non-zero stamp would be
+                 * one nobody wrote), so the reset puts back the
+                 * three that are facts rather than preferences:
+                 * the host's stamp and offset, which the device may
+                 * not have acted on yet, and the DISPLAY OFFSET,
+                 * without which the clock on the strip, in the
+                 * header and in the editor would read UTC for the
+                 * rest of the session — and a manual set made in
+                 * that window would write local-as-UTC to the chip
+                 * and jump by the zone at the next boot.
+                 *
+                 * The MARK is deliberately not restored: the next
+                 * boot then re-examines the stamp (rule 5 decides
+                 * whether it is still worth applying), which is
+                 * what makes "a Reset does not cost you the clock"
+                 * true rather than a hope. What DOES reset are the
+                 * two rows: 12-hour, no clock in the title. */
+                uint32_t host_epoch = g_settings.host_epoch;
+                int      host_off   = g_settings.host_off_min;
+                int      disp_off   = g_settings.utc_off_min;
+                int      host_dst   = g_settings.host_dst_raw;
+                settings_defaults(&g_settings);
+                g_settings.host_epoch   = host_epoch;
+                g_settings.host_off_min = host_off;
+                g_settings.utc_off_min  = disp_off;
+                g_settings.host_dst_raw = host_dst;
+                settings_apply();
+                sleep_timer_apply();           /* defaults() zeroed
+                                                * the row: disarm  */
+                settings_touch();              /* persist the reset */
+            } else if (act == SETTINGS_ACTION_SLEEPTIMER) {
+                /* The record changed, but only its RUNTIME part:
+                 * re-arm the countdown and DO NOT touch. Nothing
+                 * on disk stores the duration (ui/settings.h), so
+                 * a touch here would spin the drive up three
+                 * seconds later to write a byte-identical record —
+                 * and it would do it at bedtime, which is the one
+                 * moment the drive is parked for the night. */
+                sleep_timer_apply();
+            } else if (act == SETTINGS_ACTION_NONE) {
+                /* Only a row that actually CHANGED the record gets
+                 * persisted. SELECT on About/Diagnostics, or on the
+                 * theme already selected, used to mark the config
+                 * dirty and spin the drive up three seconds later to
+                 * write a byte-identical record. */
+                settings_apply();
+                /* Shuffle changed under a playing queue means the
+                 * player just dealt a NEW order; the record still
+                 * carries the old (seed, keep) until the next
+                 * capture edge (a track change, a pause, five
+                 * minutes), and a boot inside that window would
+                 * deal a valid but different order. Capture now.
+                 * resume_capture() is idempotent — it touches only
+                 * when something actually moved — so the rows that
+                 * are not about playback pay nothing. */
+                resume_capture();
+                settings_touch();
+            }
+        }
+        L->dirty = 1;
+    }
+    if (ev->buttons & WHEEL_BTN_MENU) {
+        if (g_set_editing) {
+            g_set_editing = 0;                 /* exit edit, stay   */
+        } else if (g_set_screen != SETTINGS_ROOT) {
+            g_set_screen = SETTINGS_ROOT;      /* back to root      */
+            g_set_sel = g_set_root_sel;
+            g_set_accum = 0;
+        } else {
+            scr_pop();                          /* leave Settings    */
+            /* The natural "I'm done" moment: commit now rather than
+             * waiting out the debounce, so the record is on the
+             * platter before the user can reach for the Hold switch.
+             * Same exit the MENU hold takes (scr_pop_to_root). */
+            settings_leave();
+        }
+        L->dirty = 1;
+    }
 }

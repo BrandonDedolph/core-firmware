@@ -58,6 +58,7 @@ int                g_pl_slot;    /* 1..OTG_SLOTS when the open playlist
                                          * IS a saved On-The-Go slot, else 0  */
 static int                g_pl_damaged; /* ...and its save was torn           */
 static playlist_scratch_t g_pl_scratch;         /* ~35 KB of .bss, one copy   */
+ui_window_t g_pl_confirm;        /* Delete Playlist, on a saved slot  */
 
 /* Where the playlists folder is looked for, and what a relative entry in a
  * playlist is relative to: the library root (Music/ when it exists, else

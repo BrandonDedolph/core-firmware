@@ -11,7 +11,7 @@
 
 #include "../fs/fat32.h"
 #include "../ui/search.h"
-#include "main_internal.h"      /* play_tap_t, until actions moves */
+#include "actions.h"
 
 extern search_t g_search;
 

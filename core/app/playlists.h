@@ -14,6 +14,7 @@
 
 #include "../fs/fat32.h"
 #include "../library/playlist.h"
+#include "util.h"
 
 extern playlist_t         g_playlists[PLAYLIST_MAX];
 extern int                g_playlists_n;
@@ -27,6 +28,7 @@ extern int                g_pl_tracks_n;
 extern int                g_pl_open;
 extern int                g_plt_sel, g_plt_accum;
 extern int                g_pl_slot;
+extern ui_window_t        g_pl_confirm;
 
 uint32_t playlists_root_clus(fat32_t *fs);
 void playlists_load(fat32_t *fs);

@@ -94,6 +94,7 @@
 #include "../app/paint.h"
 #include "../app/az.h"
 #include "../app/actions.h"
+#include "../app/ui_loop.h"
 #include "../app/main_internal.h"
 
 /*
@@ -1138,49 +1139,48 @@ _Noreturn static void run_ui(fat32_t *fs)
     g_scr_n = 0;
     scr_push(SCR_MENU);
 
-    int      dirty = 1;
-    uint32_t np_last = 0xFFFFFFFFu;
-    int      np_first = 1;
-    int      np_vol_prev = 0;            /* volume overlay was up last NP paint  */
-    int      np_vol_dirty = 0;           /* g_volume moved since the plate paint */
-    uint32_t last_present = 0;           /* rate-limit UI presents while playing */
-    uint32_t last_bars = 0;              /* rate-limit the now-playing bar anim  */
-    uint32_t last_chip = 0;              /* rate-limit album-cover chip loads    */
-    uint32_t last_uistat = 0;            /* 5 s cadence of the "core: ui" line   */
-    uint32_t last_mq = 0;                /* rate-limit the marquee scroll        */
-    int      hold_prev = clickwheel_hold() ? 1 : 0;  /* seed hold-edge detect    */
-    int      ext_prev  = power_is_external() ? 1 : 0; /* seed plug-in edge detect */
-    int      banner_up = 0;          /* a top-chrome banner is on screen     */
-    char     az_prev = 0;                /* A-Z locator letter on screen         */
-    int      toast_prev = 0;             /* low-battery toast on screen          */
-    int      bat_glyph_prev = battery_glyph_key(g_bat_pct); /* strip gauge as drawn */
-    keyhold_t play_key;                  /* PLAY: tap = pause, hold = sleep       */
-    keyhold_t menu_key;                  /* MENU: hold = the main menu            */
-    keyhold_t row_key;                   /* SELECT on a row: tap acts, hold adds  */
-    keyhold_reset(&play_key);            /* (g_ff/g_rw are statics: born idle)    */
-    keyhold_reset(&menu_key);
-    keyhold_reset(&row_key);
+    ui_loop_t  loop;                    /* the loop's state (app/ui_loop.h) */
+    ui_loop_t *L = &loop;
+    L->dirty = 1;
+    L->np_last = 0xFFFFFFFFu;
+    L->np_first = 1;
+    L->np_vol_prev = 0;            /* volume overlay was up last NP paint  */
+    L->np_vol_dirty = 0;           /* g_volume moved since the plate paint */
+    L->last_present = 0;           /* rate-limit UI presents while playing */
+    L->last_bars = 0;              /* rate-limit the now-playing bar anim  */
+    L->last_chip = 0;              /* rate-limit album-cover chip loads    */
+    L->last_uistat = 0;            /* 5 s cadence of the "core: ui" line   */
+    L->last_mq = 0;                /* rate-limit the marquee scroll        */
+    L->hold_prev = clickwheel_hold() ? 1 : 0;  /* seed hold-edge detect    */
+    L->ext_prev = power_is_external() ? 1 : 0; /* seed plug-in edge detect */
+    L->banner_up = 0;          /* a top-chrome banner is on screen     */
+    L->az_prev = 0;                /* A-Z locator letter on screen         */
+    L->toast_prev = 0;             /* low-battery toast on screen          */
+    L->bat_glyph_prev = battery_glyph_key(g_bat_pct); /* strip gauge as drawn */
+    keyhold_reset(&L->play_key);            /* (g_ff/g_rw are statics: born idle)    */
+    keyhold_reset(&L->menu_key);
+    keyhold_reset(&L->row_key);
     g_rowsel.pending = 0;
     /* Nothing believed about the jack yet. The first pass primes it from the
      * HAL's own first (already primed) sample, so a boot with an empty jack
      * yields "out" with no edge and no pause. */
     jackwatch_reset(&g_jack);
-    g_locked = hold_prev;
+    g_locked = L->hold_prev;
 
     /* Backlight inactivity: full -> dim -> off. Any input wakes to full; a press
      * that wakes from fully-OFF is swallowed (it just lights the screen, the way
      * a real iPod's first touch does). Playback keeps running the whole time. */
     enum { BL_OFF, BL_DIM, BL_FULL };
-    int      bl_state   = BL_FULL;
-    int      cpu_idled  = 0;              /* core dropped to 30 MHz for deep idle   */
+    L->bl_state = BL_FULL;
+    L->cpu_idled = 0;              /* core dropped to 30 MHz for deep idle   */
     /* LCD panel put to sleep at backlight-off (PANEL_SLEEP_AT_IDLE). While set,
      * the input sites must NOT light the LED: the "Panel wake" block below
      * wakes the panel, paints, presents the full frame (which retires the
      * BCM's panel init) and only then lights it — see the note above run_ui. */
-    int      panel_slept = 0;
-    uint32_t panel_refused_at_sleep = 0;  /* lcd_presents_refused() at the sleep */
-    uint32_t last_input = mmio_read32(USEC_TIMER_ADDR);
-    idlesleep_reset(&g_idlesleep, last_input);   /* two minutes from here, untouched,
+    L->panel_slept = 0;
+    L->panel_refused_at_sleep = 0;  /* lcd_presents_refused() at the sleep */
+    L->last_input = mmio_read32(USEC_TIMER_ADDR);
+    idlesleep_reset(&g_idlesleep, L->last_input);   /* two minutes from here, untouched,
                                                   * and a fresh boot sleeps too — a
                                                   * cold boot from a dead cell used
                                                   * to sit awake until dead again */
@@ -1189,11 +1189,11 @@ _Noreturn static void run_ui(fat32_t *fs)
      * has already left a track loaded, and a `was_active` of 0 would read the
      * first pass as a play->stop edge (closing the codec under a track we just
      * restored) and as a fresh capture of a position we only just loaded. */
-    int was_active = player_active();     /* detect the active->idle edge          */
-    int last_qidx  = was_active ? player_queue_current() : -1;
+    L->was_active = player_active();     /* detect the active->idle edge          */
+    L->last_qidx = L->was_active ? player_queue_current() : -1;
     /* Which track is open, for the seek-aim cancel below. Keyed on the OPEN
      * and not on last_qidx because repeat-one re-opens the same queue index. */
-    uint32_t last_oseq = player_open_seq();
+    L->last_oseq = player_open_seq();
     g_resume_open_seq   = player_open_seq();
     g_resume_was_paused = player_paused();
     /* Seeded AFTER resume_restore: a restore that had to skip a broken track
@@ -1219,10 +1219,10 @@ _Noreturn static void run_ui(fat32_t *fs)
          * play->stop transition too. */
         int now_active = player_active();
         int now_qidx   = now_active ? player_queue_current() : -1;
-        if (now_active != was_active || now_qidx != last_qidx) {
-            dirty = 1;
+        if (now_active != L->was_active || now_qidx != L->last_qidx) {
+            L->dirty = 1;
         }
-        last_qidx = now_qidx;
+        L->last_qidx = now_qidx;
 
         /* A RIGHT/LEFT aim belongs to the track it was aimed at, and THIS is
          * the only place that can see that track go. ui/gesture.c is fed a
@@ -1238,8 +1238,8 @@ _Noreturn static void run_ui(fat32_t *fs)
          * above; where it is the queue ENDING, `allowed` drops and the feed
          * would cancel anyway — this just gets there first. */
         uint32_t now_oseq = player_open_seq();
-        if (now_oseq != last_oseq || now_active != was_active) {
-            last_oseq = now_oseq;
+        if (now_oseq != L->last_oseq || now_active != L->was_active) {
+            L->last_oseq = now_oseq;
             (void)seekhold_cancel(&g_ff);
             (void)seekhold_cancel(&g_rw);
         }
@@ -1253,7 +1253,7 @@ _Noreturn static void run_ui(fat32_t *fs)
             uint32_t oseq  = player_open_seq();
             int      paus  = player_paused();
             uint32_t nowu  = mmio_read32(USEC_TIMER_ADDR);
-            if (now_active != was_active || oseq != g_resume_open_seq ||
+            if (now_active != L->was_active || oseq != g_resume_open_seq ||
                 paus != g_resume_was_paused ||
                 (uint32_t)(nowu - g_resume_last_us) >= RESUME_SAMPLE_US) {
                 resume_capture();
@@ -1270,7 +1270,7 @@ _Noreturn static void run_ui(fat32_t *fs)
          * an empty stack falls back to the main menu. Testing only the TOP screen
          * left a dead Now Playing behind a Queue view, and left every other screen
          * un-repainted. */
-        if (was_active && !now_active) {
+        if (L->was_active && !now_active) {
             /*
              * If the queue ended BY ITSELF, drop the saved resume position.
              * resume_capture() deliberately keeps the last locator when
@@ -1306,9 +1306,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                 g_scr_n    = 1;
                 g_main_sel = 0;
             }
-            dirty = 1;
+            L->dirty = 1;
         }
-        was_active = now_active;
+        L->was_active = now_active;
         if (battery_refresh(0)) {
             /* The strip's gauge is only ever painted on `dirty`, and an idle
              * list screen sets it for nothing, so a menu left alone showed
@@ -1317,10 +1317,10 @@ _Noreturn static void run_ui(fat32_t *fs)
              * for a sample that rounds to the same picture. The charging
              * screen shows the number itself, so every sample is a change. */
             int key = battery_glyph_key(g_bat_pct);
-            if (key != bat_glyph_prev || scr_cur() == SCR_CHARGING ||
+            if (key != L->bat_glyph_prev || scr_cur() == SCR_CHARGING ||
                 (scr_cur() == SCR_SETTINGS && g_set_screen == SETTINGS_BATTERY)) {
-                bat_glyph_prev = key;      /* the Battery page IS the sample */
-                dirty = 1;
+                L->bat_glyph_prev = key;      /* the Battery page IS the sample */
+                L->dirty = 1;
             }
         }
 
@@ -1366,7 +1366,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 int in_title = g_settings.time_in_title &&
                                (!player_active() || scr_cur() == SCR_MENU);
                 if (on_dt || in_title) {
-                    dirty = 1;
+                    L->dirty = 1;
                 }
             }
         }
@@ -1390,7 +1390,7 @@ _Noreturn static void run_ui(fat32_t *fs)
             if (jackwatch_note_raw(&g_jack, raw)) {
                 jack_narrate_raw(raw, g_jack.raw_edges);
                 if (scr_cur() == SCR_SETTINGS && g_set_screen == SETTINGS_ABOUT) {
-                    dirty = 1;          /* the digit follows the plug */
+                    L->dirty = 1;          /* the digit follows the plug */
                 }
             }
             int playing = player_active() && !player_paused();
@@ -1398,7 +1398,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                                    pump_t0)) {
             case JACKWATCH_PAUSE:
                 player_pause();
-                dirty = 1;              /* the band must read Paused, like a PLAY tap */
+                L->dirty = 1;              /* the band must read Paused, like a PLAY tap */
                 uart_puts("core: jack out, pause\n");
                 break;
             case JACKWATCH_OUT:
@@ -1416,14 +1416,14 @@ _Noreturn static void run_ui(fat32_t *fs)
          * boot, so it won't spuriously appear), auto-dismiss when unplugged. Any
          * button also dismisses it (handled in the input switch below). */
         int ext = power_is_external() ? 1 : 0;
-        if (ext && !ext_prev && scr_cur() != SCR_CHARGING) {
+        if (ext && !L->ext_prev && scr_cur() != SCR_CHARGING) {
             scr_push_modal(SCR_CHARGING);
-            dirty = 1;
+            L->dirty = 1;
         } else if (!ext && scr_cur() == SCR_CHARGING) {
             scr_pop();
-            dirty = 1;
+            L->dirty = 1;
         }
-        ext_prev = ext;
+        L->ext_prev = ext;
 
         /* The low-battery modal. Raised once per OK->DISKSAFE crossing and
          * held until a button dismisses it; the charging screen outranks it,
@@ -1433,11 +1433,11 @@ _Noreturn static void run_ui(fat32_t *fs)
         if (battwarn_screen() == BATTWARN_DISKSAFE &&
             scr_cur() != SCR_BATTERY && scr_cur() != SCR_CHARGING) {
             scr_push_modal(SCR_BATTERY);
-            dirty = 1;
+            L->dirty = 1;
         } else if (scr_cur() == SCR_BATTERY &&
                    battwarn_screen() != BATTWARN_DISKSAFE) {
             scr_pop();
-            dirty = 1;
+            L->dirty = 1;
         }
 
         /*
@@ -1464,23 +1464,23 @@ _Noreturn static void run_ui(fat32_t *fs)
             int      want_suspend   = 0;
             uint32_t suspend_origin = nowp;
 
-            switch (keyhold_feed(&play_key, down, nowp, PLAY_HOLD_US)) {
+            switch (keyhold_feed(&L->play_key, down, nowp, PLAY_HOLD_US)) {
             case KEYHOLD_TAP:
                 /* On a row that names music, PLAY plays it (play_tap_start);
                  * everywhere else it is the transport toggle, from any screen,
                  * like a real iPod. */
                 switch (play_tap_start(fs)) {
                 case PLAY_TAP_STARTED:
-                    np_first = 1;
-                    dirty    = 1;
+                    L->np_first = 1;
+                    L->dirty    = 1;
                     break;
                 case PLAY_TAP_CONSUMED:
-                    dirty = 1;           /* started nothing, but not a toggle   */
+                    L->dirty = 1;           /* started nothing, but not a toggle   */
                     break;
                 case PLAY_TAP_PASS:
                     if (player_active()) {
                         player_toggle_pause();
-                        dirty = 1;
+                        L->dirty = 1;
                     }
                     break;
                 }
@@ -1489,7 +1489,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 /* Keep timing the escalation to PMU standby from the moment
                  * the finger went down, not from now. */
                 want_suspend   = 1;
-                suspend_origin = keyhold_down_us(&play_key);
+                suspend_origin = keyhold_down_us(&L->play_key);
                 break;
             case KEYHOLD_NONE:
                 break;
@@ -1503,7 +1503,7 @@ _Noreturn static void run_ui(fat32_t *fs)
              */
             switch (sleeptimer_feed(&g_sleep, nowp)) {
             case SLEEPTIMER_TICK:
-                dirty = 1;                      /* the token's minute changed */
+                L->dirty = 1;                      /* the token's minute changed */
                 break;
             case SLEEPTIMER_FIRE:
                 uart_puts("core: sleep timer: expired, sleeping\n");
@@ -1549,7 +1549,7 @@ _Noreturn static void run_ui(fat32_t *fs)
              * from, exactly as the sleep timer's FIRE above.
              */
             {
-                int idle_fire = idlesleep_feed(&g_idlesleep, nowp, last_input,
+                int idle_fire = idlesleep_feed(&g_idlesleep, nowp, L->last_input,
                                                player_playing() ||
                                                power_is_external() ||
                                                sleeptimer_armed(&g_sleep));
@@ -1596,7 +1596,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * is: suspend WAITS on play_key's button, and on the path
                  * where it triggered the sleep its hold has already fired, so
                  * its release is silent by construction. */
-                keyhold_reset(&menu_key);
+                keyhold_reset(&L->menu_key);
                 seekhold_reset(&g_ff);
                 seekhold_reset(&g_rw);
 
@@ -1610,20 +1610,20 @@ _Noreturn static void run_ui(fat32_t *fs)
                     idlesleep_off(&g_idlesleep);
                     uart_puts("core: idle sleep: off for this session (standby refused)\n");
                 }
-                last_input   = mmio_read32(USEC_TIMER_ADDR);
-                last_present = last_input;      /* suspend just presented the wake
+                L->last_input   = mmio_read32(USEC_TIMER_ADDR);
+                L->last_present = L->last_input;      /* suspend just presented the wake
                                                  * frame: pace the loop's own
                                                  * repaint behind it, or the two
                                                  * back-to-back full frames meet
                                                  * a busy BCM (device log) */
-                bl_state   = BL_FULL;           /* backlight restored on resume */
-                panel_slept = 0;                /* suspend woke, presented and
+                L->bl_state   = BL_FULL;           /* backlight restored on resume */
+                L->panel_slept = 0;                /* suspend woke, presented and
                                                  * lit the panel itself — even
                                                  * one this loop had slept at
                                                  * idle first (lcd_sleep is
                                                  * idempotent); don't wake it
                                                  * a second time below */
-                cpu_idled  = 0;                 /* suspend's wake cpu_boost()
+                L->cpu_idled  = 0;                 /* suspend's wake cpu_boost()
                                                  * re-established the ONE boost
                                                  * this loop believes it holds.
                                                  * The sleep timer is the first
@@ -1638,7 +1638,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                                                  * same pass — g_boost stuck at
                                                  * 2, so the core never drops
                                                  * to 30 MHz at idle again */
-                dirty      = 1;                 /* repaint the current screen */
+                L->dirty      = 1;                 /* repaint the current screen */
             }
         }
 
@@ -1685,32 +1685,32 @@ _Noreturn static void run_ui(fat32_t *fs)
                 case SEEKHOLD_SKIP:
                     if (i) player_prev(); else player_next();
                     hal_volume_set(g_volume);   /* re-apply over codec re-init */
-                    dirty = 1;
+                    L->dirty = 1;
                     break;
                 case SEEKHOLD_AIM:
                     /* The hold owns the aim: hand the wheel back to volume if
                      * the scrubber had it, and force the transport band (not
                      * `dirty`, which would push the whole frame every tick). */
                     if (np_scrubbing()) scrub_exit();
-                    np_last = 0xFFFFFFFFu;
+                    L->np_last = 0xFFFFFFFFu;
                     break;
                 case SEEKHOLD_COMMIT:
                     /* One seek for the whole hold. A refusal needs nothing:
                      * the band repaints the live position either way. */
                     (void)player_seek_to(seekhold_target(sk));
-                    np_last = 0xFFFFFFFFu;
+                    L->np_last = 0xFFFFFFFFu;
                     break;
                 case SEEKHOLD_CANCEL:
-                    np_last = 0xFFFFFFFFu;      /* live position comes back    */
+                    L->np_last = 0xFFFFFFFFu;      /* live position comes back    */
                     break;
                 case SEEKHOLD_NONE:
                     break;
                 }
             }
 
-            if (keyhold_feed(&menu_key, (btn & WHEEL_BTN_MENU) != 0, nowg,
+            if (keyhold_feed(&L->menu_key, (btn & WHEEL_BTN_MENU) != 0, nowg,
                              GESTURE_MENU_HOLD_US) == KEYHOLD_HOLD) {
-                if (scr_pop_to_root()) dirty = 1;   /* at the root: a true no-op */
+                if (scr_pop_to_root()) L->dirty = 1;   /* at the root: a true no-op */
             }
         }
 
@@ -1719,12 +1719,12 @@ _Noreturn static void run_ui(fat32_t *fs)
          * and idle bookkeeping so the next press is not treated as a wake. */
         if (g_standby_refused) {
             g_standby_refused = 0;
-            last_input = mmio_read32(USEC_TIMER_ADDR);
-            bl_state   = BL_FULL;
-            panel_slept = 0;              /* enter_standby's fallback already
+            L->last_input = mmio_read32(USEC_TIMER_ADDR);
+            L->bl_state   = BL_FULL;
+            L->panel_slept = 0;              /* enter_standby's fallback already
                                            * did wake -> paint -> present ->
                                            * backlight; not a second time */
-            dirty      = 1;
+            L->dirty      = 1;
         }
 
         /* Hold-switch edge (a cheap GPIO read, independent of the wheel block
@@ -1732,19 +1732,19 @@ _Noreturn static void run_ui(fat32_t *fs)
          * screen has chrome to host it) and toggle the input lock. Playback
          * is untouched. */
         int held = clickwheel_hold() ? 1 : 0;
-        if (held != hold_prev) {
-            hold_prev = held;
+        if (held != L->hold_prev) {
+            L->hold_prev = held;
             g_locked  = held;
-            keyhold_reset(&play_key);     /* a press under the switch is void */
-            keyhold_reset(&menu_key);
-            rowsel_drop(&row_key);
+            keyhold_reset(&L->play_key);     /* a press under the switch is void */
+            keyhold_reset(&L->menu_key);
+            rowsel_drop(&L->row_key);
             seekhold_reset(&g_ff);
             seekhold_reset(&g_rw);
             /* Force the banner to REPAINT for the new state. Without this, a second
              * edge (e.g. on->off within the 1 s window) leaves banner_up set
              * from the first edge, so the render guard (!banner_up) suppresses
              * the new banner and the unlock one never shows. */
-            banner_up = 0;
+            L->banner_up = 0;
             if (banner_hosted()) {
                 ui_window_arm(&g_lock_flash);
             } else {
@@ -1752,15 +1752,15 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * is how its corner padlock comes and goes. */
                 g_lock_flash.armed = 0;
             }
-            last_input = mmio_read32(USEC_TIMER_ADDR);   /* wake the backlight    */
-            if (bl_state != BL_FULL) {
+            L->last_input = mmio_read32(USEC_TIMER_ADDR);   /* wake the backlight    */
+            if (L->bl_state != BL_FULL) {
                 /* A slept panel is lit by the "Panel wake" block, AFTER its
                  * first full present has retired the BCM's panel init. */
-                if (!panel_slept) backlight_set(g_settings.backlight_bright);
-                bl_state = BL_FULL;
+                if (!L->panel_slept) backlight_set(g_settings.backlight_bright);
+                L->bl_state = BL_FULL;
                 wheel_accel_reset();      /* don't resume a pre-sleep gesture */
             }
-            dirty = 1;
+            L->dirty = 1;
         }
 
         /* Input is sampled on the 100 Hz tick and latched (clickwheel_service),
@@ -1779,14 +1779,14 @@ _Noreturn static void run_ui(fat32_t *fs)
              * the padlock is already in the corner; the press only lights
              * the panel. */
             if (ev.buttons) {
-                banner_up = 0;
+                L->banner_up = 0;
                 if (banner_hosted()) ui_window_arm(&g_lock_flash);
-                last_input = mmio_read32(USEC_TIMER_ADDR);
-                if (bl_state != BL_FULL) {
-                    if (!panel_slept) backlight_set(g_settings.backlight_bright);
-                    bl_state = BL_FULL;
+                L->last_input = mmio_read32(USEC_TIMER_ADDR);
+                if (L->bl_state != BL_FULL) {
+                    if (!L->panel_slept) backlight_set(g_settings.backlight_bright);
+                    L->bl_state = BL_FULL;
                     wheel_accel_reset();
-                    dirty = 1;                /* stale panel: the banner's present is full */
+                    L->dirty = 1;                /* stale panel: the banner's present is full */
                 }
             }
             have_ev = 0;
@@ -1797,8 +1797,8 @@ _Noreturn static void run_ui(fat32_t *fs)
              * render with the event applied. Same rule as the UNLOCKED
              * banner below, and the reason nothing is ever applied behind it. */
             g_otg_flash.armed = 0;
-            banner_up     = 0;
-            dirty = 1;
+            L->banner_up     = 0;
+            L->dirty = 1;
         } else if (have_ev && g_lock_flash.armed && (ev.buttons || ev.wheel_delta)) {
             /* Hold has just come OFF and the unlock banner is still up: it is
              * confirmation, not a modal, so the first touch of the wheel or a
@@ -1813,23 +1813,23 @@ _Noreturn static void run_ui(fat32_t *fs)
              * banner is unaffected: input while locked is swallowed above (and
              * a button there re-arms the window), so it never reaches here. */
             g_lock_flash.armed = 0;       /* ui_window_arm's counterpart          */
-            banner_up = 0;
-            dirty = 1;
+            L->banner_up = 0;
+            L->dirty = 1;
         }
         if (have_ev) {
-            last_input = mmio_read32(USEC_TIMER_ADDR);
+            L->last_input = mmio_read32(USEC_TIMER_ADDR);
             /* The tick the event is timed from: a row press's length is
              * measured from HERE, not from the first pass the live sampler
              * happens to see the button down on. */
-            const uint32_t ev_us = last_input;
-            if (bl_state != BL_FULL) {
-                int was_off = (bl_state == BL_OFF);
+            const uint32_t ev_us = L->last_input;
+            if (L->bl_state != BL_FULL) {
+                int was_off = (L->bl_state == BL_OFF);
                 /* A slept panel is lit by the "Panel wake" block, AFTER its
                  * first full present has retired the BCM's panel init. */
-                if (!panel_slept) backlight_set(g_settings.backlight_bright);
-                bl_state = BL_FULL;
+                if (!L->panel_slept) backlight_set(g_settings.backlight_bright);
+                L->bl_state = BL_FULL;
                 wheel_accel_reset();      /* don't resume a pre-sleep gesture */
-                dirty = 1;                    /* repaint anything drawn while off */
+                L->dirty = 1;                    /* repaint anything drawn while off */
                 if (was_off) {                /* swallow the wake press */
                     /* Each button voids only its OWN arbiter: a MENU or wheel
                      * wake must not claim the next PLAY tap. PLAY keeps the
@@ -1839,10 +1839,10 @@ _Noreturn static void run_ui(fat32_t *fs)
                      * seek) would otherwise ride on a press that was only ever
                      * meant to light the screen. */
                     if (ev.buttons & WHEEL_BTN_PLAY) {
-                        keyhold_swallow_tap(&play_key);   /* ...its release too */
+                        keyhold_swallow_tap(&L->play_key);   /* ...its release too */
                     }
-                    if (ev.buttons & WHEEL_BTN_MENU)   keyhold_void(&menu_key);
-                    if (ev.buttons & WHEEL_BTN_SELECT) keyhold_void(&row_key);
+                    if (ev.buttons & WHEEL_BTN_MENU)   keyhold_void(&L->menu_key);
+                    if (ev.buttons & WHEEL_BTN_SELECT) keyhold_void(&L->row_key);
                     if (ev.buttons & WHEEL_BTN_RIGHT)  seekhold_void(&g_ff);
                     if (ev.buttons & WHEEL_BTN_LEFT)   seekhold_void(&g_rw);
                     ev.buttons = 0;
@@ -1871,15 +1871,15 @@ _Noreturn static void run_ui(fat32_t *fs)
             if ((scr_cur() == SCR_CHARGING || scr_cur() == SCR_BATTERY) &&
                 ev.buttons) {
                 scr_pop();
-                dirty = 1;
+                L->dirty = 1;
                 if (ev.buttons & WHEEL_BTN_PLAY) {
-                    keyhold_swallow_tap(&play_key);   /* PLAY's release too */
+                    keyhold_swallow_tap(&L->play_key);   /* PLAY's release too */
                 }
                 /* ...and the press that got the modal off the screen must not
                  * also walk the user home or seek, so those are voided whole
                  * (same rule as the backlight wake above). */
-                if (ev.buttons & WHEEL_BTN_MENU)   keyhold_void(&menu_key);
-                if (ev.buttons & WHEEL_BTN_SELECT) keyhold_void(&row_key);
+                if (ev.buttons & WHEEL_BTN_MENU)   keyhold_void(&L->menu_key);
+                if (ev.buttons & WHEEL_BTN_SELECT) keyhold_void(&L->row_key);
                 if (ev.buttons & WHEEL_BTN_RIGHT)  seekhold_void(&g_ff);
                 if (ev.buttons & WHEEL_BTN_LEFT)   seekhold_void(&g_rw);
                 ev.buttons     = 0;
@@ -1964,8 +1964,8 @@ _Noreturn static void run_ui(fat32_t *fs)
                     }
                     if (!np_on_stack) {
                         scr_push(SCR_NOWPLAYING);
-                        np_first = 1;
-                        dirty    = 1;
+                        L->np_first = 1;
+                        L->dirty    = 1;
                     }
                     /* consumed: not a list press */
                     ev.buttons = (uint8_t)(ev.buttons & ~WHEEL_BTN_RIGHT);
@@ -1981,7 +1981,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta) {
                     g_main_sel = wheel_move(g_main_sel, main_menu_count(),
                                             ev.wheel_delta, &g_menu_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_SELECT) {
                     if (g_main_sel == MM_MUSIC) {
@@ -1990,7 +1990,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         scr_push(SCR_MUSIC);
                     } else if (g_main_sel == MM_NOWPLAYING && player_active()) {
                         scr_push(SCR_NOWPLAYING);
-                        np_first = 1;
+                        L->np_first = 1;
                     } else if (g_main_sel == MM_SETTINGS) {
                         g_set_screen = SETTINGS_ROOT;
                         g_set_sel = g_set_root_sel = g_set_accum = 0;
@@ -2001,7 +2001,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         scr_push(SCR_PLAYLISTS);       /* Playlists; MENU pops here */
                     }
                     /* other items are greyed: SELECT does nothing yet */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2009,7 +2009,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta) {
                     g_music_sel = wheel_move(g_music_sel, MU_COUNT,
                                              ev.wheel_delta, &g_menu_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_SELECT) {
                     if (g_music_sel == MU_ALBUMS) {
@@ -2037,7 +2037,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         hal_volume_set(g_volume);      /* re-apply over codec re-init */
                         if (player_active()) {
                             scr_push(SCR_NOWPLAYING);
-                            np_first = 1;
+                            L->np_first = 1;
                         }
                     } else if (g_music_sel == MU_GENRES) {
                         library_ensure(fs);
@@ -2060,12 +2060,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                         scr_push(SCR_SEARCH);
                     }
                     /* other items are greyed: SELECT does nothing yet */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back to main menu */
                     g_menu_accum = 0;
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2073,7 +2073,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta && g_artists_n > 0) {
                     g_artist_sel = wheel_move(g_artist_sel, g_artists_n,
                                               ev.wheel_delta, &g_artist_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && g_artists_n > 0) {
                     /* Filter the album list to the chosen artist's folders. */
@@ -2088,11 +2088,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                     g_br_sel = g_br_accum = 0;
                     g_br_from_search = 0;
                     scr_push(SCR_BROWSER);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back to Music menu */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2100,16 +2100,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta && g_songview_n > 0) {
                     g_song_sel = wheel_move(g_song_sel, g_songview_n,
                                             ev.wheel_delta, &g_song_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && g_songview_n > 0) {
                     /* Tap plays, hold adds to On-The-Go: the press length
                      * decides, in the block beside Now Playing's. */
-                    rowsel_arm(g_song_sel, &row_key, ev_us);
+                    rowsel_arm(g_song_sel, &L->row_key, ev_us);
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back (Music or Genres) */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2117,16 +2117,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta && g_genres_n > 0) {
                     g_genre_sel = wheel_move(g_genre_sel, g_genres_n,
                                              ev.wheel_delta, &g_genre_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && g_genres_n > 0) {
                     songview_build(g_genre_sel, 0);     /* this genre's songs */
                     scr_push(SCR_SONGS);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back to Music menu */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2134,7 +2134,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta) {
                     g_pl_sel = wheel_move(g_pl_sel, playlists_row_count(),
                                           ev.wheel_delta, &g_pl_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_SELECT) {
                     /* Row 0 is the pinned On-The-Go list; the rest are the
@@ -2150,11 +2150,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                         playlist_open(fs, g_pl_sel - 1); /* parse + resolve + bind */
                         scr_push(SCR_PLAYLIST);
                     }
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back (Music or main) */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2163,16 +2163,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                     g_plt_sel = wheel_move(g_plt_sel, playlist_row_count(),
                                            ev.wheel_delta, &g_plt_accum);
                     g_pl_confirm.armed = 0;     /* moving off the row cancels it */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && playlist_row_count() > 0) {
                     /* Tap plays (or deletes a saved slot); hold adds the track
                      * to On-The-Go. */
-                    rowsel_arm(g_plt_sel, &row_key, ev_us);
+                    rowsel_arm(g_plt_sel, &L->row_key, ev_us);
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back to Playlists */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2184,16 +2184,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                     g_otg_sel = wheel_move(g_otg_sel, otg_row_count(),
                                            ev.wheel_delta, &g_otg_accum);
                     g_otg_confirm.armed = 0;    /* moving off the row cancels it */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && g_otg.n > 0) {
                     /* Tap plays from the row (or clears / saves); hold removes
                      * the row. */
-                    rowsel_arm(g_otg_sel, &row_key, ev_us);
+                    rowsel_arm(g_otg_sel, &L->row_key, ev_us);
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back to Playlists */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2204,12 +2204,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                          * because the ring is not a list and does not go
                          * through wheel_move. */
                         if (search_ring_move(&g_search, ev.wheel_delta)) {
-                            dirty = 1;
+                            L->dirty = 1;
                         }
                     } else if (g_search.nhit > 0) {
                         g_search.sel = wheel_move(g_search.sel, g_search.nhit,
                                                   ev.wheel_delta, &g_search.accum);
-                        dirty = 1;
+                        L->dirty = 1;
                     }
                 }
                 int act = SEARCH_ACT_NONE;
@@ -2220,7 +2220,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                      * search_hold_rows() reports no rows there and the press
                      * keeps the down-edge, as a key must. */
                     if (search_hold_rows(&g_search, 0, 0) > 0) {
-                        rowsel_arm(g_search.sel, &row_key, ev_us);
+                        rowsel_arm(g_search.sel, &L->row_key, ev_us);
                     } else {
                         act = search_key(&g_search, SEARCH_KEY_SELECT);
                     }
@@ -2234,19 +2234,19 @@ _Noreturn static void run_ui(fat32_t *fs)
                 switch (act) {
                 case SEARCH_ACT_RESCAN:
                     search_rescan();
-                    dirty = 1;
+                    L->dirty = 1;
                     break;
                 case SEARCH_ACT_TO_RESULTS:
                 case SEARCH_ACT_TO_PICK:
-                    dirty = 1;
+                    L->dirty = 1;
                     break;
                 case SEARCH_ACT_POP:
                     scr_pop();                          /* back to Music menu */
-                    dirty = 1;
+                    L->dirty = 1;
                     break;
                 case SEARCH_ACT_OPEN:
-                    if (search_open_hit(fs)) np_first = 1;
-                    dirty = 1;
+                    if (search_open_hit(fs)) L->np_first = 1;
+                    L->dirty = 1;
                     break;
                 default:
                     break;
@@ -2263,12 +2263,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                 int *acc  = (g_dir_depth == 0) ? &g_br_accum : &g_det_accum;
                 if (ev.wheel_delta && count > 0) {
                     *sel = wheel_move(*sel, count, ev.wheel_delta, acc);
-                    dirty = 1;                    /* window derived at paint time  */
+                    L->dirty = 1;                    /* window derived at paint time  */
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && count > 0) {
                     /* Tap enters the album (or plays the track); hold adds the
                      * whole album, or that one track, to On-The-Go. */
-                    rowsel_arm(*sel, &row_key, ev_us);
+                    rowsel_arm(*sel, &L->row_key, ev_us);
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     if (g_dir_depth > 0 && g_br_from_search) {
@@ -2286,7 +2286,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                     } else {                            /* album list -> Music menu */
                         scr_pop();
                     }
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
             }
@@ -2312,7 +2312,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                     /* Only the transport band shows the target: force ITS
                      * repaint (the clock-tick path) — not `dirty`, which
                      * would re-render and push the whole frame. */
-                    np_last          = 0xFFFFFFFFu;
+                    L->np_last          = 0xFFFFFFFFu;
                 } else if (ev.wheel_delta) {             /* wheel = volume        */
                     /* The wheel reports raw position units (~CW_WHEEL_SENSITIVITY
                      * per detent), which is why volume used to leap ~10 at a time.
@@ -2342,7 +2342,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                     /* The plate is its own present (see the Now Playing
                      * branch of the render step): not `dirty`, which would
                      * push all 38400 words for a 3200-word rect. */
-                    np_vol_dirty = 1;
+                    L->np_vol_dirty = 1;
                 }
                 /* SELECT is now press-length sensitive here: a tap toggles the
                  * scrubber (what SELECT does on Now Playing on a real iPod, and
@@ -2355,7 +2355,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();                          /* back, keep playing */
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2363,7 +2363,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ev.wheel_delta && player_queue_len() > 0) {
                     g_queue_sel = wheel_move(g_queue_sel, player_queue_len(),
                                              ev.wheel_delta, &g_queue_accum);
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if ((ev.buttons & WHEEL_BTN_SELECT) && player_queue_len() > 0) {
                     if (!player_queue_is_dir(g_queue_sel)) {
@@ -2371,11 +2371,11 @@ _Noreturn static void run_ui(fat32_t *fs)
                         hal_volume_set(g_volume);          /* re-apply over re-init */
                         scr_pop();                          /* back to Now Playing  */
                     }
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     scr_pop();
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
 
@@ -2394,7 +2394,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         settime_adjust(&g_settime,
                                        wheel_value_step(ev.wheel_delta,
                                                         WHEEL_VALUE_STEP_MAX));
-                        dirty = 1;
+                        L->dirty = 1;
                     }
                     if (ev.buttons & WHEEL_BTN_SELECT) {
                         if (settime_next(&g_settime)) {
@@ -2436,12 +2436,12 @@ _Noreturn static void run_ui(fat32_t *fs)
                             g_set_screen = SETTINGS_DATETIME;
                             g_set_sel = g_set_accum = 0;
                         }
-                        dirty = 1;
+                        L->dirty = 1;
                     }
                     if (ev.buttons & WHEEL_BTN_MENU) {
                         g_set_screen = SETTINGS_DATETIME;   /* nothing written */
                         g_set_sel = g_set_accum = 0;
-                        dirty = 1;
+                        L->dirty = 1;
                     }
                     break;
                 }
@@ -2472,20 +2472,20 @@ _Noreturn static void run_ui(fat32_t *fs)
                              * you turn, so the wheel drives the panel in real
                              * time. */
                             if (g_set_screen == SETTINGS_DISPLAY && g_set_sel == 1) {
-                                if (!panel_slept) {   /* the Panel-wake block
+                                if (!L->panel_slept) {   /* the Panel-wake block
                                                        * lights it after the
                                                        * first present, else
                                                        * a white flash */
                                     backlight_set(g_settings.backlight_bright);
                                 }
-                                bl_state = BL_FULL;
+                                L->bl_state = BL_FULL;
                             }
                         }
                     } else if (scount > 0) {               /* move selection    */
                         g_set_sel = wheel_move(g_set_sel, scount,
                                                ev.wheel_delta, &g_set_accum);
                     }
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_SELECT) {
                     slider = (settings_kind(g_set_screen, g_set_sel)
@@ -2632,7 +2632,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                             settings_touch();
                         }
                     }
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 if (ev.buttons & WHEEL_BTN_MENU) {
                     if (g_set_editing) {
@@ -2649,7 +2649,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                          * Same exit the MENU hold takes (scr_pop_to_root). */
                         settings_leave();
                     }
-                    dirty = 1;
+                    L->dirty = 1;
                 }
                 break;
             }
@@ -2662,7 +2662,7 @@ _Noreturn static void run_ui(fat32_t *fs)
 
         /* Settings > Theme's live preview, or the saved theme back once the
          * picker is left without SELECT. A swap repaints the whole panel. */
-        if (theme_preview_sync()) dirty = 1;
+        if (theme_preview_sync()) L->dirty = 1;
 
         /* Idle-timeout backlight: dim, then off — timeout from Settings (0 =
          * never), brightness from Settings. Playback keeps running. */
@@ -2675,13 +2675,13 @@ _Noreturn static void run_ui(fat32_t *fs)
         }
         int dim_level = g_settings.backlight_bright / 4;
         if (dim_level < 1) dim_level = 1;
-        uint32_t idle = mmio_read32(USEC_TIMER_ADDR) - last_input;
-        if (bl_state == BL_FULL && idle > dim_us) {
+        uint32_t idle = mmio_read32(USEC_TIMER_ADDR) - L->last_input;
+        if (L->bl_state == BL_FULL && idle > dim_us) {
             backlight_set(dim_level);
-            bl_state = BL_DIM;
-        } else if (bl_state == BL_DIM && idle > off_us) {
+            L->bl_state = BL_DIM;
+        } else if (L->bl_state == BL_DIM && idle > off_us) {
             backlight_set(0);
-            bl_state = BL_OFF;
+            L->bl_state = BL_OFF;
             if (PANEL_SLEEP_AT_IDLE) {    /* see the note above run_ui() */
                 /* LED first (above), then the panel: the sleep drains any
                  * in-flight update, drops the panel-enable bits and issues
@@ -2691,8 +2691,8 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * "Panel wake" block — and nothing here tries: every painter
                  * is gated on bl_state != BL_OFF. */
                 lcd_sleep();              /* blank the panel too, not just the LED */
-                panel_slept = 1;
-                panel_refused_at_sleep = lcd_presents_refused();
+                L->panel_slept = 1;
+                L->panel_refused_at_sleep = lcd_presents_refused();
             }
         }
 
@@ -2712,12 +2712,12 @@ _Noreturn static void run_ui(fat32_t *fs)
          * decode and feeds no DMA, so 30 MHz is plenty; the resume itself
          * always arrives through a wake press that has already re-lit the
          * screen (and so re-boosted here) one pass earlier. */
-        if (cpu_idled && (bl_state != BL_OFF || player_playing())) {
+        if (L->cpu_idled && (L->bl_state != BL_OFF || player_playing())) {
             cpu_boost();
-            cpu_idled = 0;
-        } else if (!cpu_idled && bl_state == BL_OFF && !player_playing()) {
+            L->cpu_idled = 0;
+        } else if (!L->cpu_idled && L->bl_state == BL_OFF && !player_playing()) {
             cpu_unboost();
-            cpu_idled = 1;
+            L->cpu_idled = 1;
         }
 
         /* Disk spin-down at idle: once nothing needs the drive AND the user has
@@ -2790,7 +2790,7 @@ _Noreturn static void run_ui(fat32_t *fs)
             uint32_t nowr  = mmio_read32(USEC_TIMER_ADDR);
             int      rdown = !g_locked &&
                              (clickwheel_buttons() & WHEEL_BTN_SELECT) != 0;
-            keyhold_action_t ract = keyhold_feed(&row_key, rdown, nowr,
+            keyhold_action_t ract = keyhold_feed(&L->row_key, rdown, nowr,
                                                  SEL_HOLD_US);
             if (g_rowsel.pending &&
                 ((int)scr_cur() != g_rowsel.scr || g_locked ||
@@ -2800,16 +2800,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * popped the screen, the list was rebuilt under it, or Hold
                  * engaged mid-press (which zeroes clickwheel_buttons() and
                  * would read below as a release). Drop it. */
-                rowsel_drop(&row_key);
+                rowsel_drop(&L->row_key);
             } else if (g_rowsel.pending) {
                 if (ract == KEYHOLD_TAP) {
                     g_rowsel.pending = 0;
                     int r = row_select_tap(fs);
-                    if (r & ROWSEL_DIRTY)   dirty = 1;
-                    if (r & ROWSEL_PLAYING) np_first = 1;
+                    if (r & ROWSEL_DIRTY)   L->dirty = 1;
+                    if (r & ROWSEL_PLAYING) L->np_first = 1;
                 } else if (ract == KEYHOLD_HOLD) {
                     g_rowsel.pending = 0;
-                    if (row_select_hold(fs)) dirty = 1;
+                    if (row_select_hold(fs)) L->dirty = 1;
                 }
             }
         }
@@ -2833,7 +2833,7 @@ _Noreturn static void run_ui(fat32_t *fs)
             g_sel_pending = 0;
             if (np_scrubbing()) {
                 scrub_exit();
-                np_last = 0xFFFFFFFFu;
+                L->np_last = 0xFFFFFFFFu;
             }
         }
         if (g_sel_pending) {
@@ -2845,7 +2845,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 g_queue_sel   = player_queue_current();
                 g_queue_accum = 0;
                 scr_push(SCR_QUEUE);
-                dirty = 1;
+                L->dirty = 1;
             } else if (!down) {
                 g_sel_pending = 0;
                 if (np_scrubbing()) scrub_exit();
@@ -2853,7 +2853,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 /* Nothing above the transport band knows about the scrubber
                  * (nowplaying_render only consults it there), so a forced
                  * transport repaint is the whole change — no `dirty`. */
-                np_last = 0xFFFFFFFFu;
+                L->np_last = 0xFFFFFFFFu;
             }
         }
 
@@ -2871,10 +2871,10 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (player_seek_to(g_scrub_target_s) != 0) {
                     g_scrub_target_s = player_elapsed_s();   /* refused: snap back */
                 }
-                np_last = 0xFFFFFFFFu;          /* transport band only, as above */
+                L->np_last = 0xFFFFFFFFu;          /* transport band only, as above */
             } else if (!g_scrub_dirty && quiet >= SCRUB_EXIT_US) {
                 scrub_exit();
-                np_last = 0xFFFFFFFFu;
+                L->np_last = 0xFFFFFFFFu;
             }
             if (!player_active()) {
                 scrub_exit();                    /* track ended under the scrubber */
@@ -2905,14 +2905,14 @@ _Noreturn static void run_ui(fat32_t *fs)
          * partial-paint caches (g_lp, np_last) and the toast/A-Z edges. That
          * second frame is invisible (same pixels) and costs one present; it is
          * exactly what suspend's return does too. */
-        if (panel_slept && bl_state != BL_OFF) {
-            uint32_t refused = lcd_presents_refused() - panel_refused_at_sleep;
+        if (L->panel_slept && L->bl_state != BL_OFF) {
+            uint32_t refused = lcd_presents_refused() - L->panel_refused_at_sleep;
             lcd_wake();
-            panel_slept = 0;
+            L->panel_slept = 0;
             paint_current_screen();
             lcd_present_fb(console_framebuffer());
             backlight_set(g_settings.backlight_bright);
-            dirty = 1;                    /* never resume onto a stale panel */
+            L->dirty = 1;                    /* never resume onto a stale panel */
             if (refused) {
                 /* Something presented into the slept panel. Not a fault (the
                  * frame above made up for it), but on the idle path nothing
@@ -2928,8 +2928,8 @@ _Noreturn static void run_ui(fat32_t *fs)
          * to repaint. ui_window_up DISARMS an expired window, so polling it
          * here is the edge — without this the row kept saying "Select again"
          * until something else happened to redraw it. */
-        if (g_otg_confirm.armed && !otg_confirm_up(&g_otg_confirm)) dirty = 1;
-        if (g_pl_confirm.armed  && !otg_confirm_up(&g_pl_confirm))  dirty = 1;
+        if (g_otg_confirm.armed && !otg_confirm_up(&g_otg_confirm)) L->dirty = 1;
+        if (g_pl_confirm.armed  && !otg_confirm_up(&g_pl_confirm))  L->dirty = 1;
 
         /* The Hold banner holds the top chrome for ~1s on a Hold edge (and on
          * a button press while locked). Paint the context + banner once, hold
@@ -2960,19 +2960,19 @@ _Noreturn static void run_ui(fat32_t *fs)
         int lock_up = ui_window_up(&g_lock_flash, LOCK_FLASH_US, now_us);
         int otg_up  = ui_window_up(&g_otg_flash,  OTG_FLASH_US,  now_us);
         if (lock_up || otg_up) {
-            if (!banner_up && bl_state != BL_OFF) {
+            if (!L->banner_up && L->bl_state != BL_OFF) {
                 paint_current_screen();
                 if (lock_up) lock_banner_render(g_locked);
                 else         otg_banner_render();
-                if (dirty) {
+                if (L->dirty) {
                     lcd_present_fb(console_framebuffer());
-                    dirty = 0;
+                    L->dirty = 0;
                 } else {
                     lcd_present_rect(console_framebuffer(), 0, 0, LCD_WIDTH,
                                      top_banner_h());
                 }
             }
-            banner_up = 1;
+            L->banner_up = 1;
             /* The banner skips the render below — and with it the loop's two
              * halts, so it halts here itself. Idle (which includes paused: no
              * DMA to pace) parks the core for a tick, as the main 10 ms halt
@@ -2988,9 +2988,9 @@ _Noreturn static void run_ui(fat32_t *fs)
             }
             continue;                     /* skip the normal render this pass      */
         }
-        if (banner_up) {              /* banner just faded: repaint underneath */
-            banner_up = 0;
-            dirty = 1;
+        if (L->banner_up) {              /* banner just faded: repaint underneath */
+            L->banner_up = 0;
+            L->dirty = 1;
         }
 
         /* A-Z locator: while the wheel is being spun fast, show the selected
@@ -2999,13 +2999,13 @@ _Noreturn static void run_ui(fat32_t *fs)
         char az_letter = wheel_accelerating() ? list_sel_initial() : 0;
         /* Suppressed with the backlight: a toast nobody can see is only a
          * repaint. It reappears on the next sample if the cell is still low. */
-        int  toast     = (bl_state != BL_OFF) &&
+        int  toast     = (L->bl_state != BL_OFF) &&
                          battwarn_toast_up(mmio_read32(USEC_TIMER_ADDR));
 
         /* Render the current screen (skipped entirely when the screen is off —
          * saves the IRQ-masked present while music plays dark). Now Playing
          * repaints ~1/s for the clock; menus/browser only on change. */
-        if (bl_state == BL_OFF) {
+        if (L->bl_state == BL_OFF) {
             /* nothing to draw */
         } else if (scr_cur() == SCR_NOWPLAYING) {
             uint32_t nowv    = mmio_read32(USEC_TIMER_ADDR);
@@ -3014,8 +3014,8 @@ _Noreturn static void run_ui(fat32_t *fs)
             /* The volume plate needs a push when it appears, when the wheel
              * moves it while it is up, and when it fades (to put back what it
              * covered). None of those is a full-frame event. */
-            int vol_edge   = (vol_active != np_vol_prev) ||
-                             (vol_active && np_vol_dirty);
+            int vol_edge   = (vol_active != L->np_vol_prev) ||
+                             (vol_active && L->np_vol_dirty);
 
             /* A FULL repaint is needed only on a real change (dirty — which the
              * loop's track-change edge sets for us) or a toast edge. Everything
@@ -3024,10 +3024,10 @@ _Noreturn static void run_ui(fat32_t *fs)
              * volume edge presents only the plate rect, instead of re-rendering
              * the whole screen — art, metadata and two anti-aliased bars — and
              * pushing all 38400 words for a 3200-word plate. */
-            int want_full = dirty || toast != toast_prev;
+            int want_full = L->dirty || toast != L->toast_prev;
             if (want_full || vol_edge) {
-                if (np_first || !player_active() ||
-                    (uint32_t)(nowv - last_present) >= present_gap_us()) {
+                if (L->np_first || !player_active() ||
+                    (uint32_t)(nowv - L->last_present) >= present_gap_us()) {
                     g_mq.active = 0;
                     console_damage_reset();
                     nowplaying_render(player_track_name(), elapsed,
@@ -3037,7 +3037,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                         battwarn_toast_shown(nowv);   /* its 4 s start here */
                         g_mq.active = 0;      /* see the list branch below */
                     }
-                    toast_prev = toast;
+                    L->toast_prev = toast;
                     if (!want_full) {
                         /* Volume edge only. The screen was re-rendered in full
                          * (the plate's anti-aliased corners blend into whatever
@@ -3053,20 +3053,20 @@ _Noreturn static void run_ui(fat32_t *fs)
                                            VOL_PLATE_W, VOL_PLATE_H);
                     }
                     ui_present_damage();
-                    np_first = 0;
+                    L->np_first = 0;
                     if (want_full) {
-                        np_last = elapsed;
-                        dirty   = 0;
+                        L->np_last = elapsed;
+                        L->dirty   = 0;
                     }
-                    np_vol_prev  = vol_active;
-                    np_vol_dirty = 0;
-                    last_present = nowv;
+                    L->np_vol_prev  = vol_active;
+                    L->np_vol_dirty = 0;
+                    L->last_present = nowv;
                     player_note_presented();
                     g_lp.valid = 0;             /* not a list screen */
                 }
                 /* else: throttled — keep dirty / the volume edge pending, present
                  * in the next window (np_vol_prev is what makes a fade retry). */
-            } else if (elapsed != np_last) {
+            } else if (elapsed != L->np_last) {
                 /* Transport only: leave the marquee registered (its own tick
                  * keeps the title scrolling) and don't touch the art/metadata.
                  * The clock lands here once a second; the scrubber lands here
@@ -3077,16 +3077,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * not: the clock's band a few ms behind a full frame found the
                  * BCM still retiring it (see ui_present_damage). np_last stays
                  * unchanged when throttled, so the band goes out next pass. */
-                if ((uint32_t)(nowv - last_present) >= present_gap_us()) {
+                if ((uint32_t)(nowv - L->last_present) >= present_gap_us()) {
                     console_damage_reset();
                     nowplaying_transport_render(elapsed, player_total_s());
                     ui_present_damage();
-                    np_last      = elapsed;
-                    last_present = nowv;
+                    L->np_last      = elapsed;
+                    L->last_present = nowv;
                     player_note_presented();
                 }
             }
-        } else if (dirty || az_letter != az_prev || toast != toast_prev) {
+        } else if (L->dirty || az_letter != L->az_prev || toast != L->toast_prev) {
             /* Repaints are paced by what the LAST present actually cost (see
              * present_gap_us), not by a fixed 150 ms: a selection move now
              * repaints two rows and pushes only those, so it can run several
@@ -3095,7 +3095,7 @@ _Noreturn static void run_ui(fat32_t *fs)
              * we present, so the latest scroll position is what lands. */
             uint32_t now = mmio_read32(USEC_TIMER_ADDR);
             if (!player_active() ||
-                (uint32_t)(now - last_present) >= present_gap_us()) {
+                (uint32_t)(now - L->last_present) >= present_gap_us()) {
                 g_mq.active = 0;
                 console_damage_reset();
                 /* Selection moved and nothing else did? Repaint the two rows
@@ -3104,7 +3104,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                  * render, which console_clear marks as whole-screen damage. The
                  * A-Z plate covers arbitrary rows, so while it is up (or in the
                  * frame that clears it) the full render is the honest option. */
-                int partial = !az_letter && !az_prev && !toast && !toast_prev &&
+                int partial = !az_letter && !L->az_prev && !toast && !L->toast_prev &&
                               list_repaint_partial();
                 if (!partial) {
                     switch (scr_cur()) {
@@ -3146,10 +3146,10 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (g_present_cost_us > g_ui_present_max_us) g_ui_present_max_us = g_present_cost_us;
                 if (partial) g_ui_partial++; else g_ui_full++;
                 list_paint_note();
-                az_prev = az_letter;
-                toast_prev = toast;
-                dirty = 0;
-                last_present = now;
+                L->az_prev = az_letter;
+                L->toast_prev = toast;
+                L->dirty = 0;
+                L->last_present = now;
             }
         }
 
@@ -3158,10 +3158,10 @@ _Noreturn static void run_ui(fat32_t *fs)
          * push (unlike a full repaint) so it can't starve the audio DMA. Not
          * while paused: the bars stand still (bars_clock) and nothing need be
          * pushed. */
-        if (bl_state != BL_OFF && scr_cur() == SCR_BROWSER && g_dir_depth > 0
+        if (L->bl_state != BL_OFF && scr_cur() == SCR_BROWSER && g_dir_depth > 0
             && player_active() && !player_paused()) {
             uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
-            if ((uint32_t)(nowb - last_bars) >= 110000u) {
+            if ((uint32_t)(nowb - L->last_bars) >= 110000u) {
                 int sv = 0;
                 for (int i = 0; i < g_det_view_n; i++)
                     if (g_det_view[i] == (int16_t)g_det_sel) { sv = i; break; }
@@ -3184,15 +3184,15 @@ _Noreturn static void run_ui(fat32_t *fs)
                                      15, ry + 6, NP_BARS_W + 1, NP_BARS_H);
                     break;
                 }
-                last_bars = nowb;
+                L->last_bars = nowb;
             }
         }
 
         /* Same animated bars on the queue view (the currently-playing row). */
-        if (bl_state != BL_OFF && scr_cur() == SCR_QUEUE && player_active()
+        if (L->bl_state != BL_OFF && scr_cur() == SCR_QUEUE && player_active()
             && !player_paused()) {
             uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
-            if ((uint32_t)(nowb - last_bars) >= 110000u) {
+            if ((uint32_t)(nowb - L->last_bars) >= 110000u) {
                 int n = player_queue_len();
                 int cur = player_queue_current();
                 int top = ui_scroll_window(g_queue_sel, n, LIST_ROWS);
@@ -3208,17 +3208,17 @@ _Noreturn static void run_ui(fat32_t *fs)
                     lcd_present_rect(console_framebuffer(),
                                      bx, by, NP_BARS_W + 1, NP_BARS_H);
                 }
-                last_bars = nowb;
+                L->last_bars = nowb;
             }
         }
 
         /* Scroll the marquee target (a selected long row, or the now-playing
          * title) in place — redraw just its band + partial-present it, ~16fps. */
-        if (bl_state != BL_OFF && g_mq.active) {
+        if (L->bl_state != BL_OFF && g_mq.active) {
             uint32_t nowm = mmio_read32(USEC_TIMER_ADDR);
             /* Phase clock (g_mq.t0) + target-change detection live in mq_set, so
              * this just paces the redraw at the shared live offset. */
-            if ((uint32_t)(nowm - last_mq) >= 33000u) {   /* ~30fps               */
+            if ((uint32_t)(nowm - L->last_mq) >= 33000u) {   /* ~30fps               */
                 draw_marquee(g_mq.x, g_mq.y, g_mq.w, g_mq.text, g_mq.tw, g_mq.font,
                              g_mq.ink, g_mq.bg, nowm - g_mq.t0, g_mq.cy0, g_mq.cy1);
                 int ptop = g_mq.y - text_ascent(g_mq.font);
@@ -3226,7 +3226,7 @@ _Noreturn static void run_ui(fat32_t *fs)
                 if (ptop < 0) ptop = 0;
                 lcd_present_rect(console_framebuffer(),
                                  g_mq.x, ptop, g_mq.w, pbot - ptop);
-                last_mq = nowm;
+                L->last_mq = nowm;
             }
         }
 
@@ -3274,7 +3274,7 @@ _Noreturn static void run_ui(fat32_t *fs)
             } else {
                 budget = idle_now ? 6 : 3;
             }
-            if (budget > 0 && (idle_now || (uint32_t)(nowc - last_chip) >= 60000u)) {
+            if (budget > 0 && (idle_now || (uint32_t)(nowc - L->last_chip) >= 60000u)) {
                 /* A pumped slot is only worth a repaint if it is actually ON
                  * SCREEN: pumping a whole library's covers used to set dirty for
                  * every one of them, forcing ~21 consecutive full-frame repaints
@@ -3332,10 +3332,10 @@ _Noreturn static void run_ui(fat32_t *fs)
                     const uint16_t *now_px = (want[r] >= 0) ? artcache_peek(want[r]) : 0;
                     if (now_px != before[r]) {
                         g_lp.rows |= 1u << r;
-                        dirty = 1;
+                        L->dirty = 1;
                     }
                 }
-                last_chip = nowc;
+                L->last_chip = nowc;
             }
         }
 
@@ -3343,9 +3343,9 @@ _Noreturn static void run_ui(fat32_t *fs)
          * and audio lines but only when something was painted. */
         {
             uint32_t nows = mmio_read32(USEC_TIMER_ADDR);
-            if ((uint32_t)(nows - last_uistat) >= 5000000u) {
+            if ((uint32_t)(nows - L->last_uistat) >= 5000000u) {
                 ui_stats_emit();
-                last_uistat = nows;
+                L->last_uistat = nows;
             }
         }
 
@@ -3365,7 +3365,7 @@ _Noreturn static void run_ui(fat32_t *fs)
          * player_pump call, several USEC_TIMER reads, GPIO reads and an event
          * drain) for as long as it sat paused. Paused is idle: it belongs in
          * the 10 ms halt below, fifty times fewer wakeups. */
-        if (player_playing() && !dirty && pump_us < 200u) {
+        if (player_playing() && !L->dirty && pump_us < 200u) {
             cpu_wait_us(200);
         }
 

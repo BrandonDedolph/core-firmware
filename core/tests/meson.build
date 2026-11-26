@@ -1887,6 +1887,22 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 180,
          suite: 'unit')
+    # backlight-dim: run_ui's call site of the idle backlight policy — with
+    # Backlight 10 s and Brightness 22 set through Settings, an idle main
+    # menu dims to 22/4 just past 10 s, goes out just past 25 s, and a press
+    # re-lights at 22, all read off the HAL's backlight events
+    # (headless/backlight_dim_test.c).
+    backlight_dim_test = executable(
+      'backlight_dim_test',
+      sources: ['headless/backlight_dim_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('backlight-dim', backlight_dim_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 120,
+         suite: 'unit')
     # az-overlay: the A-Z letter plate on the --library az disk — raised by a
     # fast spin on Songs and Artists ('#', a letter per detent, an empty
     # letter skipped, "The " filed past), held through pauses, gone after

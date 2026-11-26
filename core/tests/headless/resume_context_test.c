@@ -35,7 +35,12 @@
  * the same length at the same index, and Next from Now Playing gives the same
  * track it gave before the cut. The last is what a lost queue kind (the album
  * comes back instead: a different length) or a lost shuffle deal (a fresh one
- * from the boot's timer: a different successor) breaks.
+ * from the boot's timer: a different successor) breaks. Next alone cannot
+ * see a lost deal on a two-track album (there is one possible successor), so
+ * the player's deal itself — order seed and pinned index — is compared too:
+ * that is what settings_apply() pushing Shuffle after resume_restore()
+ * instead of before it breaks (the album rebuild does not push Shuffle
+ * itself, so the late push is an off->on edge and deals afresh).
  *
  * Throughout: no write outside the pre-allocated files, no panic.
  *
@@ -66,6 +71,8 @@ typedef struct {
     char     next[96];
     unsigned secs;
     int      qlen, qidx;
+    uint32_t order_seed;           /* the player's shuffle deal: seed, pin */
+    int      order_keep;
 } rec_t;
 
 /* ---- helpers (as walk_test.c's) ------------------------------------------ */
@@ -257,6 +264,8 @@ static void record_and_pause(rec_t *r, const char *kind)
     size_t mark = hl_log_len();
     tap(HL_BTN_PLAY);                                   /* pause mid-track */
     r->secs = paused_at_s();
+    r->order_seed = player_order_seed();
+    r->order_keep = player_order_keep();
     snprintf(tag, sizeof tag, "%s: paused mid-track (>= 10 s in)", kind);
     CHECK(tag, player_paused() && track_is(r->track) &&
                r->secs >= 10 && r->secs < 90);
@@ -296,6 +305,18 @@ static void verify(const rec_t *r)
     VCHECK("...at the same second (+-1 s)", at + 1 >= r->secs && at <= r->secs + 1);
     VCHECK("the same queue length", player_queue_len() == r->qlen);
     VCHECK("...at the same queue index", player_queue_current() == r->qidx);
+    /* The deal itself, not only the track after this one: an album of two
+     * has one possible Next whatever the deal. A deal made over the restored
+     * one — settings_apply() pushing Shuffle AFTER resume_restore(), whose
+     * album path does not push it itself, so the player sees an off->on
+     * edge and deals afresh — keeps the track and loses the order. */
+    VCHECK("the same shuffle deal (seed and pinned index)",
+           player_order_seed() == r->order_seed &&
+           player_order_keep() == r->order_keep);
+    if (player_order_seed() != r->order_seed) {
+        printf("%s: order seed %08X, expected %08X\n", r->kind,
+               player_order_seed(), r->order_seed);
+    }
 
     CHECK("select Now Playing", select_row("Now Playing"));
     tap(HL_BTN_SELECT);

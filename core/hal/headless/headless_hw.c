@@ -77,6 +77,7 @@ hl_cfg_t hl_cfg = {
     .standby_accept = 0,
     .rtc_epoch      = 1793534400u,      /* 2026-11-01 12:00:00 UTC */
     .verbose        = 0,
+    .fail_writes    = 0,
 };
 
 static void die(const char *fmt, ...) __attribute__((format(printf, 1, 2), noreturn));
@@ -330,6 +331,16 @@ static uint32_t g_lit_n;
 static int      g_lcd_slept;
 static uint32_t g_pres_full, g_pres_rect, g_pres_refused;
 
+/* hl_on_present(): set only by the test thread, between runs. */
+static void (*g_present_fn)(void *);
+static void  *g_present_user;
+
+void hl_on_present(void (*fn)(void *user), void *user)
+{
+    g_present_fn   = fn;
+    g_present_user = user;
+}
+
 int lcd_init(void) { return 1; }           /* the BCM rail reads powered */
 
 void lcd_fill(uint16_t rgb565)
@@ -354,6 +365,7 @@ void lcd_present_fb(const uint16_t *fb)
         ink += g_panel[i] != 0xFFFFu;
     }
     ev(HL_EV_PRESENT_FULL, ink);
+    if (g_present_fn) g_present_fn(g_present_user);
 }
 
 void lcd_present_rect(const uint16_t *fb, int x, int y, int w, int h)
@@ -650,6 +662,13 @@ int ata_write_sectors(uint32_t lba, uint32_t count, const void *buf)
                     "lba %u count %u\n", lba, count);
             return -1;
         }
+    }
+    if (hl_cfg.fail_writes > 0) {
+        /* A write the drive refuses (hl_cfg.fail_writes): nothing reaches
+         * the image, and the caller sees an error as from a failed command. */
+        hl_cfg.fail_writes--;
+        ata_spin_up();
+        return -2;
     }
     ata_spin_up();
     g_ata_writes++;

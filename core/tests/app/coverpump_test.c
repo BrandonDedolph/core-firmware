@@ -17,6 +17,8 @@
  *   5. The 60 ms rate limit applies only with a song loaded; idle passes are
  *      never limited.
  *   6. 1-5 across the 32-bit microsecond wrap.
+ *   7. Ages of 2^31 us (~35.8 min) up to 0xFFFFFFFF are long ago (unsigned
+ *      comparisons), for the wheel and for the last batch.
  */
 
 #include <stdio.h>
@@ -125,6 +127,35 @@ static void cases_at(uint32_t t0, const char *tag)
     expect(l, 0, 0, t0, long_ago, 1, t0, 6, 0);
     snprintf(l, sizeof l, "%s idle+moving, batch this us: 1 (no limit)", tag);
     expect(l, 0, 0, t0, t0, 1, t0, 1, 0);
+
+    /* 7. Ages of 2^31 us (~35.8 min) and more are long ago, not negative:
+     * the wheel untouched for 36 minutes, or back on the album list after a
+     * long stretch on Now Playing. The comparisons are unsigned. */
+    {
+        const uint32_t ages[] = { 0x80000000u, 0x80000001u, 0xFFFFFFFEu,
+                                  0xFFFFFFFFu };
+        for (unsigned i = 0; i < sizeof ages / sizeof *ages; i++) {
+            uint32_t a = ages[i];
+            for (int idle = 0; idle < 2; idle++) {
+                snprintf(l, sizeof l, "%s parked, wheel 0x%08x us ago, idle=%d: settled",
+                         tag, (unsigned)a, idle);
+                expect(l, 1, 0, t0, t0 - a, idle, long_ago, idle ? 6 : 3, 0);
+                snprintf(l, sizeof l, "%s spinning, wheel 0x%08x us ago, idle=%d: settled",
+                         tag, (unsigned)a, idle);
+                expect(l, 0, 0, t0, t0 - a, idle, long_ago, idle ? 6 : 3, 0);
+                snprintf(l, sizeof l, "%s parked+locked, wheel 0x%08x us ago, idle=%d: nothing",
+                         tag, (unsigned)a, idle);
+                expect(l, 1, 1, t0, t0 - a, idle, t0 - a, 0, 0);
+            }
+            snprintf(l, sizeof l, "%s playing, batch 0x%08x us ago: 3", tag, (unsigned)a);
+            expect(l, 0, 0, t0, long_ago, 0, t0 - a, 3, 0);
+            snprintf(l, sizeof l, "%s playing+moving, batch 0x%08x us ago: 1", tag, (unsigned)a);
+            expect(l, 0, 0, t0, t0 - 1, 0, t0 - a, 1, 0);
+            snprintf(l, sizeof l, "%s playing, wheel and batch 0x%08x us ago: 3",
+                     tag, (unsigned)a);
+            expect(l, 0, 0, t0, t0 - a, 0, t0 - a, 3, 0);
+        }
+    }
 }
 
 int main(void)

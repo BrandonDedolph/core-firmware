@@ -1996,6 +1996,23 @@ if target == 'sim'
          depends: [headless_disk_az],
          timeout: 180,
          suite: 'unit')
+    # np-settings-input: the Now Playing wheel (volume, the plate, the Volume
+    # Limit, the scrubber's aim, clamps, commit and lapse) and Settings' input
+    # (a slider change saved, Brightness driving the backlight, the Date &
+    # Time editor's fields, wraps and clamps, MENU writing nothing, the last
+    # SELECT writing the RTC and the clock that then runs on the screen)
+    # (headless/np_settings_input_test.c).
+    np_settings_input_test = executable(
+      'np_settings_input_test',
+      sources: ['headless/np_settings_input_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('np-settings-input', np_settings_input_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
     # suspend: suspend_to_ram() and enter_standby() off the idle path — the
     # PLAY hold under a playing, lit device with changes pending (forced
     # commits, park, white frame, the first frame after the wake), the idle

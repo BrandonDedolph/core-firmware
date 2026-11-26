@@ -1817,6 +1817,22 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 180,
          suite: 'unit')
+    # resume-context: resume across power cuts brings back the QUEUE — album,
+    # Songs, an artist, a genre, Shuffle Songs, a playlist and On-The-Go,
+    # Shuffle on — not just the track: same track and second, same queue
+    # length and index, the same track on Next (the saved deal), and the
+    # main-menu cursor on Now Playing (headless/resume_context_test.c).
+    resume_context_test = executable(
+      'resume_context_test',
+      sources: ['headless/resume_context_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('resume-context', resume_context_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

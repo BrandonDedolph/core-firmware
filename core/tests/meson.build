@@ -2014,6 +2014,33 @@ if target == 'sim'
          depends: [headless_disk, headless_partial_disk],
          timeout: 300,
          suite: 'unit')
+    # animations: run_ui's animators while a track PLAYS — the marquee (the
+    # Now Playing title, a Songs row), the queue's and the album detail's
+    # now-playing bars — every rect they present judged against the full
+    # render of that instant, and their pace, scroll rate, dwells and wrap
+    # against the code's numbers; the bars stop on pause. Its disk is the
+    # stock one plus an album whose one title overflows (--long-title)
+    # (headless/animations_test.c).
+    headless_anim_disk = custom_target('headless-anim-disk',
+      output: ['headless_anim_disk.img', 'headless_anim_disk.img.ranges'],
+      command: [py_hl, files('scripts' / 'make_headless_disk.py'),
+                '--vectors', vectors_dir, '--out', '@OUTPUT0@', '--long-title'],
+      depend_files: files('../../tools/build_index.py',
+                          '../../tools/make_config.py',
+                          '../../tools/make_log.py',
+                          '../../tools/make_otg.py'))
+    animations_test = executable(
+      'animations_test',
+      sources: ['headless/animations_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('animations', animations_test,
+         args: [headless_anim_disk[0].full_path(),
+                headless_anim_disk[1].full_path()],
+         depends: [headless_anim_disk],
+         timeout: 300,
+         suite: 'unit')
     test('firmware-walk', firmware_walk_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path(),
                 meson.current_build_dir()],

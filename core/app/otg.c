@@ -18,6 +18,7 @@
 #include "../kernel/cfg_commit.h"
 #include "../kernel/otg_store.h"
 #include "../ui/chrome.h"
+#include "../ui/wheel.h"
 #include "../library/names.h"
 #include "../library/playlist.h"
 #include "../library/otg.h"
@@ -31,6 +32,7 @@
 #include "library.h"
 #include "playctx.h"
 #include "statusbar.h"
+#include "actions.h"
 #include "playlists.h"
 #include "main_internal.h"
 #include "otg.h"
@@ -646,4 +648,33 @@ int otg_delete_slot(fat32_t *fs)
     playlists_load(fs);
     scr_pop();                           /* the tracklist -> Playlists */
     return 1;
+}
+
+/* The input half of each screen: what run_ui's per-screen switch does with
+ * one drained wheel event while that screen is on top. Each body is the
+ * switch case it replaced, statement for statement, with run_ui's loop
+ * state reached through L (app/ui_loop.h). */
+
+void otg_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+               uint32_t ev_us)
+{
+    (void)fs;
+    /* Both action rows are greyed and do nothing on an empty
+     * list, so there is nothing to move to and nothing to press:
+     * the cursor stays on row 0 and the wheel is silent. */
+    if (ev->wheel_delta && g_otg.n > 0) {
+        g_otg_sel = wheel_move(g_otg_sel, otg_row_count(),
+                               ev->wheel_delta, &g_otg_accum);
+        g_otg_confirm.armed = 0;    /* moving off the row cancels it */
+        L->dirty = 1;
+    }
+    if ((ev->buttons & WHEEL_BTN_SELECT) && g_otg.n > 0) {
+        /* Tap plays from the row (or clears / saves); hold removes
+         * the row. */
+        rowsel_arm(g_otg_sel, &L->row_key, ev_us);
+    }
+    if (ev->buttons & WHEEL_BTN_MENU) {
+        scr_pop();                          /* back to Playlists */
+        L->dirty = 1;
+    }
 }

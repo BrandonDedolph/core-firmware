@@ -2001,70 +2001,15 @@ _Noreturn static void run_ui(fat32_t *fs)
                 break;
 
             case SCR_PLAYLISTS:
-                if (ev.wheel_delta) {
-                    g_pl_sel = wheel_move(g_pl_sel, playlists_row_count(),
-                                          ev.wheel_delta, &g_pl_accum);
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_SELECT) {
-                    /* Row 0 is the pinned On-The-Go list; the rest are the
-                     * files. No hold action here, so SELECT still acts on the
-                     * down-edge — a delayed tap would be latency for nothing. */
-                    if (g_pl_sel == 0) {
-                        g_otg_free_slot = otg_slot_free_index(fs);
-                        g_otg_sel = (g_otg.n > 0) ? OTG_ROW_FIRST : OTG_ROW_CLEAR;
-                        g_otg_accum = 0;
-                        g_otg_confirm.armed = 0;
-                        scr_push(SCR_OTG);
-                    } else {
-                        playlist_open(fs, g_pl_sel - 1); /* parse + resolve + bind */
-                        scr_push(SCR_PLAYLIST);
-                    }
-                    L->dirty = 1;
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back (Music or main) */
-                    L->dirty = 1;
-                }
+                playlists_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_PLAYLIST:
-                if (ev.wheel_delta && playlist_row_count() > 0) {
-                    g_plt_sel = wheel_move(g_plt_sel, playlist_row_count(),
-                                           ev.wheel_delta, &g_plt_accum);
-                    g_pl_confirm.armed = 0;     /* moving off the row cancels it */
-                    L->dirty = 1;
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && playlist_row_count() > 0) {
-                    /* Tap plays (or deletes a saved slot); hold adds the track
-                     * to On-The-Go. */
-                    rowsel_arm(g_plt_sel, &L->row_key, ev_us);
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back to Playlists */
-                    L->dirty = 1;
-                }
+                playlist_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_OTG:
-                /* Both action rows are greyed and do nothing on an empty
-                 * list, so there is nothing to move to and nothing to press:
-                 * the cursor stays on row 0 and the wheel is silent. */
-                if (ev.wheel_delta && g_otg.n > 0) {
-                    g_otg_sel = wheel_move(g_otg_sel, otg_row_count(),
-                                           ev.wheel_delta, &g_otg_accum);
-                    g_otg_confirm.armed = 0;    /* moving off the row cancels it */
-                    L->dirty = 1;
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && g_otg.n > 0) {
-                    /* Tap plays from the row (or clears / saves); hold removes
-                     * the row. */
-                    rowsel_arm(g_otg_sel, &L->row_key, ev_us);
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    scr_pop();                          /* back to Playlists */
-                    L->dirty = 1;
-                }
+                otg_input(&ev, L, fs, ev_us);
                 break;
 
             case SCR_SEARCH: {
@@ -2124,42 +2069,9 @@ _Noreturn static void run_ui(fat32_t *fs)
                 break;
             }
 
-            case SCR_BROWSER: {
-                /* Depth 0 scrolls the album list (g_br_sel); depth 1 the loaded
-                 * tracklist (g_det_sel) — separate so backing out restores the
-                 * album-list position. */
-                int count = (g_dir_depth == 0) ? albumlist_count() : g_browse_n;
-                int *sel  = (g_dir_depth == 0) ? &g_br_sel   : &g_det_sel;
-                int *acc  = (g_dir_depth == 0) ? &g_br_accum : &g_det_accum;
-                if (ev.wheel_delta && count > 0) {
-                    *sel = wheel_move(*sel, count, ev.wheel_delta, acc);
-                    L->dirty = 1;                    /* window derived at paint time  */
-                }
-                if ((ev.buttons & WHEEL_BTN_SELECT) && count > 0) {
-                    /* Tap enters the album (or plays the track); hold adds the
-                     * whole album, or that one track, to On-The-Go. */
-                    rowsel_arm(*sel, &L->row_key, ev_us);
-                }
-                if (ev.buttons & WHEEL_BTN_MENU) {
-                    if (g_dir_depth > 0 && g_br_from_search) {
-                        /* Opened straight from a Search hit: back is the
-                         * results, not an album list that was never shown.
-                         * The depth goes with the screen, as it does in
-                         * scr_pop_to_root — this is the one exit from depth 1
-                         * that leaves no BROWSER on the stack to own it. */
-                        g_br_from_search = 0;
-                        g_dir_depth      = 0;
-                        scr_pop();
-                    } else if (g_dir_depth > 0) {       /* tracklist -> album list */
-                        g_dir_depth = 0;
-                        albumlist_queue_chips();        /* g_br_sel kept (the album) */
-                    } else {                            /* album list -> Music menu */
-                        scr_pop();
-                    }
-                    L->dirty = 1;
-                }
+            case SCR_BROWSER:
+                browse_input(&ev, L, fs, ev_us);
                 break;
-            }
 
             case SCR_NOWPLAYING:
                 /* Scrubbing: the wheel aims at a position instead of setting

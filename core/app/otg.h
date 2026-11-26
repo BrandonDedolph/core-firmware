@@ -14,9 +14,11 @@
 
 #include <stdint.h>
 
+#include "hw/clickwheel.h"
 #include "../fs/fat32.h"
 #include "../library/otg.h"
 #include "util.h"               /* ui_window_t */
+#include "ui_loop.h"
 
 extern otg_list_t  g_otg;
 extern int16_t     g_otg_song[OTG_MAX];
@@ -57,5 +59,10 @@ void otg_render(int sel);
 
 int  otg_save_to_slot(fat32_t *fs);
 int  otg_delete_slot(fat32_t *fs);
+
+/* SCR_OTG's input: run_ui calls it with the drained event, its loop state,
+ * the mounted volume and the event's tick while On-The-Go is on top. */
+void otg_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+               uint32_t ev_us);
 
 #endif /* CORE_APP_OTG_H */

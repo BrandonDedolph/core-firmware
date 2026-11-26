@@ -11,6 +11,7 @@
 #include "../kernel/resume_ctx.h"
 #include "../ui/text.h"
 #include "../ui/chrome.h"
+#include "../ui/wheel.h"
 #include "../library/names.h"
 #include "../library/playlist.h"
 #include "../library/otg.h"
@@ -22,6 +23,7 @@
 #include "library.h"
 #include "playctx.h"
 #include "statusbar.h"
+#include "actions.h"
 #include "main_internal.h"
 #include "otg.h"
 #include "playlists.h"
@@ -40,7 +42,8 @@ int                g_playlists_n;
 int                g_playlists_err;      /* FAT32_* when the list could
                                                  * not be read (not "none")    */
 static int                g_playlists_truncated;
-int                g_pl_sel, g_pl_accum; /* Playlists list             */
+int                g_pl_sel;             /* Playlists list             */
+static int                g_pl_accum;
 /* Whether the Playlists folder has been read since boot. Search wants playlist
  * NAMES without making the user visit the list first, and the disk is
  * read-only while the firmware runs, so one read a session is exact — the
@@ -53,7 +56,8 @@ int                g_pl_tracks_n;
 int                g_pl_open = -1;       /* g_playlists index shown    */
 static int                g_pl_err;             /* negative: file unreadable  */
 static playlist_stats_t   g_pl_stats;
-int                g_plt_sel, g_plt_accum; /* tracklist                */
+int                g_plt_sel;            /* tracklist                  */
+static int                g_plt_accum;
 int                g_pl_slot;    /* 1..OTG_SLOTS when the open playlist
                                          * IS a saved On-The-Go slot, else 0  */
 static int                g_pl_damaged; /* ...and its save was torn           */
@@ -507,4 +511,61 @@ void playlist_render(int sel)
         playlist_row_draw(r, idx);
     }
     ui_scrollbar(LIST_Y0, top, LIST_ROWS2, total);
+}
+
+/* The input half of each screen: what run_ui's per-screen switch does with
+ * one drained wheel event while that screen is on top. Each body is the
+ * switch case it replaced, statement for statement, with run_ui's loop
+ * state reached through L (app/ui_loop.h). */
+
+void playlists_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                     uint32_t ev_us)
+{
+    (void)ev_us;
+    if (ev->wheel_delta) {
+        g_pl_sel = wheel_move(g_pl_sel, playlists_row_count(),
+                              ev->wheel_delta, &g_pl_accum);
+        L->dirty = 1;
+    }
+    if (ev->buttons & WHEEL_BTN_SELECT) {
+        /* Row 0 is the pinned On-The-Go list; the rest are the
+         * files. No hold action here, so SELECT still acts on the
+         * down-edge — a delayed tap would be latency for nothing. */
+        if (g_pl_sel == 0) {
+            g_otg_free_slot = otg_slot_free_index(fs);
+            g_otg_sel = (g_otg.n > 0) ? OTG_ROW_FIRST : OTG_ROW_CLEAR;
+            g_otg_accum = 0;
+            g_otg_confirm.armed = 0;
+            scr_push(SCR_OTG);
+        } else {
+            playlist_open(fs, g_pl_sel - 1); /* parse + resolve + bind */
+            scr_push(SCR_PLAYLIST);
+        }
+        L->dirty = 1;
+    }
+    if (ev->buttons & WHEEL_BTN_MENU) {
+        scr_pop();                          /* back (Music or main) */
+        L->dirty = 1;
+    }
+}
+
+void playlist_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                    uint32_t ev_us)
+{
+    (void)fs;
+    if (ev->wheel_delta && playlist_row_count() > 0) {
+        g_plt_sel = wheel_move(g_plt_sel, playlist_row_count(),
+                               ev->wheel_delta, &g_plt_accum);
+        g_pl_confirm.armed = 0;     /* moving off the row cancels it */
+        L->dirty = 1;
+    }
+    if ((ev->buttons & WHEEL_BTN_SELECT) && playlist_row_count() > 0) {
+        /* Tap plays (or deletes a saved slot); hold adds the track
+         * to On-The-Go. */
+        rowsel_arm(g_plt_sel, &L->row_key, ev_us);
+    }
+    if (ev->buttons & WHEEL_BTN_MENU) {
+        scr_pop();                          /* back to Playlists */
+        L->dirty = 1;
+    }
 }

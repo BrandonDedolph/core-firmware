@@ -25,6 +25,7 @@
 #include "../ui/wheel.h"
 #include "hw/ata.h"
 #include "paint.h"
+#include "actions.h"
 #include "main_internal.h"
 #include "albums.h"
 #include "coverpump.h"
@@ -809,4 +810,48 @@ uint32_t albumlist_pump_chips(fat32_t *fs, int locked, uint32_t *last_chip)
         *last_chip = nowc;
     }
     return rows;
+}
+
+/* The input half of each screen: what run_ui's per-screen switch does with
+ * one drained wheel event while that screen is on top. Each body is the
+ * switch case it replaced, statement for statement, with run_ui's loop
+ * state reached through L (app/ui_loop.h). */
+
+void browse_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                  uint32_t ev_us)
+{
+    (void)fs;
+    /* Depth 0 scrolls the album list (g_br_sel); depth 1 the loaded
+     * tracklist (g_det_sel) — separate so backing out restores the
+     * album-list position. */
+    int count = (g_dir_depth == 0) ? albumlist_count() : g_browse_n;
+    int *sel  = (g_dir_depth == 0) ? &g_br_sel   : &g_det_sel;
+    int *acc  = (g_dir_depth == 0) ? &g_br_accum : &g_det_accum;
+    if (ev->wheel_delta && count > 0) {
+        *sel = wheel_move(*sel, count, ev->wheel_delta, acc);
+        L->dirty = 1;                    /* window derived at paint time  */
+    }
+    if ((ev->buttons & WHEEL_BTN_SELECT) && count > 0) {
+        /* Tap enters the album (or plays the track); hold adds the
+         * whole album, or that one track, to On-The-Go. */
+        rowsel_arm(*sel, &L->row_key, ev_us);
+    }
+    if (ev->buttons & WHEEL_BTN_MENU) {
+        if (g_dir_depth > 0 && g_br_from_search) {
+            /* Opened straight from a Search hit: back is the
+             * results, not an album list that was never shown.
+             * The depth goes with the screen, as it does in
+             * scr_pop_to_root — this is the one exit from depth 1
+             * that leaves no BROWSER on the stack to own it. */
+            g_br_from_search = 0;
+            g_dir_depth      = 0;
+            scr_pop();
+        } else if (g_dir_depth > 0) {       /* tracklist -> album list */
+            g_dir_depth = 0;
+            albumlist_queue_chips();        /* g_br_sel kept (the album) */
+        } else {                            /* album list -> Music menu */
+            scr_pop();
+        }
+        L->dirty = 1;
+    }
 }

@@ -2,9 +2,12 @@
 /*
  * core/app/playlists.h — Music -> Playlists: the playlist list and one open
  * playlist's tracklist, their state, and playing one as a queue. Moved
- * verbatim out of kernel/main.c. The state is plain extern data: run_ui's
- * input switch moves the cursors, and On-The-Go, resume, search, the list
- * view table and the row actions read the open playlist's rows directly.
+ * verbatim out of kernel/main.c, plus each screen's input handler (x_input
+ * below), which moves the cursor with the wheel and acts on SELECT and MENU.
+ * The state is plain extern data: On-The-Go, resume, search, the list view
+ * table and the row actions read the cursors and the open playlist's rows
+ * directly. The two wheel accumulators, which nothing outside this file
+ * touches, are file-local.
  */
 
 #ifndef CORE_APP_PLAYLISTS_H
@@ -12,21 +15,23 @@
 
 #include <stdint.h>
 
+#include "hw/clickwheel.h"
 #include "../fs/fat32.h"
 #include "../library/playlist.h"
 #include "util.h"
+#include "ui_loop.h"
 
 extern playlist_t         g_playlists[PLAYLIST_MAX];
 extern int                g_playlists_n;
 extern int                g_playlists_err;
-extern int                g_pl_sel, g_pl_accum;
+extern int                g_pl_sel;
 extern int                g_playlists_scanned;
 
 extern playlist_track_t   g_pl_tracks[PLAYLIST_TRACKS_MAX];
 extern int16_t            g_pl_song[PLAYLIST_TRACKS_MAX];
 extern int                g_pl_tracks_n;
 extern int                g_pl_open;
-extern int                g_plt_sel, g_plt_accum;
+extern int                g_plt_sel;
 extern int                g_pl_slot;
 extern ui_window_t        g_pl_confirm;
 
@@ -42,5 +47,12 @@ void playlists_render(int sel);
 int  playlist_row_count(void);
 void playlist_row_draw(int r, int idx);
 void playlist_render(int sel);
+
+/* Per-screen input: run_ui calls the one for the screen on top with the
+ * drained event, its loop state, the mounted volume and the event's tick. */
+void playlists_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                     uint32_t ev_us);
+void playlist_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                    uint32_t ev_us);
 
 #endif /* CORE_APP_PLAYLISTS_H */

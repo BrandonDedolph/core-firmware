@@ -1903,6 +1903,23 @@ if target == 'sim'
          depends: [headless_disk],
          timeout: 120,
          suite: 'unit')
+    # boot-order: the steps of ui_boot() whose wrong order the device's end
+    # state hides — the loading frames in the saved theme with the charger's
+    # budget already asked for, the main menu painted once (the gauge primed
+    # before the loop seeds it), and a clock mark whose forced write failed
+    # re-armed after the boot's cfg_commit_clear(), so the next boot does not
+    # act on the same stamp again (headless/boot_order_test.c).
+    boot_order_test = executable(
+      'boot_order_test',
+      sources: ['headless/boot_order_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('boot-order', boot_order_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
     # az-overlay: the A-Z letter plate on the --library az disk — raised by a
     # fast spin on Songs and Artists ('#', a letter per detent, an empty
     # letter skipped, "The " filed past), held through pauses, gone after

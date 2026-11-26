@@ -110,6 +110,8 @@ typedef struct {
     int      standby_accept;    /* 1: power_standby() powers off (parks)        */
     uint32_t rtc_epoch;         /* RTC at boot, UTC (default 2026-11-01 12:00) */
     int      verbose;           /* echo the UART to stdout (env HL_VERBOSE=1)  */
+    uint32_t fail_writes;       /* refuse this many ATA writes (each one counts
+                                 * down; default 0): a write the drive fails  */
 } hl_cfg_t;
 
 extern hl_cfg_t hl_cfg;
@@ -211,6 +213,15 @@ const uint16_t *hl_lit_frame(uint32_t *n);
  * firmware's clock nor try to yield a baton the test thread already holds.
  * Off by default; turn it off again before the next hl_run_ms(). */
 void hl_hold_time(int on);
+
+/* Call fn(user) after every full present, on the FIRMWARE thread, from inside
+ * lcd_present_fb(), with hl_panel() already holding the new frame — the one
+ * way to see a frame the firmware paints over before the next hl_run_ms()
+ * returns (the boot's loading screens). fn may read hl_panel(), hl_log() and
+ * firmware state; it must not read the timer, run the firmware or call
+ * anything that does. NULL turns it off. Set before hl_boot() or between runs.
+ */
+void hl_on_present(void (*fn)(void *user), void *user);
 
 /* Dump the panel as a 24-bit BMP. 0 on success. */
 int hl_write_bmp(const char *path);

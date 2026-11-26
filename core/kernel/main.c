@@ -856,13 +856,21 @@ static void suspend_to_ram(uint32_t play_down_us)
 #define PANEL_SLEEP_AT_IDLE  0
 #endif
 
+/* Backlight states, L->bl_state: set by ui_boot, stepped by run_ui's loop. */
+enum { BL_OFF, BL_DIM, BL_FULL };
+
 /*
- * The UI: one event loop that pumps the background player every pass and
- * dispatches input to the current screen (Main menu / Music menu / Browser /
- * Now Playing) on a stack. MENU pops the screen WITHOUT stopping playback, so a
- * song keeps going while you navigate. Never returns.
+ * run_ui's prologue: everything before the event loop, in boot order (the
+ * order is load-bearing; the comments below say why at each step), ending
+ * with the loop state *L given its initial values.
+ *
+ * Forced inline: left to itself GCC keeps this as a call and inlines the
+ * boot-only callees (config_load, evlog_mount, otg_store_mount,
+ * resume_restore) into it, a 456 B frame stacked on run_ui's for the boot's
+ * library load, +280 B on the deepest call chain. Inlined into run_ui, the
+ * frames and the chain are what they were before the split.
  */
-_Noreturn static void run_ui(fat32_t *fs)
+__attribute__((always_inline)) static inline void ui_boot(fat32_t *fs, ui_loop_t *L)
 {
     clickwheel_init();
     player_init(fs);
@@ -1139,8 +1147,6 @@ _Noreturn static void run_ui(fat32_t *fs)
     g_scr_n = 0;
     scr_push(SCR_MENU);
 
-    ui_loop_t  loop;                    /* the loop's state (app/ui_loop.h) */
-    ui_loop_t *L = &loop;
     L->dirty = 1;
     L->np_last = 0xFFFFFFFFu;
     L->np_first = 1;
@@ -1170,7 +1176,6 @@ _Noreturn static void run_ui(fat32_t *fs)
     /* Backlight inactivity: full -> dim -> off. Any input wakes to full; a press
      * that wakes from fully-OFF is swallowed (it just lights the screen, the way
      * a real iPod's first touch does). Playback keeps running the whole time. */
-    enum { BL_OFF, BL_DIM, BL_FULL };
     L->bl_state = BL_FULL;
     L->cpu_idled = 0;              /* core dropped to 30 MHz for deep idle   */
     /* LCD panel put to sleep at backlight-off (PANEL_SLEEP_AT_IDLE). While set,
@@ -1200,6 +1205,19 @@ _Noreturn static void run_ui(fat32_t *fs)
      * bumps the end counter, and that must not read as "the queue finished". */
     g_resume_end_seq    = player_end_seq();
     g_resume_last_us    = mmio_read32(USEC_TIMER_ADDR);
+}
+
+/*
+ * The UI: one event loop that pumps the background player every pass and
+ * dispatches input to the current screen (Main menu / Music menu / Browser /
+ * Now Playing) on a stack. MENU pops the screen WITHOUT stopping playback, so a
+ * song keeps going while you navigate. Never returns.
+ */
+_Noreturn static void run_ui(fat32_t *fs)
+{
+    ui_loop_t  loop;                    /* the loop's state (app/ui_loop.h) */
+    ui_loop_t *L = &loop;
+    ui_boot(fs, L);
     for (;;) {
         /* Time the pump: when it returns in a few microseconds the decode step
          * produced nothing (PCM ring full) and the disk buffer isn't filling —

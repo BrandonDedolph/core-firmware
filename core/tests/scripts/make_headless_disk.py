@@ -26,9 +26,17 @@ With --stray, the Mono Mix album folder also holds "Stray.flac", a file the
 index has no record of (tests/headless/row_hold_test.c).
 
 Usage: make_headless_disk.py --vectors DIR --out IMG [--library stock|az] [--stray]
+                             [--covers] [--long-playlist]
 
 --library az adds the long lists the A-Z plate test needs (az_library); the
 default, stock, is the disk every other headless test boots.
+
+With --covers, every album folder also gets a folder.thm (the 28x28 CoreArt
+list chip tools/coreart.py bakes), a different picture per album, so the
+album list has covers to load; --long-playlist adds a twelve-row playlist
+whose name is long enough to reach the header's "n / m" value
+(tests/headless/partial_repaint_test.c boots an image with both). The stock
+image has neither, and nothing else uses these variants.
 """
 
 import argparse
@@ -564,6 +572,54 @@ def pack(stage, out_path):
             f.write(f"{lba} {cnt} {rel}\n")
 
 
+# ---- covers (--covers) -------------------------------------------------------
+#
+# The CoreArt container tools/coreart.py writes (its docstring has the layout):
+# "CART", u16 version 1, u16 width, u16 height, u16 0, then RGB565 LE pixels.
+# Built here rather than through coreart.py, which needs ffmpeg and a FLAC
+# with an embedded picture. Each album gets its own picture: a diagonal
+# gradient in a per-album hue, so a chip drawn for the wrong row, or not at
+# all, is a different set of pixels.
+THM_DIM = 28   # ARTCACHE_DIM
+
+
+LONG_PLAYLIST = "The Presidents of the United States of America"
+
+
+def write_long_playlist(stage):
+    """A playlist whose name, as the playlist screen's header title, reaches
+    into the header's "n / m" value box, with twelve rows so that value
+    widens ("9 / 12" -> "10 / 12") under a move."""
+    music = os.path.join(stage, "Music")
+    albums = sorted(d for d in os.listdir(music)
+                    if os.path.isdir(os.path.join(music, d))
+                    and d not in ("Playlists", "Loose Files"))
+    tracks = [f"../{a}/{t}" for a in albums
+              for t in sorted(os.listdir(os.path.join(music, a)))
+              if t.lower().endswith((".flac", ".mp3"))]
+    lines = ["#EXTM3U"] + [tracks[i % len(tracks)] for i in range(12)]
+    with open(os.path.join(music, "Playlists", LONG_PLAYLIST + ".m3u"), "w",
+              encoding="utf-8", newline="\r\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def write_covers(stage):
+    music = os.path.join(stage, "Music")
+    albums = sorted(d for d in os.listdir(music)
+                    if os.path.isdir(os.path.join(music, d))
+                    and d not in ("Playlists", "Loose Files"))
+    for n, folder in enumerate(albums):
+        px = bytearray()
+        for y in range(THM_DIM):
+            for x in range(THM_DIM):
+                t = (x + y) * 31 // (2 * THM_DIM - 2)
+                r, g, b = ((t, 8 + n * 16, 31 - t), (31 - t, t * 2, 4 + n * 8),
+                           (6 + n * 6, 63 - t * 2, t))[n % 3]
+                px += struct.pack("<H", (r << 11) | (g << 5) | b)
+        with open(os.path.join(music, folder, "folder.thm"), "wb") as f:
+            f.write(b"CART" + struct.pack("<HHHH", 1, THM_DIM, THM_DIM, 0) + px)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--vectors", required=True)
@@ -574,10 +630,18 @@ def main():
     ap.add_argument("--stray", action="store_true",
                     help="add an audio file the index does not know to the "
                          "Mono Mix album folder")
+    ap.add_argument("--covers", action="store_true",
+                    help="give every album a folder.thm list chip")
+    ap.add_argument("--long-playlist", action="store_true",
+                    help="add a 12-row playlist named " + LONG_PLAYLIST)
     a = ap.parse_args()
     lib, genres = az_library() if a.library == "az" else (None, None)
     with tempfile.TemporaryDirectory() as stage:
         build_tree(a.vectors, stage, lib, genres, stray=a.stray)
+        if a.covers:
+            write_covers(stage)
+        if a.long_playlist:
+            write_long_playlist(stage)
         pack(stage, a.out)
     return 0
 

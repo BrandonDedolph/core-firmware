@@ -14,7 +14,8 @@ core/
 ├── kernel/      cooperative scheduler, IRQ, timer, clock, cache,
 │                framebuffer console, PCM ring, panic/fault handlers,
 │                CORECFG.DAT settings store, the CORELOG.BIN event log,
-│                drivepower.c (when the drive may park)
+│                drivepower.c (when the drive may park),
+│                backlightpolicy.c (when an idle screen dims and goes out)
 │                — and main.c (kernel_main, run_ui: the UI's boot and main loop)
 ├── app/         the UI's application layer, split out of kernel/main.c:
 │   ├── state.c       app-wide singletons (Settings record, volume, Hold, clock)

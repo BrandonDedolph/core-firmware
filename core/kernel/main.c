@@ -41,6 +41,7 @@
 #include "chargestat.h"
 #include "idlesleep.h"
 #include "drivepower.h"
+#include "backlightpolicy.h"
 #include "otg_store.h"
 #include "core_version.h"       /* CORE_BUILD_ID: meson vcs_tag, git describe   */
 #include "core_version_tag.h"   /* CORE_VERSION:  meson vcs_tag, nearest tag    */
@@ -855,9 +856,6 @@ static void suspend_to_ram(uint32_t play_down_us)
 #ifndef PANEL_SLEEP_AT_IDLE
 #define PANEL_SLEEP_AT_IDLE  0
 #endif
-
-/* Backlight states, L->bl_state: set by ui_boot, stepped by run_ui's loop. */
-enum { BL_OFF, BL_DIM, BL_FULL };
 
 /*
  * run_ui's prologue: everything before the event loop, in boot order (the
@@ -2683,21 +2681,15 @@ _Noreturn static void run_ui(fat32_t *fs)
         if (theme_preview_sync()) L->dirty = 1;
 
         /* Idle-timeout backlight: dim, then off — timeout from Settings (0 =
-         * never), brightness from Settings. Playback keeps running. */
-        uint32_t dim_us, off_us;
-        if (g_settings.backlight_secs <= 0) {
-            dim_us = off_us = 0xFFFFFFFFu;      /* never dim/off               */
-        } else {
-            dim_us = (uint32_t)g_settings.backlight_secs * 1000000u;
-            off_us = dim_us + 15u * 1000000u;
-        }
-        int dim_level = g_settings.backlight_bright / 4;
-        if (dim_level < 1) dim_level = 1;
+         * never), brightness from Settings. Playback keeps running. The
+         * timing is kernel/backlightpolicy.h; the LED and the panel are here. */
         uint32_t idle = mmio_read32(USEC_TIMER_ADDR) - L->last_input;
-        if (L->bl_state == BL_FULL && idle > dim_us) {
-            backlight_set(dim_level);
+        int bl_step = backlightpolicy_step(L->bl_state, idle,
+                                           g_settings.backlight_secs);
+        if (bl_step == BLP_DIM) {
+            backlight_set(backlightpolicy_dim_level(g_settings.backlight_bright));
             L->bl_state = BL_DIM;
-        } else if (L->bl_state == BL_DIM && idle > off_us) {
+        } else if (bl_step == BLP_OFF) {
             backlight_set(0);
             L->bl_state = BL_OFF;
             if (PANEL_SLEEP_AT_IDLE) {    /* see the note above run_ui() */
@@ -2729,11 +2721,14 @@ _Noreturn static void run_ui(fat32_t *fs)
          * pocket is the common way to stop listening. A paused pump does no
          * decode and feeds no DMA, so 30 MHz is plenty; the resume itself
          * always arrives through a wake press that has already re-lit the
-         * screen (and so re-boosted here) one pass earlier. */
-        if (L->cpu_idled && (L->bl_state != BL_OFF || player_playing())) {
+         * screen (and so re-boosted here) one pass earlier. The rule is
+         * kernel/backlightpolicy.h. */
+        int cpu_step = backlightpolicy_cpu(L->cpu_idled, L->bl_state,
+                                           player_playing());
+        if (cpu_step == BLP_CPU_BOOST) {
             cpu_boost();
             L->cpu_idled = 0;
-        } else if (!L->cpu_idled && L->bl_state == BL_OFF && !player_playing()) {
+        } else if (cpu_step == BLP_CPU_IDLE) {
             cpu_unboost();
             L->cpu_idled = 1;
         }

@@ -25,24 +25,4 @@
 int enter_standby(void);                   /* until power moves */
 extern drivepower_t g_drivepower;          /* until the drive-power wiring leaves main.c */
 
-extern ui_window_t g_pl_confirm;            /* until actions moves */
-
-/*
- * PLAY_TAP_CONSUMED is the tap that was acted on and started nothing: a
- * playlist whose file cannot be read or whose tracks have all gone missing
- * (its tracklist screen is now up carrying the reason), an album folder that
- * could not be read (the same), or a view whose every song has vanished off
- * the disk since the index was built. That last one is the reason this is not
- * simply PASS: library_play_song() and shuffle_songs_build() clear the old
- * queue BEFORE they discover there is nothing to add, so the music has
- * already stopped and the status strip's track name has to repaint away. In
- * all of them the screen changed, and PLAY must not ALSO toggle a transport
- * that is no longer there.
- */
-typedef enum {
-    PLAY_TAP_PASS = 0,   /* not a title: PLAY still means pause/resume        */
-    PLAY_TAP_STARTED,    /* a queue started and Now Playing is up             */
-    PLAY_TAP_CONSUMED,   /* acted on, started nothing: repaint, do not toggle */
-} play_tap_t;                               /* until actions moves */
-
 #endif /* CORE_APP_MAIN_INTERNAL_H */

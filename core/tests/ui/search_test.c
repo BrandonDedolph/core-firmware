@@ -525,7 +525,7 @@ int main(void)
     }
 
     /* ---- 10. what a HOLD has under the cursor ----------------------------- */
-    /* The same seam for the row-select arbiter (kernel/main.c rowsel_*): a
+    /* The same seam for the row-select arbiter (app/actions.c rowsel_*): a
      * hold on a result adds it to On-The-Go, which only means anything for a
      * hit that names ONE TRACK. A song hit hands back its position in the
      * SORTED song order, which is the one thing main.c has to turn into a

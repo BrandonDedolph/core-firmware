@@ -2933,7 +2933,7 @@ _Noreturn static void run_ui(fat32_t *fs)
         }
 
         /* Scroll the marquee target (a selected long row, or the now-playing
-         * title) in place — redraw just its band + partial-present it, ~16fps. */
+         * title) in place — redraw just its band + partial-present it, ~30fps. */
         if (L->bl_state != BL_OFF && g_mq.active) {
             marquee_tick(L);
         }

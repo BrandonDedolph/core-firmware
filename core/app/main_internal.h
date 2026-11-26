@@ -20,9 +20,10 @@
 #include <stdint.h>
 
 #include "util.h"
+#include "../kernel/drivepower.h"
 
 int enter_standby(void);                   /* until power moves */
-extern uint32_t g_present_cost_us;         /* until paint moves */
+extern drivepower_t g_drivepower;          /* until the drive-power wiring leaves main.c */
 
 extern ui_window_t g_pl_confirm;            /* until actions moves */
 

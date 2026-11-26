@@ -27,6 +27,7 @@
 #include "util.h"
 #include "persist.h"
 #include "main_internal.h"
+#include "paint.h"
 #include "resume.h"
 #include "battery_ui.h"
 

@@ -16,8 +16,10 @@
 
 #include <stdint.h>
 
+#include "hw/clickwheel.h"
 #include "../fs/fat32.h"
 #include "../player/player.h"   /* browse_entry_t, BROWSE_MAX, NAME_MAX */
+#include "ui_loop.h"
 
 /* Album detail tracklist geometry. */
 #define DET_LIST_Y0  108                  /* tracklist first row top              */
@@ -57,5 +59,11 @@ int albumlist_count(void);
 int albumlist_album_at(int row);
 void albumlist_row_draw(int r, int idx);
 void browse_render(int sel);
+
+/* SCR_BROWSER's input, at either depth: run_ui calls it with the drained
+ * event, its loop state, the mounted volume and the event's tick while the
+ * browser is on top. */
+void browse_input(const wheel_event_t *ev, ui_loop_t *L, fat32_t *fs,
+                  uint32_t ev_us);
 
 #endif /* CORE_APP_ALBUMS_H */

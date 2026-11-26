@@ -1676,6 +1676,18 @@ if target == 'sim'
                           '../../tools/make_config.py',
                           '../../tools/make_log.py',
                           '../../tools/make_otg.py'))
+    # The same builder with --library az: the stock library plus long A-Z
+    # lists (Artists 48 rows, Songs 146, Genres 47), for az-overlay alone.
+    # Every other headless test boots the stock disk above.
+    headless_disk_az = custom_target('headless-disk-az',
+      output: ['headless_disk_az.img', 'headless_disk_az.img.ranges'],
+      command: [py_hl, files('scripts' / 'make_headless_disk.py'),
+                '--vectors', vectors_dir, '--out', '@OUTPUT0@',
+                '--library', 'az'],
+      depend_files: files('../../tools/build_index.py',
+                          '../../tools/make_config.py',
+                          '../../tools/make_log.py',
+                          '../../tools/make_otg.py'))
 
     headless_fw_src = files(
       '../kernel/main.c', '../kernel/console.c', '../kernel/pcm_ring.c',
@@ -1831,6 +1843,23 @@ if target == 'sim'
     test('resume-context', resume_context_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
          depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
+    # az-overlay: the A-Z letter plate on the --library az disk — raised by a
+    # fast spin on Songs and Artists ('#', a letter per detent, an empty
+    # letter skipped, "The " filed past), held through pauses, gone after
+    # the hold with the cursor on the letter's first row; rebuilt when a list
+    # of the same length replaces another; never on a 47-row list
+    # (headless/az_overlay_test.c).
+    az_overlay_test = executable(
+      'az_overlay_test',
+      sources: ['headless/az_overlay_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('az-overlay', az_overlay_test,
+         args: [headless_disk_az[0].full_path(), headless_disk_az[1].full_path()],
+         depends: [headless_disk_az],
          timeout: 180,
          suite: 'unit')
     test('firmware-walk', firmware_walk_test,

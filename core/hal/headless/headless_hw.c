@@ -1036,6 +1036,17 @@ void hl_scroll(int rows)
     in_push(t + 100000u, IN_UNTOUCH, 0);
 }
 
+void hl_spin(int ticks, uint32_t gap_us)
+{
+    int dir = ticks < 0 ? -1 : 1;
+    int n = ticks < 0 ? -ticks : ticks;
+    uint64_t t = g_now;
+    for (int i = 0; i < n; i++, t += gap_us) {
+        in_push(t, IN_WHEEL, dir);          /* one raw tick */
+    }
+    in_push(t + 100000u, IN_UNTOUCH, 0);
+}
+
 void hl_tap(unsigned btn, uint32_t settle_ms)
 {
     hl_press(btn, 60);

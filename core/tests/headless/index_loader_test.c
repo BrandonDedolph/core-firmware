@@ -26,9 +26,9 @@
  *               fails is refused (read) and the scan takes over — never a
  *               library of the records that happened to read, which is what
  *               `if (got <= 0) break;` used to produce.
- *   eio-once    one read of the index's second cluster fails at the drive
- *               (every one of player_disk_read's attempts): retried on the
- *               load's budget, and the index loads in full.
+ *   eio-once    reads of the index's second cluster fail at the drive, more
+ *               times than one player_disk_read's own attempts absorb:
+ *               retried on the load's budget, and the index loads in full.
  *   eio-always  it never reads: refused (read) with the load error set — the
  *               DISK failed, so no scan fallback against it: zero songs.
  *
@@ -157,6 +157,12 @@ static const char *const CASE_NAME[] = {
  * damaged index were loaded anyway, this is the string it would show. */
 static char g_flipped[49];
 
+/* eio-once: drive errors injected on the index's second cluster. More than
+ * one player_disk_read absorbs with its own attempts (6 today), so the load
+ * only survives them through library_load_index's retry; the case also
+ * asserts every one was consumed, so it cannot pass by never reaching them. */
+#define EIO_ONCE_N 12u
+
 static _Noreturn void run_case(case_t c)
 {
     char suite[64];
@@ -211,7 +217,7 @@ static _Noreturn void run_case(case_t c)
     uint32_t second_lba = (uint32_t)(clus_off(g_loc.clus + 1) / 512u);
     uint32_t clus_lbas  = clus_bytes / 512u;
     if (c == C_EIO_ONCE) {
-        hl_fail_reads(second_lba, clus_lbas, 6);     /* player_disk_read's 6 */
+        hl_fail_reads(second_lba, clus_lbas, EIO_ONCE_N);
     } else if (c == C_EIO_ALWAYS) {
         hl_fail_reads(second_lba, clus_lbas, 0xFFFFFFFFu);
     }
@@ -255,6 +261,8 @@ static _Noreturn void run_case(case_t c)
               songs >= (long)g_loc.count);
         break;
     case C_EIO_ONCE:
+        CHECK("fixture: every injected read error happened",
+              hl_fail_reads_left() == 0);
         CHECK("a transient read error is retried, not refused",
               !log_has("idx: rejected"));
         CHECK("every record is a song", songs == (long)g_loc.count);

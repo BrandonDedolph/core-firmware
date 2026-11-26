@@ -597,6 +597,8 @@ void hl_fail_reads(uint32_t lba, uint32_t count, uint32_t n)
     g_fail_n     = n;
 }
 
+uint32_t hl_fail_reads_left(void) { return g_fail_n; }
+
 static void ata_spin_up(void)
 {
     if (!g_ata_parked) return;

@@ -1631,8 +1631,8 @@ arm-none-eabi-binutils arm-none-eabi-newlib meson ninja pkgconf`, then
   old records still load and fall back to the album). Positions under 10 s
   aren't seeked. Any doubt at any step falls back to the track's album,
   and past that leaves the device exactly as if nothing had been saved.
-  Parity between the C and host implementations is gated by
-  `check_resume_parity.py` in `make verify-hw`. Not yet flashed.
+  The resume unit test links the matcher itself (`app/resume_match.c`).
+  Not yet flashed.
 - **Boot Details** (Settings → Boot Details) — a live per-phase breakdown of
   the last cold boot: LCD/BCM, disk + mount, library, resume (split into
   dir / open / seek), and OTHER derived as total-minus-named so unmeasured

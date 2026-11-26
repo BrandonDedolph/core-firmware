@@ -22,7 +22,10 @@ It also writes IMG.ranges: one "lba count path" line per pre-allocated file —
 the ONLY places the firmware may write. The harness refuses any other write,
 which is the guard every write path's first-flash procedure asks for.
 
-Usage: make_headless_disk.py --vectors DIR --out IMG
+Usage: make_headless_disk.py --vectors DIR --out IMG [--library stock|az]
+
+--library az adds the long lists the A-Z plate test needs (az_library); the
+default, stock, is the disk every other headless test boots.
 """
 
 import argparse
@@ -68,6 +71,67 @@ LIBRARY = {
 }
 
 GENRE = "Test"
+
+# ---- the A-Z variant (--library az) ------------------------------------------
+#
+# The A-Z letter plate (az_overlay_render, over ui/letterindex.c) only engages
+# on a list of LETTERIDX_MIN_ROWS (48) rows or more, and the stock library
+# above has seven songs. This variant is the stock library plus:
+#
+#   Alphabet Soup  48 songs, 23 letters (no H, I or Q), two or three a letter
+#   Alphabet Stew  48 songs: three '#' titles, then 21 letters (no H, I, Q or
+#                  Z) — the same count as Soup's, on the same screen, with
+#                  different runs, so the index has to be rebuilt between them
+#   43 artists     one album, one song each: two '#' names, one H ("Harbor
+#                  Lights", "Harbor Song"), nothing under I or Q, and "The
+#                  Kestrels" (filed under K, ahead of "Kingfisher")
+#
+# so Artists is EXACTLY 48 rows (the threshold: a plate) and Songs 146. Each
+# album's genre is its first word, but Soup and Stew share one, so Genres is
+# EXACTLY 47 rows (one under: no plate). tests/headless/az_overlay_test.c
+# leans on all of it: change one, change the other.
+AZ_SINGLES = [
+    "4 Seasons Trio", "99 Rooms", "Amber Fox", "Bell Tower", "Blue Heron",
+    "Cinder", "Delta Nine", "Dune Sea", "Echo Park", "Ember", "Fern Gully",
+    "Foxglove", "Gold Coast", "Grey Wolf", "Harbor Lights", "Jade River",
+    "Juniper", "The Kestrels", "Kingfisher", "Lark Song", "Maple Leaf",
+    "Moth Wing", "Night Owl", "Nova", "Opal Moon", "Orchid", "Pine Hollow",
+    "Pixel Cat", "Red Canyon", "Rust Belt", "Silver Lake", "Stone Path",
+    "Tide Pool", "Tundra", "Umbra", "Velvet Fog", "Violet Hour",
+    "Willow Creek", "Wren", "Xylo", "Yellow Kite", "Yarrow", "Zephyr",
+]
+AZ_SOUP_LETTERS = "ABCDEFGJKLMNOPRSTUVWXYZ"
+AZ_STEW_LETTERS = "BCDEFGJKLMNOPRSTUVWXY"
+
+
+def az_library():
+    """(library, genre of each folder) for --library az."""
+    lib = dict(LIBRARY)
+    soup = {}
+    for i in range(48):
+        c = AZ_SOUP_LETTERS[i % len(AZ_SOUP_LETTERS)]
+        t = f"{c}{c.lower()} Soup {i + 1:02d}"
+        soup[t + ".flac"] = ("gen:1", dict(title=t, track=i + 1))
+    lib["Many Letters - Alphabet Soup"] = soup
+    names = ["(Stew Intro)", "07 Stew", "1 Stew"]
+    for i in range(45):
+        c = AZ_STEW_LETTERS[i % len(AZ_STEW_LETTERS)]
+        names.append(f"{c}{c.lower()} Stew {i + 4:02d}")
+    lib["Other Letters - Alphabet Stew"] = {
+        f"S{i + 1:02d}.flac": ("gen:1", dict(title=t, track=i + 1))
+        for i, t in enumerate(names)}
+    for a in AZ_SINGLES:
+        word = (a[4:] if a.startswith("The ") else a).split()[0]
+        lib[f"{word} Album - {a}"] = {
+            "One.flac": ("gen:1", dict(title=f"{word.rstrip('s')} Song",
+                                       track=1))}
+    genre = {f: f.split()[0] for f in lib}
+    genre["Other Letters - Alphabet Stew"] = genre["Many Letters - Alphabet Soup"]
+    artists = {f.rsplit(" - ", 1)[1] for f in lib}
+    titles = [t["title"] for files in lib.values() for _, t in files.values()]
+    assert (len(artists), len(set(genre.values())), len(titles),
+            len(set(titles))) == (48, 47, 146, 146)
+    return lib, genre
 
 
 # ---- a FLAC writer -----------------------------------------------------------
@@ -194,10 +258,12 @@ def load_build_index():
     return mod
 
 
-def build_tree(vectors, stage):
+def build_tree(vectors, stage, library=None, genres=None):
+    library = LIBRARY if library is None else library
+    genres = genres or {}
     src = os.path.join(stage, "_src")
     tags_of = {}
-    for folder, files in LIBRARY.items():
+    for folder, files in library.items():
         album, artist = folder.rsplit(" - ", 1)
         d = os.path.join(src, folder)
         os.makedirs(d)
@@ -213,7 +279,8 @@ def build_tree(vectors, stage):
             else:
                 shutil.copyfile(os.path.join(vectors, origin), path)
                 dur = 2 if "2s" in origin else 1
-            tags_of[path] = (tags["title"], artist, album, GENRE, dur,
+            tags_of[path] = (tags["title"], artist, album,
+                             genres.get(folder, GENRE), dur,
                              tags["track"], 0)
 
     bi = load_build_index()
@@ -251,7 +318,10 @@ def build_tree(vectors, stage):
     def tracks(folder):
         return sorted(f for f in os.listdir(os.path.join(music, folder))
                       if f.lower().endswith((".flac", ".mp3")))
-    loose = os.path.join(music, "Loose Files")
+    # (Every stock album has two tracks or more; --library az's one-song
+    # albums are not the playlist's to name.)
+    albums = [d for d in albums if len(tracks(d)) >= 2]
+    loose =os.path.join(music, "Loose Files")
     os.makedirs(loose)
     shutil.copyfile(os.path.join(music, albums[2], tracks(albums[2])[0]),
                     os.path.join(loose, "Bonus.flac"))
@@ -486,9 +556,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--vectors", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--library", choices=("stock", "az"), default="stock",
+                    help="stock (default): the seven-song library every "
+                         "headless test boots; az: plus the long A-Z lists")
     a = ap.parse_args()
+    lib, genres = az_library() if a.library == "az" else (None, None)
     with tempfile.TemporaryDirectory() as stage:
-        build_tree(a.vectors, stage)
+        build_tree(a.vectors, stage, lib, genres)
         pack(stage, a.out)
     return 0
 

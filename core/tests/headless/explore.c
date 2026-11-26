@@ -12,6 +12,9 @@
  *                 tap that button (60 ms) and run 400 ms
  *   hold:BTN:MS   hold sel|menu|play|right|left for MS, then run 400 ms
  *   down:N up:N   N wheel rows (150 ms apart), then settle
+ *   spin:N[:US]   N raw wheel ticks (4 = a row; negative: backwards) US
+ *                 microseconds apart (default 5000: fast enough for the A-Z
+ *                 plate), then run for the spin's length
  *   holdsw:0|1    the Hold switch
  *   jack:0|1      headphones out / in
  *   shot:PATH     write the panel as a 24-bit BMP
@@ -66,6 +69,12 @@ int main(int argc, char **argv)
             int n = atoi(strchr(a, ':') + 1);
             hl_scroll(a[0] == 'd' ? n : -n);
             hl_run_ms((uint32_t)(n * 150 + 400));
+        } else if (!strncmp(a, "spin:", 5)) {
+            int n = atoi(a + 5);
+            const char *g = strchr(a + 5, ':');
+            uint32_t gap = g ? (uint32_t)atoi(g + 1) : 5000u;
+            hl_spin(n, gap);
+            hl_run_ms((uint32_t)(n < 0 ? -n : n) * gap / 1000u + 1u);
         } else if (!strncmp(a, "holdsw:", 7)) {
             hl_set_hold(atoi(a + 7));
             hl_run_ms(400);

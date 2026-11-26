@@ -81,6 +81,12 @@ else is refused and fails the test — the check every write path's first-flash
 procedure (`kernel/config.c`) asks for by hand. The test copies the image
 first; the build output is never written.
 
+A second image, `headless_disk_az.img`, comes from the same builder with
+`--library az`: the stock library plus long alphabetised lists (Artists 48
+rows, Songs 146, Genres 47) so the A-Z letter plate, which needs 48 rows,
+can engage. Only `az-overlay` (`tests/headless/az_overlay_test.c`) boots it;
+`--library` defaults to the stock disk every other test uses.
+
 ## What the walk asserts
 
 Session 1 (one process):
@@ -159,7 +165,9 @@ cp build-sim/tests/headless_disk.img /tmp/d.img        # it WRITES to the disk
 ```
 
 Commands: `run:MS`, `sel` `menu` `play` `right` `left` (tap), `hold:BTN:MS`,
-`down:N` / `up:N` (wheel rows), `holdsw:0|1` (Hold switch), `jack:0|1`,
+`down:N` / `up:N` (wheel rows), `spin:N[:US]` (N raw wheel ticks US
+microseconds apart, default 5000 — a spin fast enough for the A-Z plate;
+`hl_spin()` in a test), `holdsw:0|1` (Hold switch), `jack:0|1`,
 `shot:PATH` (24-bit BMP), `find:TEXT`, `stats`, `log` (UART since the last
 `log`), `evs` (the hardware timeline), `echo:TEXT` (a marker line for
 scripts). `HL_VERBOSE=1` echoes the UART as it happens; `HL_DUMP_LOG=1` makes

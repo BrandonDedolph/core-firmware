@@ -136,6 +136,11 @@ int  hl_run_until(int (*pred)(void *), void *arg, uint32_t step_ms,
  * delivered one row per 150 ms so the acceleration curve stays at rest. */
 void hl_press(unsigned btn, uint32_t hold_ms);       /* down now, up later */
 void hl_scroll(int rows);                            /* + = clockwise      */
+/* `ticks` single raw wheel ticks (4 = one row), `gap_us` apart, then the
+ * finger lifts 100 ms after the last: a spin at 1e6/gap_us ticks a second,
+ * fast enough (5000 us = 200 ticks/s) to reach the A-Z letter mode that
+ * hl_scroll's one row per 150 ms never does. */
+void hl_spin(int ticks, uint32_t gap_us);
 void hl_set_hold(int on);
 void hl_set_headphones(int present);
 void hl_set_external_power(int on);

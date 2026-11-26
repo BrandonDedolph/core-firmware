@@ -30,14 +30,11 @@
  *              commit: Time in Title on (so the status strip shows the clock),
  *              minute -1 and SELECT through the last field: "core: rtc set"
  *              rc 0, back on Date & Time row 0, the clock reads the time
- *              entered and the strip shows it — and the running time a
- *              minute later.
- *              NOTE: Date & Time's row 0 should show the clock too, but reads
- *              "Not set" in this build: app/settings_glue.c
- *              settings_render_cur() calls
- *              settings_set_now(clock_local_epoch(&local), local), and the
- *              order the two arguments are evaluated in is unspecified — the
- *              host compiler reads `local` (still 0) first. Not asserted here.
+ *              entered and both the strip and row 0 show it — and the
+ *              running time a minute later. Row 0 is the clock
+ *              settings_render_cur() injects (settings_set_now); it read
+ *              "Not set" on the host while that was one call whose argument
+ *              order left `local` unfilled.
  *   4. Now Playing (Long Two, 90 s, a small file the anti-skip buffer holds)
  *              volume: a detent is +1 on g_volume, the Settings record and
  *              the codec; a second detent while the plate is up re-presents
@@ -173,6 +170,9 @@ static uint32_t elapsed_s(void)
 }
 /* The status strip (the top band) shows `s`. */
 static int strip_shows(const char *s) { return hl_find_text_in(hl_panel(), s, 0, STATUS_H + 4, NULL); }
+/* Below the strip and the header: the rows. Date & Time's row 0 is the only
+ * row that draws a time, so this is row 0 showing `s`. */
+static int rows_show(const char *s) { return hl_find_text_in(hl_panel(), s, 40, HL_H, NULL); }
 static void fmt_time(char *buf, const datetime_t *d)
 {
     datetime_fmt_time(buf, 16, d, g_settings.time_24h);
@@ -345,8 +345,7 @@ static void datetime_cancel(void)
 static void datetime_commit(void)
 {
     /* Time in Title on: idle, the status strip then shows the clock on every
-     * Settings screen. (Row 0 of Date & Time is meant to show it too, but
-     * reads "Not set" in this build — see the note at the top.) */
+     * Settings screen. Row 0 of Date & Time shows it whatever that setting. */
     set_row(2);
     tap(HL_BTN_SELECT, 500);
     CHECK("dt: Time in Title on", g_settings.time_in_title == 1);
@@ -356,6 +355,9 @@ static void datetime_commit(void)
     now_local(&now);
     fmt_time(buf, &now);
     CHECK("dt: the strip shows the clock", strip_shows(buf));
+    CHECK("dt: row 0 shows the clock, not \"Not set\"",
+          rows_show(buf) && !on_panel("Not set"));
+    if (T.fails) printf("  clock %s\n", buf);
 
     /* Keep the edit inside one minute and the set inside one hour. */
     if (now.sec > 45) {
@@ -388,6 +390,7 @@ static void datetime_commit(void)
           c.hour == s.hour && c.min == s.min - 1 && c.sec <= 2);
     fmt_time(buf, &c);
     CHECK("dt: the strip shows it", strip_shows(buf));
+    CHECK("dt: ...and so does row 0", rows_show(buf) && !on_panel("Not set"));
     if (T.fails) printf("  set %s\n", buf);
 
     /* And the strip keeps time from the new setting. */
@@ -395,6 +398,7 @@ static void datetime_commit(void)
     now_local(&c);
     fmt_time(buf, &c);
     CHECK("dt: a minute later the strip shows the running time", strip_shows(buf));
+    CHECK("dt: ...and so does row 0", rows_show(buf));
     if (T.fails) printf("  now %s\n", buf);
     tap(HL_BTN_MENU, 500);
     CHECK("dt: MENU: the root, cursor on Date & Time",

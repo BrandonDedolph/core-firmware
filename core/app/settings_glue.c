@@ -129,7 +129,11 @@ void settings_render_cur(void)
      * clock is injected into ui/chrome.c. */
     {
         uint32_t local = 0;
-        settings_set_now(clock_local_epoch(&local), local);
+        /* Two statements: C leaves the order of a call's arguments open, so
+         * settings_set_now(clock_local_epoch(&local), local) may read
+         * `local` before clock_local_epoch fills it. */
+        int valid = clock_local_epoch(&local);
+        settings_set_now(valid, local);
     }
 
     if (g_set_screen == SETTINGS_ABOUT) {

@@ -223,6 +223,16 @@ void hl_hold_time(int on);
  */
 void hl_on_present(void (*fn)(void *user), void *user);
 
+/* The same after every rect present (lcd_present_rect), with the rect as
+ * presented (clipped to the panel): the frames the main loop's animators
+ * (the marquee, the now-playing bars) push between full repaints. The same
+ * rules as hl_on_present, except that fn may read the timer under
+ * hl_hold_time(1) (on, then off again before it returns): the time it reads
+ * is then the instant of the present, which is what a renderer called as an
+ * oracle needs. NULL turns it off. */
+void hl_on_present_rect(void (*fn)(void *user, int x, int y, int w, int h),
+                        void *user);
+
 /* Dump the panel as a 24-bit BMP. 0 on success. */
 int hl_write_bmp(const char *path);
 

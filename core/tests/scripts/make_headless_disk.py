@@ -26,7 +26,7 @@ With --stray, the Mono Mix album folder also holds "Stray.flac", a file the
 index has no record of (tests/headless/row_hold_test.c).
 
 Usage: make_headless_disk.py --vectors DIR --out IMG [--library stock|az] [--stray]
-                             [--covers] [--long-playlist]
+                             [--covers] [--long-playlist] [--long-title]
 
 --library az adds the long lists the A-Z plate test needs (az_library); the
 default, stock, is the disk every other headless test boots.
@@ -36,7 +36,10 @@ list chip tools/coreart.py bakes), a different picture per album, so the
 album list has covers to load; --long-playlist adds a twelve-row playlist
 whose name is long enough to reach the header's "n / m" value
 (tests/headless/partial_repaint_test.c boots an image with both). The stock
-image has neither, and nothing else uses these variants.
+image has neither, and nothing else uses these variants. --long-title adds an
+album "Marquee" whose one 60 s track has a title too long for the Now Playing
+title box or a Songs row, so the marquee scrolls it
+(tests/headless/animations_test.c).
 """
 
 import argparse
@@ -583,6 +586,16 @@ def pack(stage, out_path):
 THM_DIM = 28   # ARTCACHE_DIM
 
 
+LONG_TITLE = "An Overlong Title That Scrolls Along Its Row"
+# --long-title: one more album, one 60 s track whose title overflows both the
+# Now Playing title box and a Songs row, so the marquee runs on either.
+LONG_TITLE_ALBUM = {
+    "Marquee - Long Names": {
+        "Overlong.flac": ("gen:60", dict(title=LONG_TITLE, track=1)),
+    },
+}
+
+
 LONG_PLAYLIST = "The Presidents of the United States of America"
 
 
@@ -634,8 +647,12 @@ def main():
                     help="give every album a folder.thm list chip")
     ap.add_argument("--long-playlist", action="store_true",
                     help="add a 12-row playlist named " + LONG_PLAYLIST)
+    ap.add_argument("--long-title", action="store_true",
+                    help="add an album whose one track is titled " + LONG_TITLE)
     a = ap.parse_args()
     lib, genres = az_library() if a.library == "az" else (None, None)
+    if a.long_title:
+        lib = dict(lib or LIBRARY, **LONG_TITLE_ALBUM)
     with tempfile.TemporaryDirectory() as stage:
         build_tree(a.vectors, stage, lib, genres, stray=a.stray)
         if a.covers:

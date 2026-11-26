@@ -341,6 +341,17 @@ void hl_on_present(void (*fn)(void *user), void *user)
     g_present_user = user;
 }
 
+/* hl_on_present_rect(): likewise. */
+static void (*g_present_rect_fn)(void *, int, int, int, int);
+static void  *g_present_rect_user;
+
+void hl_on_present_rect(void (*fn)(void *user, int x, int y, int w, int h),
+                        void *user)
+{
+    g_present_rect_fn   = fn;
+    g_present_rect_user = user;
+}
+
 int lcd_init(void) { return 1; }           /* the BCM rail reads powered */
 
 void lcd_fill(uint16_t rgb565)
@@ -386,6 +397,7 @@ void lcd_present_rect(const uint16_t *fb, int x, int y, int w, int h)
     }
     g_pres_rect++;
     ev(HL_EV_PRESENT_RECT, ((uint32_t)x << 16) | (uint32_t)y);
+    if (g_present_rect_fn) g_present_rect_fn(g_present_rect_user, x, y, w, h);
 }
 
 void lcd_sleep(void) { if (!g_lcd_slept) ev(HL_EV_LCD_SLEEP, 0); g_lcd_slept = 1; }

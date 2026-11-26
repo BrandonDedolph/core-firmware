@@ -529,13 +529,13 @@ static int expect_source(uint32_t gpiol, int want, const char *label)
  *
  * The policy is a pure state machine over the clamped mv that battery_sample()
  * produces, so these cases feed it directly and assert the EVENT it returns on
- * every sample — the event is what kernel/main.c acts on (flush + park at
+ * every sample — the event is what app/battery_ui.c acts on (flush + park at
  * DISKSAFE, power off at SHUTOFF), so "which sample fires" is exactly the
  * behaviour under test. One case drives a real battery_sample() failure
  * through the mock bus to prove the -1 route composes end to end.
  *
  * Every number below is hand-derived from the constants in battery.h at the
- * 5 s cadence main.c samples on: BATTERY_FILTER_N = 5 (median),
+ * 5 s cadence app/battery_ui.c samples on: BATTERY_FILTER_N = 5 (median),
  * BATTERY_SHUTOFF_CONFIRM = 3, lines at 3500 / 3300, recovery at 3600.
  *
  * MUTATION CHECK (2026-09-09): each case was confirmed to FAIL against a
@@ -696,7 +696,7 @@ static int test_policy_decline_crosses(void)
 /*
  * DISKSAFE fires ONCE, and always BEFORE SHUTOFF — even on a cell that is
  * already at the floor when the policy arms (boot on a flat battery). The
- * fifth sample arms the policy and must produce DISKSAFE, so main.c gets to
+ * fifth sample arms the policy and must produce DISKSAFE, so app/battery_ui.c gets to
  * flush and park; SHUTOFF follows only after the confirm window (samples 6, 7).
  * Sitting in DISKSAFE for a long time must not re-fire it.
  */
@@ -749,7 +749,7 @@ static int test_policy_disksafe_once_first(void)
  *
  * The last leg runs the real driver: the mock's I2C STATUS register reads
  * BUSY forever, i2c_wait_idle() gives up, battery_sample() returns -1, and
- * feeding that result (exactly as main.c does) changes nothing.
+ * feeding that result (exactly as app/battery_ui.c does) changes nothing.
  */
 static int test_policy_i2c_failure_inert(void)
 {

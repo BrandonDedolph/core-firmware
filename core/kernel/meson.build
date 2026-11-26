@@ -20,7 +20,7 @@
 # parked-drive and battery refusals, the wake-before-write, and what becomes
 # of a change whose write failed. EXTRACTED OUT OF main.c's settings_commit()
 # so the host can test it (tests/kernel/cfg_commit_test.c); pure, no
-# hardware — main.c hands it the clock, the drive, the player and the battery.
+# hardware — app/persist.c hands it the clock, the drive, the player and the battery.
 
 #
 # evlog.c is the SECOND writer: the on-disk event log (a RAM tap on the UART,

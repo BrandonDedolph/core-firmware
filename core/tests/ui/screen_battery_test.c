@@ -87,7 +87,7 @@ static int count_not(int x, int y, int w, int h, uint16_t bg)
 #define BATT_X ((LCD_WIDTH - BATT_W) / 2)
 #define BATT_Y 56
 
-/* One policy sample every 5 s, the cadence kernel/main.c actually uses. */
+/* One policy sample every 5 s, the cadence app/battery_ui.c actually uses. */
 #define STEP 5000000u
 
 /* Feed a sample and report whether the toast came UP on this very sample:

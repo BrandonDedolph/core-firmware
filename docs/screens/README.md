@@ -77,14 +77,14 @@ A screenshot here is a claim about what the device draws. So:
   - Music > Search, both modes: `core/ui/search.h` (every geometry constant
     the stills use — the query plate, the ring's cell widths and window, the
     hairline, the two row origins, the footer baseline) and `core/ui/search.c`
-    (`search_render`). The A-Z plate over a long list is `main.c`'s
+    (`search_render`). The A-Z plate over a long list is `core/app/az.c`'s
     `az_overlay_render`, and whether a list HAS a letter at all is
     `core/ui/letterindex.h`'s two thresholds — `letter.png` shows a list long
     enough to pass them, because a still of a ten-row list with a plate over
     it would be a screen the device never draws;
   - everything else — status strip, main menu, Music menu, Artists/Albums/
     Songs/Genres/Playlists lists, album detail, Now Playing, the volume
-    plate, the Hold banner: `core/kernel/main.c`
+    plate, the Hold banner: `core/app/`
     (`status_strip_render`,
     `main_menu_render`, `music_menu_render`, `g_main_menu`, `g_music_menu`,
     `albumlist_render`, `detail_render`, `artists_render`, `songs_render`,
@@ -138,7 +138,7 @@ A screenshot here is a claim about what the device draws. So:
 | `detail.png` | album detail (tracklist) | `screen_detail` |
 | `nowplaying.png` `volume.png` `volume_limit.png` | Now Playing, volume plate, the plate at a Volume Limit (triangle marker) | `screen_nowplaying`, `screen_volume`, `screen_volume_limit` |
 | `hold_unlocked.png` `hold_locked.png` `hold_locked_list.png` | Hold-switch banners (Now Playing row / list chrome) | `screen_lock`, `screen_locked`, `screen_locked_list` |
-| `settings.png` `playback.png` `sound.png` `clicker.png` `theme.png` | Settings (the Playback still carries the strip's `SLEEP` token). `theme.png` is drawn in the palette of the theme UNDER THE CURSOR (Onyx), not the saved one: since v0.3.0 the picker previews the hovered theme (`main.c` `theme_preview_sync`) | `screen_settings`, `screen_playback`, `screen_sound`, `screen_clicker`, `screen_theme` |
+| `settings.png` `playback.png` `sound.png` `clicker.png` `theme.png` | Settings (the Playback still carries the strip's `SLEEP` token). `theme.png` is drawn in the palette of the theme UNDER THE CURSOR (Onyx), not the saved one: since v0.3.0 the picker previews the hovered theme (`app/settings_glue.c` `theme_preview_sync`) | `screen_settings`, `screen_playback`, `screen_sound`, `screen_clicker`, `screen_theme` |
 | `datetime.png` `settime.png` `mainmenu_clock.png` | Settings > Date & Time (four rows — Daylight Saving is the fourth, since v0.3.0), its field editor, and the main menu with Time in Title on (the clock is in the HEADER; the strip only carries it while nothing plays) | `screen_datetime`, `screen_settime`, `screen_mainmenu_clock` |
 | `about.png` `bootdetails.png` | About dashboard, Boot Details | `screen_about`, `screen_diag` |
 | `nowplaying_onyx.png` `albums_onyx.png` | the Onyx theme | `with_palette(ONYX, …)` |
@@ -158,7 +158,7 @@ Indexed here, not referenced by the top-level README: `demo.gif`, `hold.gif`,
 ## Keeping it honest
 
 When a screen changes in the firmware, the screenshot changes in the same
-PR. `git log --oneline -- core/ui core/kernel/main.c` since the last gallery
+PR. `git log --oneline -- core/ui core/app core/kernel/main.c` since the last gallery
 commit is the checklist. The image is wrong the moment it shows a row the
 device does not have, a theme count it does not ship, or a layout it moved
 on from — and the README's readers cannot tell.

@@ -111,7 +111,7 @@ int main(void)
     check("resume-off", s.resume_on_startup == 0);
     settings_activate(SETTINGS_PLAYBACK, &s, 2);
     check("resume-back-on", s.resume_on_startup == 1);
-    /* Toggling the SETTING must not disturb the stored locator — main.c owns
+    /* Toggling the SETTING must not disturb the stored locator — app/resume.c owns
      * clearing that, and doing it here too would mean the pure model quietly
      * discarding state the caller had just loaded off disk. */
     s.resume_hash = 0xABCD1234u; s.resume_secs = 77; s.resume_total = 240;
@@ -735,7 +735,7 @@ int main(void)
 
     /* --- Test 13: Date & Time ---------------------------------------------
      * The screen is three rows, and the first one's VALUE is a clock this
-     * module cannot compute — main.c injects it. The injection seam is worth
+     * module cannot compute — app/settings_glue.c injects it. The injection seam is worth
      * pinning because the failure it prevents is silent: with no clock, the
      * row must say "Not set" rather than a plausible 1970 date. */
     settings_defaults(&s);

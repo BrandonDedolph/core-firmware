@@ -21,7 +21,7 @@
  * name_hash() lives in library/names.c and is linked here for real, and so
  * is the queue-context seam in kernel/resume_ctx.h — test 5 below.)
  *
- * The library it reads is stubbed below with the same field NAMES main.c's
+ * The library it reads is stubbed below with the same field NAMES app/library.h's
  * lib_song_t uses, so the copied body compiles unchanged.
  */
 

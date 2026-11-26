@@ -19,7 +19,7 @@
  *     the charging field and on its low-battery sibling, which shares the
  *     treatment;
  *   - the padlock survives the caption (screen_charging_note clears its own
- *     band only), since main.c draws it last.
+ *     band only), since app/battery_ui.c draws it last.
  *
  * The framebuffer is the oracle, as in screen_battery_test.c: a sentinel
  * colour first, pixels read back after.
@@ -152,7 +152,7 @@ int main(void)
     check_lock_on(&c, "charged", paint_charging_full);
     check_lock_on(&c, "low battery", paint_low);
 
-    /* Order of painting in main.c: render, caption, then the padlock. The
+    /* Order of painting in app/battery_ui.c: render, caption, then the padlock. The
      * caption band (rows 210..223) is nowhere near the corner, so the glyph
      * survives a caption repaint either way — pin that so a taller caption
      * band cannot quietly eat it. */

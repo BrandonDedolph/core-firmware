@@ -230,7 +230,7 @@ static const char *const THEME_L[THEME_COUNT] = {
     [THEME_UMBER]    = "Umber",
     [THEME_MUSHROOM] = "Mushroom",
 };
-/* Clicker: index 0 = Off, 1..N = sound profiles (main.c maps to piezo tones). */
+/* Clicker: index 0 = Off, 1..N = sound profiles (app/az.c maps to piezo tones). */
 static const char *const CLICK_L[8] = {
     "Off", "Tick", "Click", "Pop", "Blip", "Tock", "Double", "Chirp",
 };
@@ -476,7 +476,7 @@ void settings_value(int screen, const settings_t *s, int idx,
                          : s->repeat == REPEAT_ALL ? "All" : "One"); break;
         case 2: scopy(buf, s->resume_on_startup ? "On" : "Off"); break;
         /* The CHOSEN duration, not the countdown — the minutes left live in
-         * the status strip's SLEEP token (kernel/main.c). */
+         * the status strip's SLEEP token (app/statusbar.c). */
         case 3:
             if (s->sleep_timer_min <= 0) {
                 scopy(buf, "Off");
@@ -514,7 +514,7 @@ void settings_value(int screen, const settings_t *s, int idx,
     case SETTINGS_DATETIME:
         switch (idx) {
         /* The clock as it is right now, in the format the row below selects —
-         * injected by main.c (settings_set_now), because this module has no
+         * injected by app/settings_glue.c (settings_set_now), because this module has no
          * idea what time it is. */
         case 0: {
             datetime_t now;
@@ -618,14 +618,14 @@ int settings_activate(int screen, settings_t *s, int idx)
         case 1: s->repeat = (repeat_mode_t)((s->repeat + 1) % 3);
                 return SETTINGS_ACTION_NONE;
         /* Turning Resume OFF does not clear the stored locator here — this
-         * module is pure, and main.c owns that (it drops it on the next pass,
+         * module is pure, and app/resume.c owns that (it drops it on the next pass,
          * so the record on disk stops carrying a position you asked it to
          * forget). */
         case 2: s->resume_on_startup = !s->resume_on_startup;
                 return SETTINGS_ACTION_NONE;
         /* Wraps through six options, so this is always a change — including
          * the step that lands back on the duration already showing, which
-         * main.c treats as a deliberate restart of the countdown. Never NONE:
+         * app/settings_glue.c treats as a deliberate restart of the countdown. Never NONE:
          * nothing on disk stores this, and a touch would write a
          * byte-identical record (settings.h, SETTINGS_ACTION_SLEEPTIMER). */
         case 3: s->sleep_timer_min = sleep_step(s->sleep_timer_min);

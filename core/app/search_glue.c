@@ -35,7 +35,7 @@ search_t g_search;
 /* ---------------------------------------------------------------------------
  * Music > Search (ui/search.c)
  *
- * The module owns the query, the ring, the match and the screen; main.c owns
+ * The module owns the query, the ring, the match and the screen; app/search_glue.c owns
  * the two things only it knows — WHAT to scan and how a hit reads as a row —
  * and what a chosen hit does, which is always "the thing the ordinary list
  * would have done", so a search result is never a second-class way in.

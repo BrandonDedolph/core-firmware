@@ -2,7 +2,7 @@
 """
 Faithful 320x240 renderer for the Core (iPod firmware) "Linen" warm-light UI.
 
-Reproduces the on-device look of core/kernel/main.c + core/ui/screen_settings.c:
+Reproduces the on-device look of core/app/ + core/ui/screen_settings.c:
 the status strip, titled headers, list rows (single + two-line with art chips),
 album detail, now-playing, the volume overlay, the Hold lock/unlock banner, the
 About dashboard and the Boot Details diagnostics page.
@@ -731,7 +731,7 @@ def draw_lock_glyph(sc, x, y, c):
     sc.fill_rect(x + 1, y, 6, 2, c)
 
 def status_strip(sc, left="", pct=78, locked=False, sleep=None):
-    # main.c status_strip_render: the playing track's name, clipped before the
+    # app/statusbar.c status_strip_render: the playing track's name, clipped before the
     # right cluster (12, LCD_WIDTH-70) rather than drawn full width and painted
     # over — and NOTHING when nothing is playing (the strip is a now-playing
     # readout, not a wordmark; the main menu's own header says "Core").
@@ -811,7 +811,7 @@ def list_row(sc, y0, r, text, sub=None, right=None, chevron=False,
     if right:
         reserved = W - 16 - text_width(right, bold_11) - 6
         # title_priority: a long title spans the full width (over the value) and
-        # the value drops, so it truncates/marquees at the row edge (main.c).
+        # the value drops, so it truncates/marquees at the row edge (ui/chrome.c).
         if title_priority and text_width(text, tf) > reserved - tx:
             title_right = W - 16
             show_right = False
@@ -932,11 +932,11 @@ def _now_playing_base(vol_overlay=None, elapsed=73, total=182, locked=False,
     sc.text(12, 15, "Now Playing", bold_11, INK)
     bx = W - 12 - 19
     draw_battery(sc, bx, 3, 78)
-    # Persistent Hold padlock in the strip while locked (main.c: drawn just left
+    # Persistent Hold padlock in the strip while locked (app/statusbar.c: drawn just left
     # of the battery at bx-14). The shuffle token shifts left to clear it.
     if locked:
         draw_lock_glyph(sc, bx - 14, 3, INK)
-    # main.c nowplaying_render builds SHUF / RPT / SLEEP as ONE string and
+    # app/nowplaying.c nowplaying_render builds SHUF / RPT / SLEEP as ONE string and
     # measures it once, so the spacing is the font's own kerning.
     tokens = "SHUF" if sleep is None else "SHUF SLEEP %d" % sleep
     sc.text_right(bx - (18 if locked else 6), 13, tokens, FONT_SMALL, MUTED2)
@@ -1002,7 +1002,7 @@ def volume_overlay(sc, vol, limit=100):
     fw = max(0, min(bw, bw * vol // 100))
     sc.fill_rect(bx, by, fw, bh, INK)
     # Volume Limit marker: a 5x3 triangle, apex down, on the track's top edge
-    # at the ceiling (main.c volume_overlay_render). The bar keeps its 0..100
+    # at the ceiling (app/nowplaying.c volume_overlay_render). The bar keeps its 0..100
     # scale, so the marker is where the wheel stops.
     if limit < 100:
         mx = bx + bw * limit // 100
@@ -1027,14 +1027,14 @@ def screen_volume_limit():
 
 
 # -- Hold banner -------------------------------------------------------------
-# main.c "Top banner": a Hold edge does NOT raise a centred 180x110 plate any
+# app/statusbar.c "Top banner": a Hold edge does NOT raise a centred 180x110 plate any
 # more. The TOP CHROME INVERTS for LOCK_FLASH_US and then settles back into the
 # persistent strip padlock. Ported row for row from top_banner_render /
 # lock_banner_render, including the bitmaps and the explicit-colour battery.
 
 # Dot-keyhole padlock, 14 px wide, as row bitmasks (bit 13 = left column).
 # Closed = 16 rows; open = 18, the shackle "popped" clear of the body. Values
-# verbatim from main.c LOCK_BM_CLOSED / LOCK_BM_OPEN.
+# verbatim from app/statusbar.c LOCK_BM_CLOSED / LOCK_BM_OPEN.
 LOCK_BM_CLOSED = [
     0x03F0, 0x07F8, 0x0E1C, 0x0C0C, 0x0C0C, 0x0C0C,
     0x1FFE, 0x3FFF, 0x3FFF, 0x3F3F, 0x3F3F, 0x3FFF,
@@ -1047,7 +1047,7 @@ LOCK_BM_OPEN = [
 ]
 
 
-# main.c OTG_BM_PLUS / OTG_BM_MINUS: a "+" and a "-" in a ring, 14 px wide —
+# app/statusbar.c OTG_BM_PLUS / OTG_BM_MINUS: a "+" and a "-" in a ring, 14 px wide —
 # what the On-The-Go banner puts where the padlock goes. Added and removed are
 # the only two things it ever says; a REFUSAL ("Not in the library") draws no
 # glyph at all, because a + on a refusal would be a lie.
@@ -1062,7 +1062,7 @@ OTG_BM_MINUS = [
 
 
 def draw_bitmap14(sc, x, y, rows, c):
-    """main.c draw_bitmap14: blit a 14-wide row-mask bitmap at (x, y) as
+    """app/statusbar.c draw_bitmap14: blit a 14-wide row-mask bitmap at (x, y) as
     horizontal runs (bit 13 is the leftmost column)."""
     for r, m in enumerate(rows):
         run = -1
@@ -1076,7 +1076,7 @@ def draw_bitmap14(sc, x, y, rows, c):
 
 
 def draw_battery_c(sc, x, y, pct, outline, fill):
-    """main.c draw_battery_c: draw_battery in explicit colours, so the right
+    """app/statusbar.c draw_battery_c: draw_battery in explicit colours, so the right
     cluster can sit on an inverted band without flickering."""
     w, h = 22, 12
     sc.fill_rect(x, y, w, 1, outline)
@@ -1101,7 +1101,7 @@ def _as_screen(img):
 
 def top_banner(sc, inverted, bm, bm_dy, label, token, screen,
                left="", pct=78):
-    """main.c top_banner_render: paint a banner over the top chrome of whatever
+    """app/statusbar.c top_banner_render: paint a banner over the top chrome of whatever
     is already in the framebuffer. `inverted` picks the selected-row pair (INK
     band / SURFACE marks / SEL_SUB secondaries), else surface + the ordinary
     border rule. `bm_dy` drops a taller bitmap so its body stays put. `screen`
@@ -1147,7 +1147,7 @@ def top_banner(sc, inverted, bm, bm_dy, label, token, screen,
 
 
 def lock_banner(sc, locked, screen, **kw):
-    """main.c lock_banner_render: closed padlock + "Locked" / HOLD ON, or
+    """app/statusbar.c lock_banner_render: closed padlock + "Locked" / HOLD ON, or
     popped-open padlock + "Unlocked" / HOLD OFF, both on the surface (the
     locked band stopped inverting in v0.1.2)."""
     if locked:
@@ -1159,7 +1159,7 @@ def lock_banner(sc, locked, screen, **kw):
 
 
 def otg_banner(sc, sign, label, token, screen, **kw):
-    """main.c otg_banner_render: the same band as the Hold banner, with a + or
+    """app/statusbar.c otg_banner_render: the same band as the Hold banner, with a + or
     a - in a ring. `sign` is +1 added, -1 removed, 0 a refusal (no glyph, and
     the label keeps the x every other banner puts it at). Unlike the LOCKED
     banner it is not modal — the first real input dismisses it — so nothing is
@@ -1281,7 +1281,7 @@ def _bp_chart(sc, hist):
 def screen_battery_page():
     sc = Screen()
     header(sc, "Battery", back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
     # the Charge Rate row, selected (the only row)
     _sel_bar(sc, LIST_Y0, ROW_H, 0)
     sc.text(14, row_base(LIST_Y0, ROW_H), "Charge Rate", FONT_HEADER, SEL_FG)
@@ -1346,7 +1346,7 @@ def _about_card(sc, x, label):
 def screen_about(lib_truncated=AB_LIB_TRUNCATED):
     sc = Screen()
     header(sc, "About", back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
 
     # --- device row: name left, firmware chip right, one baseline ---
     sc.text(16, 66, "iPod 5.5G", FONT_TITLE, INK)
@@ -1425,14 +1425,14 @@ def save_png(im, name):
 
 
 # ---------------------------------------------------------------------------
-# Menu screens (main + Music submenu) — real rows from core/kernel/main.c
+# Menu screens (main + Music submenu) — real rows from core/app/lists.c
 # ---------------------------------------------------------------------------
 MAIN_MENU = [   # (label, active) — idle: "Now Playing" row is hidden
     ("Music", True), ("Playlists", True), ("Podcasts", False),
     ("Audiobooks", False), ("Settings", True),
 ]
 # Nine rows since Search landed, which is one more than the panel has room
-# for: main.c menu_render_list windows and scrollbars them like every other
+# for: app/lists.c menu_render_list windows and scrollbars them like every other
 # list now.
 MUSIC_MENU = [
     ("Playlists", True), ("Artists", True), ("Albums", True), ("Songs", True),
@@ -1712,7 +1712,7 @@ def screen_mainmenu():
 
 def screen_mainmenu_clock():
     """The main menu with Time in Title on: the clock lives in the HEADER's
-    right slot (main.c main_menu_render), not on the strip — the strip keeps
+    right slot (app/lists.c main_menu_render), not on the strip — the strip keeps
     the playing track. Nothing is playing here, so the strip carries the clock
     too, which is the other half of the same setting."""
     sc = Screen()
@@ -1745,7 +1745,7 @@ def screen_artists():
         if r >= len(ARTISTS):
             break
         name, cnt = ARTISTS[r]
-        # main.c artists_row_draw: list_row(..., right=0, chevron=1) — a
+        # app/lists.c artists_row_draw: list_row(..., right=0, chevron=1) — a
         # disclosure chevron, no per-row album count (the count is header-only).
         list_row(sc, LIST_Y0, r, name, chevron=True, selected=(r == ARTISTS_SEL))
     scrollbar(sc, LIST_Y0, 0, LIST_ROWS, len(ARTISTS))
@@ -1776,11 +1776,11 @@ def screen_songs():
 
 
 # An ARTIST's "All Songs" — the synthetic row at the top of a filtered album
-# list opens the whole discography in title order (main.c songview_build +
+# list opens the whole discography in title order (app/library.c songview_build + app/lists.c
 # songs_render). Two things differ from the plain Songs list above: the header
 # is the ARTIST, and each row's sub-line is the ALBUM. It used to repeat the
 # artist, which under an artist header spent the only sub-line on the one fact
-# the reader already had (main.c songs_row_draw).
+# the reader already had (app/lists.c songs_row_draw).
 ALLSONGS_ARTIST = "Post Malone"
 ALLSONGS = sorted([
     ("Chemical", "AUSTIN", "2:46"),
@@ -1813,7 +1813,7 @@ def screen_allsongs(sel=ALLSONGS_SEL):
     return sc.img
 
 
-# Music -> Playlists (main.c playlists_render / playlists_row_draw): a plain
+# Music -> Playlists (app/playlists.c playlists_render / playlists_row_draw): a plain
 # single-line list (list_row, ROW_H) of the .m3u8 files in Music/Playlists,
 # each row a name + disclosure chevron — no sub-line, no per-row right value
 # (the count lives in the header only, like Artists).
@@ -1847,7 +1847,7 @@ def screen_playlists(sel=PLAYLISTS_SEL):
     return sc.img
 
 
-# Playlists -> On-The-Go (main.c otg_render / otg_row_draw). Two action rows,
+# Playlists -> On-The-Go (app/otg.c otg_render / otg_row_draw). Two action rows,
 # then the tracks in the Songs shape. Clear and Save are greyed when the list
 # is empty, and Save is greyed when all five saved slots are in use. An entry
 # whose file is no longer on the disk is KEPT and says so — a later sync may
@@ -1914,13 +1914,13 @@ def screen_otg_added():
 
 
 # ---------------------------------------------------------------------------
-# The A-Z locator plate (core/kernel/main.c az_overlay_render) over a long
+# The A-Z locator plate (core/app/az.c az_overlay_render) over a long
 # list, and Music > Search (core/ui/search.c — the geometry constants below
 # are that file's, and its header says so).
 # ---------------------------------------------------------------------------
 def az_plate(sc, ch):
     """The 66x66 rounded plate with the letter, centred — up while the wheel
-    is stepping letters (main.c az_overlay_render)."""
+    is stepping letters (app/az.c az_overlay_render)."""
     PW = PH = 66
     px, py = (W - PW) // 2, (H - PH) // 2
     sc.fill_round_rect_aa(px - 1, py - 1, PW + 2, PH + 2, 13, BORDER)
@@ -2112,7 +2112,7 @@ ROOT_L = ["Playback", "Sound", "Theme", "Display", "Clicker", "Date & Time",
 ROOT_SEL = 1   # Sound
 
 def scroll_window(sel, total, visible):
-    """main.c scroll_window / screen_settings.c st_scroll_window: keep the
+    """ui/chrome.c ui_scroll_window / screen_settings.c st_scroll_window: keep the
     selection about 1/3 down the window, clamped to the ends."""
     if total <= visible:
         return 0
@@ -2121,7 +2121,7 @@ def scroll_window(sel, total, visible):
 def screen_settings(sel=ROOT_SEL):
     sc = Screen()
     header(sc, "Settings", back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
     right_vals = {2: "Linen", 4: "Tick"}   # Theme + Clicker carry their choice
     top = scroll_window(sel, len(ROOT_L), LIST_ROWS)
     for vr in range(LIST_ROWS):
@@ -2155,7 +2155,7 @@ DT_SEL = 0
 def screen_datetime(sel=DT_SEL):
     sc = Screen()
     header(sc, "Date & Time", back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
     for r, (label, val) in enumerate(DT_L):
         ry = LIST_Y0 + r * ROW_H
         is_sel = (r == sel)
@@ -2248,7 +2248,7 @@ def screen_diag():
     # The full build id rides in the header's right-hand slot — the one free
     # text row on a page whose bars, legend and LBA rows reach y=230.
     header(sc, "Boot Details", right=BUILD_ID, back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
 
     # headline: label left, total right, on one line
     sc.text(16, 60, "COLD BOOT", FONT_SMALL, MUTED)
@@ -2335,7 +2335,7 @@ def screen_sound(rows=None, sel_row=SOUND_SEL):
     rows = rows if rows is not None else SOUND_ROWS
     sc = Screen()
     header(sc, "Sound", back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
     for r, (label, val, num, den, locked) in enumerate(rows):
         ry = LIST_Y0 + r * ROW_H
         sel = (r == sel_row)
@@ -2372,7 +2372,7 @@ def screen_playback():
     sc = Screen()
     header(sc, "Playback", back=True)
     # The strip carries the SLEEP token while the timer runs — this is the one
-    # still that shows it (main.c status_strip_render / strip_sleep_token).
+    # still that shows it (app/statusbar.c status_strip_render / strip_sleep_token).
     status_strip(sc, "Something Real", sleep=PLAY_SLEEP)
     for r, (label, val) in enumerate(PLAY_L):
         ry = LIST_Y0 + r * ROW_H
@@ -2393,7 +2393,7 @@ CLICK_SEL = 2      # Click
 def screen_clicker():
     sc = Screen()
     header(sc, "Clicker", back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
     for r, label in enumerate(CLICK_L):
         ry = LIST_Y0 + r * ROW_H
         sel = (r == CLICK_SEL)
@@ -2418,7 +2418,7 @@ TH_CURRENT = 0                  # Linen active
 TH_SEL = 1                      # cursor on Onyx
 
 def screen_theme(sel=TH_SEL, current=TH_CURRENT):
-    """Since v0.3.0 the picker previews the theme under the cursor: main.c's
+    """Since v0.3.0 the picker previews the theme under the cursor: app/settings_glue.c's
     theme_preview_sync() repaints the whole page in the hovered theme (nothing
     is written until Select), so the still is drawn in THEMES[sel]'s palette,
     not the saved one. The swatches and the CURRENT mark are unchanged."""
@@ -2428,7 +2428,7 @@ def screen_theme(sel=TH_SEL, current=TH_CURRENT):
 def _theme_page(sel, current):
     sc = Screen()
     header(sc, "Theme", "%d themes" % len(THEMES), back=True)
-    status_strip(sc)                 # main.c settings_render_cur
+    status_strip(sc)                 # app/settings_glue.c settings_render_cur
     n = len(THEMES)
     top = scroll_window(sel, n, TH_ROWS)
     for vr in range(TH_ROWS):

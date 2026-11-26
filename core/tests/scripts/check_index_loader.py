@@ -5,10 +5,10 @@ validator.
 
 library/idx.c validates a CORELIB.IDX header (idx_header_parse) and checks the
 records' CRC-32 (crc32_update); tests/library/idx_test.c tests them directly.
-What a unit test cannot show is that kernel/main.c's library_load_index()
+What a unit test cannot show is that app/library.c's library_load_index()
 consults them: a validator the loader does not call is decoration, and that is
 exactly what a refactor could quietly leave behind while the unit test kept
-passing. So this script asserts, by reading main.c, that library_load_index():
+passing. So this script asserts, by reading app/library.c, that library_load_index():
 
   - calls idx_header_parse(), and hands it g_idx_size — the size check lives
     inside the parser, and compares against nothing if the directory entry's

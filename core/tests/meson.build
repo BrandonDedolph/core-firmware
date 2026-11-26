@@ -1331,7 +1331,7 @@ if target == 'sim'
   # batch-splitting, every accepted header shape (v1 without CRC, v2 with),
   # and each refusal: magic, unknown version, record size, a truncated or
   # padded file, a count that wraps the size arithmetic. hw-index-loader below
-  # checks that main.c's loader actually calls these.
+  # checks that app/library.c's loader actually calls these.
   idx_test = executable(
     'idx_test',
     sources: ['library/idx_test.c', '../library/idx.c'],

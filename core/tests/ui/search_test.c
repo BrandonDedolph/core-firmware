@@ -528,7 +528,7 @@ int main(void)
     /* The same seam for the row-select arbiter (app/actions.c rowsel_*): a
      * hold on a result adds it to On-The-Go, which only means anything for a
      * hit that names ONE TRACK. A song hit hands back its position in the
-     * SORTED song order, which is the one thing main.c has to turn into a
+     * SORTED song order, which is the one thing app/actions.c has to turn into a
      * record. The PICKER answers 0 rows on purpose — its SELECT types a
      * character and must act on the DOWN-EDGE like a key, never wait for a
      * release — so a press there never enters the arbitration at all. */

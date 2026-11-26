@@ -22,7 +22,12 @@
 #include "nav.h"
 #include "library.h"
 #include "statusbar.h"
+#include "../ui/wheel.h"
+#include "hw/ata.h"
+#include "paint.h"
+#include "main_internal.h"
 #include "albums.h"
+#include "coverpump.h"
 
 /* ---------------------------------------------------------------------------
  * File / album browser
@@ -694,4 +699,114 @@ void detail_load_meta(fat32_t *fs)
         }
         g_det_view[g_det_view_n++] = (int16_t)i;
     }
+}
+
+/* Rows past the window the cover pump also loads, once every visible row is
+ * resident: a screen ahead in the direction of travel and a screen behind.
+ * Without them every newly revealed row waited for its read and then
+ * re-presented its band when the cover landed: two paints per detent. */
+#define CHIP_AHEAD_ROWS        LIST_ROWS2
+
+/* Load album covers while on the album list. Idle → blast several per
+ * pass (covers fill near-instantly). While a song plays we still spread
+ * the I/O so it can't starve decode, but a folder.thm is only ~1KB and
+ * the anti-skip diskbuf is 8MB (~73s), so a small BATCH every ~60ms
+ * (~50 covers/s) is safe and stops the old one-line-at-a-time trickle.
+ *
+ * Every load is a SYNCHRONOUS disk read on this loop, so two things are
+ * held back while the wheel is actually turning:
+ *
+ *   - A PARKED platter is not woken for a cover. player.c parks the
+ *     drive between refill bursts (most of a track) and the idle timer
+ *     parks it after 20 s, so the first cover read after either is a
+ *     spin-up: the loop is frozen for the 1-3 s it takes (ATA_SPINUP_US
+ *     allows 4), the wheel's motion piles into the latch, and the list
+ *     jumps when it comes back. Covers wait for CHIP_SPINUP_QUIET_US of
+ *     wheel silence, so that stall lands on a still screen — a wait, not
+ *     a jerk — and a slow deliberate scroll never triggers it at all.
+ *   - With the platter up, a scroll in progress gets ONE read per pass.
+ *     Six reads is ~60 ms of seek+PIO stacked onto the pass that also
+ *     has to paint the new window; one bounds the hitch and the rest of
+ *     the window fills the moment the wheel settles.
+ *
+ * The pump is told the window (artcache_pump_for), so whichever reads
+ * do happen go to the rows on screen, top first — never to rows that
+ * already scrolled past. */
+/* Called by run_ui once per pass while the album list is up. Returns the
+ * visible rows (bit r: row r) whose chip appeared this pass; the caller
+ * marks them in g_lp.rows and sets its dirty flag. *last_chip is the last
+ * batch's timer stamp (run_ui's L->last_chip). */
+uint32_t albumlist_pump_chips(fat32_t *fs, int locked, uint32_t *last_chip)
+{
+    uint32_t rows = 0;
+    uint32_t nowc = mmio_read32(USEC_TIMER_ADDR);
+    int idle_now  = !player_active();
+    uint32_t since_wheel = nowc - wheel_last_us();
+    int held;
+    int budget = coverpump_budget(ata_is_parked(), locked, since_wheel, idle_now,
+                                  (uint32_t)(nowc - *last_chip), &held);
+    if (held) g_ui_art_held++;
+    if (budget > 0) {
+        /* A pumped slot is only worth a repaint if it is actually ON
+         * SCREEN: pumping a whole library's covers used to set dirty for
+         * every one of them, forcing ~21 consecutive full-frame repaints
+         * for rows nobody was looking at. Snapshot the visible rows'
+         * chips, pump, and repaint only the rows whose chip appeared —
+         * through g_lp.rows, so a landed cover costs one row band, not a
+         * cleared panel and a full-frame push (see list_repaint_partial). */
+        const uint16_t *before[LIST_ROWS2];
+        int want[LIST_ROWS2 + 2 * CHIP_AHEAD_ROWS];
+        int nlist = albumlist_count();
+        int vtop = ui_scroll_window(g_br_sel, nlist, LIST_ROWS2);
+        /* PEEK, not get: this loop is only observing. artcache_get
+         * claims a way and re-stamps the LRU, so using it here (12
+         * times a pass, always in row order) is what pinned the top
+         * row to the lowest stamp and starved it. The render's own
+         * artcache_get calls are what should drive residency. */
+        /* Map row -> global album index: the cache is keyed by album,
+         * and a row is not an album when an artist filter puts the
+         * synthetic "All Songs" row at 0. */
+        for (int r = 0; r < LIST_ROWS2; r++) {
+            want[r]   = albumlist_album_at(vtop + r);
+            before[r] = (want[r] >= 0) ? artcache_peek(want[r]) : 0;
+        }
+        /* Then the look-ahead, after the window so it never delays a
+         * visible chip: a screen in the direction the selection last
+         * moved, then a screen the other way. Only from a drive that
+         * is already turning: rows nobody is looking at are not worth
+         * a spin-up (or, idle, the battery a spin-up costs). */
+        int nwant = LIST_ROWS2;
+        if (g_br_sel != g_chip_last_sel) {
+            g_chip_dir = (g_br_sel > g_chip_last_sel) ? 1 : -1;
+            g_chip_last_sel = g_br_sel;
+        }
+        if (!ata_is_parked()) {
+            for (int pass = 0; pass < 2; pass++) {
+                int dir = pass == 0 ? g_chip_dir : -g_chip_dir;
+                for (int k = 0; k < CHIP_AHEAD_ROWS; k++) {
+                    int row = dir > 0 ? vtop + LIST_ROWS2 + k
+                                      : vtop - 1 - k;
+                    if (row < 0 || row >= nlist) break;
+                    want[nwant++] = albumlist_album_at(row);
+                }
+            }
+        }
+        uint32_t t_art = mmio_read32(USEC_TIMER_ADDR);
+        int loaded = 0;
+        while (loaded < budget && artcache_pump_for(fs, want, nwant)) {
+            loaded++;
+        }
+        t_art = mmio_read32(USEC_TIMER_ADDR) - t_art;
+        g_ui_art_reads += (uint32_t)loaded;
+        if (loaded) drivepower_note_ui_read(&g_drivepower, mmio_read32(USEC_TIMER_ADDR));
+        if (loaded && t_art > g_ui_art_max_us) g_ui_art_max_us = t_art;
+        for (int r = 0; r < LIST_ROWS2; r++) {
+            const uint16_t *now_px = (want[r] >= 0) ? artcache_peek(want[r]) : 0;
+            if (now_px != before[r]) {
+                rows |= 1u << r;
+            }
+        }
+        *last_chip = nowc;
+    }
+    return rows;
 }

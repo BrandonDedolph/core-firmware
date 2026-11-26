@@ -68,7 +68,7 @@
  *   - suspend_to_ram (kernel/main.c): ata_sleep() on the way down, with a
  *     STANDBY fallback, and the re-park after a commit woke the drive inside
  *     the suspend loop.
- *   - run_ui's cover pump (kernel/main.c) refuses to wake a parked platter
+ *   - run_ui's cover pump (app/albums.c, app/coverpump.c) refuses to wake a parked platter
  *     while locked, or within CHIP_SPINUP_QUIET_US of a wheel turn; its loads
  *     are what drivepower_note_ui_read is told about.
  *   - player_resume (player/player.c) pre-pays the spin-up (ata_wakeup)

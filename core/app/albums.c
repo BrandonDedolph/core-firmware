@@ -29,6 +29,7 @@
 #include "main_internal.h"
 #include "albums.h"
 #include "coverpump.h"
+#include "animpace.h"
 
 /* ---------------------------------------------------------------------------
  * File / album browser
@@ -249,6 +250,40 @@ void nowplaying_bars(int x, int y, uint16_t c, uint32_t t_us)
     for (int i = 0; i < 3; i++) {
         int h = nowplaying_bar_h(ms, ph[i]);
         console_fill_rect(x + i * 3, y + (NP_BARS_H - h), 2, h, c);
+    }
+}
+
+/* The album detail's half of run_ui's now-playing bar animation: redraw the
+ * playing row's bars box and partial-present just that, once BARS_STEP_US
+ * has passed since L->last_bars (app/animpace.h). run_ui calls it while the
+ * detail is up with a song playing (not paused) and the backlight on. */
+void detail_bars_tick(ui_loop_t *L)
+{
+    uint32_t nowb = mmio_read32(USEC_TIMER_ADDR);
+    if (bars_step_due(nowb, L->last_bars)) {
+        int sv = 0;
+        for (int i = 0; i < g_det_view_n; i++)
+            if (g_det_view[i] == (int16_t)g_det_sel) { sv = i; break; }
+        int top = ui_scroll_window(sv, g_det_view_n, DET_ROWS);
+        const char *pn = player_track_name();
+        for (int r = 0; r < DET_ROWS; r++) {
+            int vi = top + r;
+            if (vi >= g_det_view_n) break;
+            int16_t v = g_det_view[vi];
+            if (v < 0) continue;
+            const browse_entry_t *e = &g_browse[v];
+            if (e->is_dir || !name_eq_ci(e->name, pn)) continue;
+            int ry = DET_LIST_Y0 + r * ROW_H;
+            int is_sel = (v == g_det_sel);
+            console_fill_rect(15, ry + 6, NP_BARS_W, NP_BARS_H,
+                              is_sel ? LINEN_SEL_BG : LINEN_SURFACE);
+            nowplaying_bars(15, ry + 6, is_sel ? LINEN_SEL_FG : LINEN_INK,
+                            bars_clock());
+            lcd_present_rect(console_framebuffer(),
+                             15, ry + 6, NP_BARS_W + 1, NP_BARS_H);
+            break;
+        }
+        L->last_bars = nowb;
     }
 }
 

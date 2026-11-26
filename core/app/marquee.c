@@ -5,10 +5,12 @@
 
 #include "hw/pp5022.h"
 #include "hw/mmio.h"
+#include "hw/lcd.h"
 #include "hal.h"
 #include "../kernel/console.h"
 #include "../ui/chrome.h"
 #include "marquee.h"
+#include "animpace.h"
 
 marquee_t g_mq;
 
@@ -132,4 +134,25 @@ void mq_text(int x, int y, int w, const char *text,
     }
     draw_marquee(x, y, w, text, tw, font, ink, bg,
                  mmio_read32(USEC_TIMER_ADDR) - g_mq.t0, cy0, cy1);
+}
+
+/* run_ui's marquee step: redraw g_mq's band at the live phase offset and
+ * partial-present it, once MQ_STEP_US has passed since L->last_mq
+ * (app/animpace.h). run_ui calls it while g_mq.active and the backlight is
+ * on. */
+void marquee_tick(ui_loop_t *L)
+{
+    uint32_t nowm = mmio_read32(USEC_TIMER_ADDR);
+    /* Phase clock (g_mq.t0) + target-change detection live in mq_set, so
+     * this just paces the redraw at the shared live offset. */
+    if (marquee_step_due(nowm, L->last_mq)) {   /* ~30fps               */
+        draw_marquee(g_mq.x, g_mq.y, g_mq.w, g_mq.text, g_mq.tw, g_mq.font,
+                     g_mq.ink, g_mq.bg, nowm - g_mq.t0, g_mq.cy0, g_mq.cy1);
+        int ptop = g_mq.y - text_ascent(g_mq.font);
+        int pbot = g_mq.y + text_descent(g_mq.font);
+        if (ptop < 0) ptop = 0;
+        lcd_present_rect(console_framebuffer(),
+                         g_mq.x, ptop, g_mq.w, pbot - ptop);
+        L->last_mq = nowm;
+    }
 }

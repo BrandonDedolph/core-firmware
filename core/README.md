@@ -33,6 +33,7 @@ core/
 │   ├── playlists.c   Music > Playlists and one playlist's tracklist
 │   ├── albums.c      album list, album detail, folder browse data, cover pump
 │   ├── coverpump.c   how many covers the album list may read per pass
+│   ├── animpace.c    when the now-playing bars and the marquee may step
 │   ├── nowplaying.c  Now Playing, transport band, volume plate, seek state
 │   ├── otg.c         On-The-Go live list, its screen, Save/Delete
 │   ├── settings_glue.c Settings state, apply, per-page render, Theme preview

@@ -13,6 +13,7 @@
 
 #include "../player/player.h"
 #include "../ui/text.h"
+#include "ui_loop.h"
 
 /* Marquee: a single "currently-scrolling" text target (the selected overflowing
  * row, or the now-playing title). Render fns set it while drawing; the main loop
@@ -45,5 +46,6 @@ void draw_marquee(int x, int y, int w, const char *s, int tw,
 void mq_text(int x, int y, int w, const char *text,
              const text_font_t *font, uint16_t ink, uint16_t bg,
              int cy0, int cy1);
+void marquee_tick(ui_loop_t *L);
 
 #endif /* CORE_APP_MARQUEE_H */

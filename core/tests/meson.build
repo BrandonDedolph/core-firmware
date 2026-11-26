@@ -1442,6 +1442,18 @@ if target == 'sim'
   )
   test('coverpump', coverpump_test, suite: 'unit')
 
+  # animpace: when run_ui's now-playing bars (110 ms) and marquee (33 ms) may
+  # step (core/app/animpace.c), at the boundary microsecond and across the
+  # 32-bit timer wrap. Pure, so the host runs the SAME source the ARM build
+  # links.
+  animpace_test = executable(
+    'animpace_test',
+    sources: ['app/animpace_test.c', '../app/animpace.c'],
+    include_directories: include_directories('../app', '.'),
+    override_options: test_opts,
+  )
+  test('animpace', animpace_test, suite: 'unit')
+
   # timesync: what the firmware does at boot with the clock stamp the host
   # leaves in CORECFG.DAT (core/kernel/timesync.c), and the software clock that
   # carries the time between the rare RTC reads (core/kernel/wallclock.c) —

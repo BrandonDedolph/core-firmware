@@ -354,13 +354,16 @@ int list_repaint_partial(void)
 
         /* Header value: clear only as wide as the old/new text. If the title
          * reaches into that box, the clear would eat it — fall back to a full
-         * paint. */
+         * paint. The clear runs on to the panel edge, not just to the
+         * value's advance at LCD_WIDTH - 12: a glyph's anti-aliased ink
+         * overhangs that by a pixel (the "2" of "n / 2"), and a column left
+         * uncleared was blended again by every partial repaint. */
         int rw = v.right[0] ? text_width(v.right, FONT_SMALL) : 0;
         int cw = ((rw > g_lp.right_w) ? rw : g_lp.right_w) + 4;
         if (cw > 4) {
             int cx = LCD_WIDTH - 12 - cw;
             if (12 + 20 + text_width(v.title, FONT_HEADER) > cx) return 0;
-            console_fill_rect(cx, HDR_BASE - 12, cw, 16, LINEN_SURFACE);
+            console_fill_rect(cx, HDR_BASE - 12, LCD_WIDTH - cx, 16, LINEN_SURFACE);
             if (rw) {
                 ui_text(LCD_WIDTH - 12 - rw, HDR_BASE - 1, v.right, FONT_SMALL,
                         LINEN_MUTED2);

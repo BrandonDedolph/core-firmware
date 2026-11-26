@@ -164,34 +164,12 @@ static void shot(const char *name)
     (void)hl_write_bmp(path);
 }
 
-/* KNOWN BUG (app/paint.c list_repaint_partial): the header value's clear
- * box ends at x = LCD_WIDTH - 12, where the value's right edge is — but a
- * glyph's anti-aliased ink can overhang its advance by a pixel ("n / 2": the
- * 2's foot, at (308, 28)). That column is never cleared, so each partial
- * repaint blends the value's edge onto the last one's and the pixel darkens
- * frame by frame, where the full render blends it once onto the surface.
- * Differences in that 3 x 16 box are counted apart (g_overhang) and printed
- * as a note, not failed: CI runs CORE_TEST_STRICT_XFAIL, and the fix is a
- * firmware change this test does not make. Every other pixel must match
- * exactly. When the clear box is fixed, delete in_overhang() and the note. */
-#define OVH_X0 (HL_W - 12)
-#define OVH_X1 (HL_W - 9)            /* exclusive */
-#define OVH_Y0 (30 - 12)             /* HDR_BASE - 12: the clear box's rows */
-#define OVH_Y1 (30 + 4)
-static int g_overhang;
-
-static int in_overhang(int x, int y)
-{
-    return x >= OVH_X0 && x < OVH_X1 && y >= OVH_Y0 && y < OVH_Y1;
-}
-
 /* The frame judged: the panel, or (g_judge_lit) what the backlight last came
  * on over — a wake's frame, which the main loop paints over at once. */
 static int g_judge_lit;
 
 /* Pixels of that frame in rows [y0, HL_H) that differ from the full render
- * of the current state (outside the known overhang column). The first
- * difference is described into `why`. */
+ * of the current state. The first difference is described into `why`. */
 static int g_compares;          /* checkpoints judged, for the summary line */
 
 static int diff_from_full(int y0, char *why, size_t whylen)
@@ -199,11 +177,10 @@ static int diff_from_full(int y0, char *why, size_t whylen)
     g_compares++;
     full_render();
     const uint16_t *p = g_judge_lit ? hl_lit_frame(NULL) : hl_panel();
-    int n = 0, fx = -1, fy = -1, x1 = 0, y1 = 0, x0 = HL_W, yy0 = HL_H, ovh = 0;
+    int n = 0, fx = -1, fy = -1, x1 = 0, y1 = 0, x0 = HL_W, yy0 = HL_H;
     for (int y = y0; y < HL_H; y++) {
         for (int x = 0; x < HL_W; x++) {
             if (p[y * HL_W + x] == g_full[y * HL_W + x]) continue;
-            if (in_overhang(x, y)) { ovh++; continue; }
             if (!n) { fx = x; fy = y; }
             n++;
             if (x < x0) x0 = x;
@@ -212,7 +189,6 @@ static int diff_from_full(int y0, char *why, size_t whylen)
             if (y > y1) y1 = y;
         }
     }
-    if (ovh) g_overhang++;
     if (n && why) {
         snprintf(why, whylen, "%d px differ, first (%d,%d) panel %04x full %04x, "
                  "box x %d..%d y %d..%d", n, fx, fy, p[fy * HL_W + fx],
@@ -388,13 +364,6 @@ static int load_ranges(const char *path)
 
 static _Noreturn void session_end(void)
 {
-    if (g_overhang) {
-        printf("%s: NOTE known bug: %d frame(s) differed only in the header "
-               "value's overhang column (app/paint.c list_repaint_partial "
-               "clears the value up to LCD_WIDTH - 12; the glyph's AA "
-               "overhang past it is blended again on every partial repaint)\n",
-               g_case, g_overhang);
-    }
     hl_stats_t s = hl_stats();
     CHECK("disk: every write inside a pre-allocated file", s.bad_writes == 0);
     CHECK("never panicked", hl_parked() != HL_PARK_PANIC);

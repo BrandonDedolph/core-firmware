@@ -14,7 +14,7 @@
  *   3. A present is due once the gap has passed and not a microsecond
  *      before; one just made (now == last) is not due again unless the gap
  *      is 0.
- *   4. 3 across the 32-bit microsecond wrap (~71.6 min), and ages from 2^31
+ *   4. 3 holds across the 32-bit microsecond wrap (~71.6 min), and ages from 2^31
  *      up to 0xFFFFFFFF are long ago (an unsigned comparison): due.
  */
 

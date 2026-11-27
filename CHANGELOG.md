@@ -5,6 +5,24 @@ the boot screen and Settings → About show the one the device runs.
 The desktop app and the `core` CLI have their own repository, releases and changelog:
 [core-desktop-app/CHANGELOG.md](https://github.com/BrandonDedolph/core-desktop-app/blob/main/CHANGELOG.md).
 
+## v0.4.1 — 2026-11-26
+
+Since v0.4.0. Two small fixes you can see, and a large rebuild of the firmware's insides that you
+should not be able to see at all.
+
+- **Pulling the headphones lights the screen.** A pull already paused the song. If the screen had
+  gone dark during a long listen, it stayed dark, so the first press of Play after plugging back in
+  only woke the screen and it took a second press to resume. The pull now lights the screen, which
+  shows the pause, and one press of Play resumes.
+- **No more smudge at the end of a list header's count.** Moving the selection redraws only the
+  rows that changed, and that partial redraw left the header's last pixel column (the edge of the
+  "2" in "3 / 12") uncleared, so it darkened a little with every move. It is now cleared to the
+  panel edge, the same as a full redraw.
+- **Under the hood: the main loop is split into modules.** The 11,000-line file that ran the
+  interface, the player glue, power and sleep is now about 1,700 lines plus thirty smaller files,
+  each with its own tests. Every step was checked to produce the same screens, presses and timing
+  as before, and the build was tested on an iPod.
+
 ## v0.4.0 — 2026-11-25
 
 Since v0.3.0. Menus stop waiting on the disk: no screen looks or behaves differently, but opening

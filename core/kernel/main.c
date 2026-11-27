@@ -808,6 +808,16 @@ _Noreturn static void run_ui(fat32_t *fs)
                                    pump_t0)) {
             case JACKWATCH_PAUSE:
                 player_pause();
+                /* The pull is an input, like the Hold edge: it lights the
+                 * screen to show the pause. Left dark (a long listen with no
+                 * input lets it go out), the first PLAY after plugging back
+                 * in was only the wake press, and resuming took two. */
+                L->last_input = mmio_read32(USEC_TIMER_ADDR);
+                if (L->bl_state != BL_FULL) {
+                    if (!L->panel_slept) backlight_set(g_settings.backlight_bright);
+                    L->bl_state = BL_FULL;
+                    wheel_accel_reset();
+                }
                 L->dirty = 1;              /* the band must read Paused, like a PLAY tap */
                 uart_puts("core: jack out, pause\n");
                 break;

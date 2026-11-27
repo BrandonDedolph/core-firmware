@@ -300,6 +300,27 @@ static void wake(void)
     CHECK("wake: a wheel turn relights it in full", lit_full());
 }
 
+/* ---- jack: a pull under a dark screen ---------------------------------------
+ * Listening for a while with no input lets the screen go out. A headphone
+ * pull then pauses the track; if the screen stayed dark, the first PLAY
+ * after plugging back in was only the wake press (swallowed) and it took a
+ * second to resume. The pull is an input: it lights the screen, which shows
+ * the pause, and one PLAY resumes. */
+static void jack(void)
+{
+    CHECK("jack: playing", playing());
+    CHECK("jack: the screen goes out while it plays",
+          hl_run_until(pred_dark, NULL, 500, 45000));
+    hl_set_headphones(0);
+    hl_run_ms(300);
+    CHECK("jack: a pull pauses", !playing());
+    CHECK("jack: ...and lights the screen in full", lit_full());
+    hl_set_headphones(1);
+    hl_run_ms(300);
+    tap(HL_BTN_PLAY, 800);
+    CHECK("jack: plugged back in, ONE PLAY resumes", playing());
+}
+
 /* ---- modal: the charging screen ------------------------------------------- */
 
 static void modal(void)
@@ -358,6 +379,7 @@ int main(int argc, char **argv)
     hold_switch();
     otg_banner();
     wake();
+    jack();
     modal();
     track_end();
 

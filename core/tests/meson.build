@@ -1467,6 +1467,19 @@ if target == 'sim'
   )
   test('presentpace', presentpace_test, suite: 'unit')
 
+  # gesturepace: run_ui's Now Playing SELECT (tap / 450 ms hold) and the
+  # wheel scrubber's commit (400 ms quiet) and lapse (4 s)
+  # (core/app/gesturepace.c), at the boundary microsecond and across the
+  # 32-bit timer wrap. Pure, so the host runs the SAME source the ARM build
+  # links.
+  gesturepace_test = executable(
+    'gesturepace_test',
+    sources: ['app/gesturepace_test.c', '../app/gesturepace.c'],
+    include_directories: include_directories('../app', '.'),
+    override_options: test_opts,
+  )
+  test('gesturepace', gesturepace_test, suite: 'unit')
+
   # timesync: what the firmware does at boot with the clock stamp the host
   # leaves in CORECFG.DAT (core/kernel/timesync.c), and the software clock that
   # carries the time between the rare RTC reads (core/kernel/wallclock.c) —
@@ -2022,6 +2035,22 @@ if target == 'sim'
       override_options: test_opts,
     )
     test('np-settings-input', np_settings_input_test,
+         args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
+         depends: [headless_disk],
+         timeout: 180,
+         suite: 'unit')
+    # gestures: run_ui's button gestures (app/gestures.c) judged by the state
+    # they leave: RIGHT/LEFT taps and holds, MENU's hold, Now Playing's
+    # SELECT and the scrubber, the Hold switch and a press under it, the
+    # first touch ending the On-The-Go banner, the wake press, the charging
+    # modal's dismissal (headless/gestures_test.c).
+    gestures_test = executable(
+      'gestures_test',
+      sources: ['headless/gestures_test.c'],
+      dependencies: [headless_fw_dep],
+      override_options: test_opts,
+    )
+    test('gestures', gestures_test,
          args: [headless_disk[0].full_path(), headless_disk[1].full_path()],
          depends: [headless_disk],
          timeout: 180,

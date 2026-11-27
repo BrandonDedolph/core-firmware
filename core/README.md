@@ -45,6 +45,8 @@ core/
 │   ├── presentpace.c how far apart UI presents go, and whether one is due
 │   ├── az.c          A-Z locator glue, wheel clock, piezo click
 │   ├── actions.c     what PLAY and SELECT (tap / hold) do on a list row
+│   ├── gestures.c    run_ui's button gestures: seek/MENU holds, Hold edge, wake
+│   ├── gesturepace.c Now Playing SELECT hold and scrubber commit/lapse timing
 │   ├── ui_loop.h     ui_loop_t, the state run_ui's loop carries between passes
 │   └── main_internal.h transitional decls for symbols still in kernel/main.c
 ├── hal/

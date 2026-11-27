@@ -76,7 +76,7 @@ static int      g_have_us;      /* g_last_us seeded yet? */
  * often the ISR's per-interrupt work runs — clickwheel_service samples the
  * wheel once per interrupt, so at 10 Hz a press shorter than ~100 ms can
  * fall between samples. That is the trade the suspend loop makes on
- * purpose (kernel/main.c suspend_to_ram): it wants ten wakeups a second
+ * purpose (app/power.c suspend_to_ram): it wants ten wakeups a second
  * instead of a hundred, and "hold any button" is the wake gesture.
  */
 void timer_set_rate(uint32_t hz)

@@ -16,7 +16,7 @@
  *     is NOT a level: it never primes and never pauses;
  *   - re-inserting the plug is a notification (IN), never an instruction;
  *   - a pull is PAUSE only while something is playing, and OUT otherwise —
- *     the distinction kernel/main.c's suspend loop turns into "do not resume
+ *     the distinction app/power.c's suspend loop turns into "do not resume
  *     at wake".
  *
  * MUTATION CHECK: each of these breaks the suite —
@@ -157,7 +157,7 @@ int main(void)
 
     /* --- the suspend loop, which feeds this module the same way ----------
      *
-     * kernel/main.c keeps feeding the watcher through a suspend, with
+     * app/power.c keeps feeding the watcher through a suspend, with
      * `playing` = the transport state the sleep interrupted, and answers a
      * PAUSE by declining to resume at wake. These two sequences are the
      * reason that works: a pull is seen WHILE it happens, so a plug that

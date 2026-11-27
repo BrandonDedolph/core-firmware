@@ -209,7 +209,7 @@ uint32_t cpu_frequency(void)
  * point (CPUFREQ_SLEEP, CLOCK_SOURCE = 0x20000000) is the operating point
  * for "suspend both cores via PROC_SLEEP and let the PMU finish it" — a core
  * that is not executing. Ours keeps executing: the suspend loop in
- * kernel/main.c services the wheel from the tick ISR, samples the battery
+ * app/power.c services the wheel from the tick ISR, samples the battery
  * over I2C, and prints a UART line every 5 s, and at 32 768 Hz the ISR
  * entry alone would be a good fraction of a 10 Hz tick period. The doc also
  * says nothing about which peripheral clocks (I2C, SER0, OPTO) follow the

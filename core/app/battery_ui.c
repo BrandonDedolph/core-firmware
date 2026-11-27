@@ -29,6 +29,7 @@
 #include "main_internal.h"
 #include "paint.h"
 #include "resume.h"
+#include "power.h"
 #include "battery_ui.h"
 
 /* Cached battery/power readout. The gauge read is an I2C transaction (slow, and

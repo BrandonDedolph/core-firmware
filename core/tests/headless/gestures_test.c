@@ -23,7 +23,11 @@
  *              nothing when it is held on or let go
  *   hold       the Hold switch: the lock and the "Locked" banner; the wheel
  *              and a press under Hold do nothing; switched off in the dark,
- *              the panel lights and STAYS lit (the edge is an input)
+ *              the panel lights and STAYS lit. (The headless HAL drops wheel
+ *              and button input under Hold before it reaches the firmware,
+ *              so gesture_input_gate's swallow-under-Hold branch is NOT
+ *              reached here; the two "under Hold" checks pin the end
+ *              result only.)
  *   banners    a wheel turn ends the On-The-Go banner early (and is applied)
  *   wake       a press clicks; a wheel turn on a dimmed screen relights it at
  *              full brightness
@@ -202,7 +206,7 @@ static void select_np(void)
     hl_run_ms(300);
     uint32_t tgt = g_scrub_target_s;
     CHECK("select: the wheel aimed ahead", tgt >= el0 + 10);
-    CHECK("select: ...and 400 ms of quiet sought it, once",
+    CHECK("select: ...and 400 ms of quiet sought it",
           !g_scrub_dirty && elapsed() + 1 >= tgt && elapsed() <= tgt + 2);
     CHECK("select: still scrubbing", np_scrubbing());
     hl_run_ms(4500);
@@ -242,7 +246,9 @@ static void hold_switch(void)
     hl_run_ms(1200);
     CHECK("hold: the banner ran out", !g_lock_flash.armed);
 
-    /* Input under Hold: drained, and applied to nothing. */
+    /* Input under Hold, applied to nothing. The headless HAL already gates
+     * it (hal/headless/headless_hw.c), so this pins the end result, not
+     * gesture_input_gate's own swallow branch. */
     hl_scroll(2);
     hl_run_ms(800);
     CHECK("hold: the wheel under Hold moved nothing",
@@ -257,7 +263,7 @@ static void hold_switch(void)
     hl_run_ms(300);
     CHECK("hold: switched off, the panel lights", !g_locked && lit_full());
     hl_run_ms(2500);
-    CHECK("hold: ...and stays lit (the edge is an input)", lit_full());
+    CHECK("hold: ...and stays lit", lit_full());
 }
 
 /* ---- banners: the first touch ends the On-The-Go banner --------------------- */

@@ -132,8 +132,6 @@ const char core_version_marker[] __attribute__((used, section(".rodata.core_vers
  * Design-matched list chrome (menus.jsx): status strip, header, rows, scrollbar
  * ------------------------------------------------------------------------- */
 
-#define LOCK_FLASH_US 1000000u
-
 /* Set by enter_standby() when the PMU refused the power-down and the device
  * was brought back instead: run_ui reads and clears it to resync its
  * backlight/idle state with the screen enter_standby already relit. */
@@ -2315,218 +2313,17 @@ _Noreturn static void run_ui(fat32_t *fs)
          * every scroll and press behind it. The paint is always full; the PRESENT is the band
          * alone unless something else is pending — a Hold edge marks the strip
          * dirty for the padlock, and a wake from dark has a stale panel — in
-         * which case the whole frame goes, as it always did. */
-        uint32_t now_us = mmio_read32(USEC_TIMER_ADDR);
-        /* Two banners can want the band at once (a Hold edge during an
-         * On-The-Go confirmation). The lock one wins — it reports a state
-         * change the user must see — and the other expires underneath;
-         * nothing is applied unseen either way, because the input drain
-         * disarms the On-The-Go banner on the first press. Both windows are
-         * polled exactly once: ui_window_up DISARMS an expired one.
-         *
-         * A dark modal hosts neither: a window armed on the screen under it
-         * (a Hold flip, then the cable, inside one second) is dropped here
-         * rather than painted as a linen strip over the field — and so
-         * cannot be replayed on the screen the modal pops back to. */
-        if (!banner_hosted()) {
-            g_lock_flash.armed = 0;
-            g_otg_flash.armed  = 0;
-        }
-        int lock_up = ui_window_up(&g_lock_flash, LOCK_FLASH_US, now_us);
-        int otg_up  = ui_window_up(&g_otg_flash,  OTG_FLASH_US,  now_us);
-        if (lock_up || otg_up) {
-            if (!L->banner_up && L->bl_state != BL_OFF) {
-                paint_current_screen();
-                if (lock_up) lock_banner_render(g_locked);
-                else         otg_banner_render();
-                if (L->dirty) {
-                    lcd_present_fb(console_framebuffer());
-                    L->dirty = 0;
-                } else {
-                    lcd_present_rect(console_framebuffer(), 0, 0, LCD_WIDTH,
-                                     top_banner_h());
-                }
-            }
-            L->banner_up = 1;
-            /* The banner skips the render below — and with it the loop's two
-             * halts, so it halts here itself. Idle (which includes paused: no
-             * DMA to pace) parks the core for a tick, as the main 10 ms halt
-             * does. PLAYING takes the same 200 us halt as the bottom of the
-             * loop, under the same "the pump did nothing" gate: without it a
-             * Hold flip mid-track free-spun the core at 80 MHz for the whole
-             * second the banner is up, re-polling the wheel through masked IRQs
-             * — the exact spin the bottom halt exists to prevent. */
-            if (!player_playing()) {
-                cpu_wait_ms(10);
-            } else if (pump_us < 200u) {
-                cpu_wait_us(200);
-            }
+         * which case the whole frame goes, as it always did. The block is
+         * top_banner_tick (app/statusbar.c); `pump_us` is this pass's, for
+         * the banner's own halt. */
+        if (top_banner_tick(L, pump_us)) {
             continue;                     /* skip the normal render this pass      */
         }
-        if (L->banner_up) {              /* banner just faded: repaint underneath */
-            L->banner_up = 0;
-            L->dirty = 1;
-        }
 
-        /* A-Z locator: while the wheel is being spun fast, show the selected
-         * row's initial so you can aim at a letter instead of reading rows that
-         * are flying past. Its appearance/disappearance is itself a repaint. */
-        char az_letter = wheel_accelerating() ? list_sel_initial() : 0;
-        /* Suppressed with the backlight: a toast nobody can see is only a
-         * repaint. It reappears on the next sample if the cell is still low. */
-        int  toast     = (L->bl_state != BL_OFF) &&
-                         battwarn_toast_up(mmio_read32(USEC_TIMER_ADDR));
-
-        /* Render the current screen (skipped entirely when the screen is off —
-         * saves the IRQ-masked present while music plays dark). Now Playing
-         * repaints ~1/s for the clock; menus/browser only on change. */
-        if (L->bl_state == BL_OFF) {
-            /* nothing to draw */
-        } else if (scr_cur() == SCR_NOWPLAYING) {
-            uint32_t nowv    = mmio_read32(USEC_TIMER_ADDR);
-            uint32_t elapsed = player_elapsed_s();
-            int vol_active = ui_window_up(&g_vol_show, VOL_SHOW_US, nowv);
-            /* The volume plate needs a push when it appears, when the wheel
-             * moves it while it is up, and when it fades (to put back what it
-             * covered). None of those is a full-frame event. */
-            int vol_edge   = (vol_active != L->np_vol_prev) ||
-                             (vol_active && L->np_vol_dirty);
-
-            /* A FULL repaint is needed only on a real change (dirty — which the
-             * loop's track-change edge sets for us) or a toast edge. Everything
-             * else is a partial: the clock tick redraws ONLY the transport strip
-             * (elapsed/remaining/progress) and presents only its band, and a
-             * volume edge presents only the plate rect, instead of re-rendering
-             * the whole screen — art, metadata and two anti-aliased bars — and
-             * pushing all 38400 words for a 3200-word plate. */
-            int want_full = L->dirty || toast != L->toast_prev;
-            if (want_full || vol_edge) {
-                if (L->np_first || !player_active() ||
-                    (uint32_t)(nowv - L->last_present) >= present_gap_us()) {
-                    g_mq.active = 0;
-                    console_damage_reset();
-                    nowplaying_render(player_track_name(), elapsed,
-                                      player_total_s(), player_buf_pct());
-                    if (toast) {
-                        screen_battery_toast_render();
-                        battwarn_toast_shown(nowv);   /* its 4 s start here */
-                        g_mq.active = 0;      /* see the list branch below */
-                    }
-                    L->toast_prev = toast;
-                    if (!want_full) {
-                        /* Volume edge only. The screen was re-rendered in full
-                         * (the plate's anti-aliased corners blend into whatever
-                         * is under them, so a fresh background is the only way
-                         * to draw them — or to erase them — without drift), but
-                         * everything outside the plate came out as the pixels
-                         * the panel already shows. Push just the plate rect;
-                         * console.c's damage rect is a union, so replace it.
-                         * np_last is left alone: if the second rolled over in
-                         * this pass, the next one presents the transport band. */
-                        console_damage_reset();
-                        console_damage_add(VOL_PLATE_X, VOL_PLATE_Y,
-                                           VOL_PLATE_W, VOL_PLATE_H);
-                    }
-                    ui_present_damage();
-                    L->np_first = 0;
-                    if (want_full) {
-                        L->np_last = elapsed;
-                        L->dirty   = 0;
-                    }
-                    L->np_vol_prev  = vol_active;
-                    L->np_vol_dirty = 0;
-                    L->last_present = nowv;
-                    player_note_presented();
-                    g_lp.valid = 0;             /* not a list screen */
-                }
-                /* else: throttled — keep dirty / the volume edge pending, present
-                 * in the next window (np_vol_prev is what makes a fade retry). */
-            } else if (elapsed != L->np_last) {
-                /* Transport only: leave the marquee registered (its own tick
-                 * keeps the title scrolling) and don't touch the art/metadata.
-                 * The clock lands here once a second; the scrubber lands here
-                 * on every detent (it forces np_last), so THAT case is paced by
-                 * the last present's cost like every other wheel-driven paint —
-                 * np_last stays forced until the band actually goes out. */
-                /* Paced against the last present of ANY kind, scrubbing or
-                 * not: the clock's band a few ms behind a full frame found the
-                 * BCM still retiring it (see ui_present_damage). np_last stays
-                 * unchanged when throttled, so the band goes out next pass. */
-                if ((uint32_t)(nowv - L->last_present) >= present_gap_us()) {
-                    console_damage_reset();
-                    nowplaying_transport_render(elapsed, player_total_s());
-                    ui_present_damage();
-                    L->np_last      = elapsed;
-                    L->last_present = nowv;
-                    player_note_presented();
-                }
-            }
-        } else if (L->dirty || az_letter != L->az_prev || toast != L->toast_prev) {
-            /* Repaints are paced by what the LAST present actually cost (see
-             * present_gap_us), not by a fixed 150 ms: a selection move now
-             * repaints two rows and pushes only those, so it can run several
-             * times faster without keeping IRQs masked long enough to starve the
-             * audio DMA ISR. Idle → present immediately. `dirty` stays set until
-             * we present, so the latest scroll position is what lands. */
-            uint32_t now = mmio_read32(USEC_TIMER_ADDR);
-            if (!player_active() ||
-                (uint32_t)(now - L->last_present) >= present_gap_us()) {
-                g_mq.active = 0;
-                console_damage_reset();
-                /* Selection moved and nothing else did? Repaint the two rows
-                 * (plus the header count + scrollbar) instead of clearing and
-                 * redrawing the panel. Anything else falls through to the full
-                 * render, which console_clear marks as whole-screen damage. The
-                 * A-Z plate covers arbitrary rows, so while it is up (or in the
-                 * frame that clears it) the full render is the honest option. */
-                int partial = !az_letter && !L->az_prev && !toast && !L->toast_prev &&
-                              list_repaint_partial();
-                if (!partial) {
-                    switch (scr_cur()) {
-                    case SCR_MENU:    main_menu_render();            break;
-                    case SCR_MUSIC:   music_menu_render();           break;
-                    case SCR_ARTISTS: artists_render(g_artist_sel);  break;
-                    case SCR_SONGS:   songs_render(g_song_sel);      break;
-                    case SCR_GENRES:  genres_render(g_genre_sel);    break;
-                    case SCR_PLAYLISTS: playlists_render(g_pl_sel);  break;
-                    case SCR_PLAYLIST:  playlist_render(g_plt_sel);  break;
-                    case SCR_OTG:       otg_render(g_otg_sel);       break;
-                    case SCR_SEARCH:    search_render_cur();         break;
-                    case SCR_BROWSER: browse_render(g_dir_depth ? g_det_sel : g_br_sel);   break;
-                    case SCR_QUEUE:   queue_render(g_queue_sel);     break;
-                    case SCR_SETTINGS: settings_render_cur();        break;
-                    case SCR_BATTERY:
-                        battery_modal_paint();
-                        break;
-                    case SCR_CHARGING:
-                        charging_screen_paint();
-                        break;
-                    default: break;                 /* NOWPLAYING handled above */
-                    }
-                }
-                if (az_letter) az_overlay_render(az_letter);
-                if (toast) {
-                    screen_battery_toast_render();
-                    battwarn_toast_shown(now);        /* its 4 s start here */
-                }
-                /* The plate owns the screen. The repaint above re-registered
-                 * the selected row with the marquee, whose tick would then
-                 * punch a hole straight through whatever is covering it. */
-                if (az_letter || toast) g_mq.active = 0;
-                /* Render and present timed apart: `now` was read before the
-                 * paint, so the delta here is the CPU the renderer took. */
-                g_ui_render_us = mmio_read32(USEC_TIMER_ADDR) - now;
-                if (g_ui_render_us > g_ui_render_max_us) g_ui_render_max_us = g_ui_render_us;
-                ui_present_damage();
-                if (g_present_cost_us > g_ui_present_max_us) g_ui_present_max_us = g_present_cost_us;
-                if (partial) g_ui_partial++; else g_ui_full++;
-                list_paint_note();
-                L->az_prev = az_letter;
-                L->toast_prev = toast;
-                L->dirty = 0;
-                L->last_present = now;
-            }
-        }
+        /* Render the current screen, or the parts of it that changed, and
+         * present them, paced by the last present's cost: render_tick
+         * (app/paint.c). */
+        render_tick(L);
 
         /* Animate the now-playing 3-bar indicator in the album detail: redraw
          * only its ~10px box and partial-present just that, ~9fps. A tiny pixel

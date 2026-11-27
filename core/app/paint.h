@@ -2,7 +2,8 @@
 /*
  * core/app/paint.h — presenting and painting: the damage-only present and its
  * pacing, the partial list repaint, the screen paint dispatch, and the
- * "core: ui" stats line. Moved verbatim out of kernel/main.c.
+ * "core: ui" stats line. Moved verbatim out of kernel/main.c. Since phase 3
+ * also run_ui's render pass, render_tick.
  *
  * The counters, g_present_cost_us and g_lp are plain extern data for now
  * (phase 2 of the split): run_ui's paint path updates the counters,
@@ -13,6 +14,8 @@
 #define CORE_APP_PAINT_H
 
 #include <stdint.h>
+
+#include "ui_loop.h"
 
 /* A list screen described generically, so one routine can repaint the rows that
  * changed without knowing which screen it is. `row` draws list row r showing
@@ -52,5 +55,6 @@ int list_view_current(list_view_t *v);
 void list_paint_note(void);
 int list_repaint_partial(void);
 void paint_current_screen(void);
+void render_tick(ui_loop_t *L);
 
 #endif /* CORE_APP_PAINT_H */

@@ -5,9 +5,13 @@
 
 #include <stdint.h>
 
+#include "hw/pp5022.h"
+#include "hw/mmio.h"
+#include "hw/lcd.h"
 #include "hal.h"
 #include "../kernel/console.h"
 #include "../kernel/datetime.h"
+#include "../kernel/backlightpolicy.h"
 #include "../player/player.h"
 #include "../library/names.h"
 #include "../ui/text.h"
@@ -20,6 +24,8 @@
 #include "nav.h"
 #include "battery_ui.h"
 #include "otg.h"
+#include "util.h"
+#include "paint.h"
 #include "statusbar.h"
 
 /* Small padlock glyph (system-screens.jsx corner lock): body + shackle. */
@@ -388,4 +394,68 @@ void otg_banner_render(void)
     static const uint16_t none[1] = { 0 };
     top_banner_render(0, none, 1, 0, g_otg_flash_label,
                       g_otg_flash_token[0] ? g_otg_flash_token : 0);
+}
+
+/* run_ui's top-banner pass: the Hold and On-The-Go banners (see the block
+ * comment at the call in run_ui). While either window is up it paints the
+ * current screen with the banner over it once, keeps L->banner_up set, takes
+ * the loop's halt itself (`pump_us` is the pass's pump time, measured at the
+ * top of run_ui's loop) and returns 1: run_ui then skips the normal render
+ * for this pass. The pass after the last one up clears L->banner_up and
+ * marks the screen dirty so it repaints underneath; that and every other
+ * pass return 0. */
+int top_banner_tick(ui_loop_t *L, uint32_t pump_us)
+{
+    uint32_t now_us = mmio_read32(USEC_TIMER_ADDR);
+    /* Two banners can want the band at once (a Hold edge during an
+     * On-The-Go confirmation). The lock one wins — it reports a state
+     * change the user must see — and the other expires underneath;
+     * nothing is applied unseen either way, because the input drain
+     * disarms the On-The-Go banner on the first press. Both windows are
+     * polled exactly once: ui_window_up DISARMS an expired one.
+     *
+     * A dark modal hosts neither: a window armed on the screen under it
+     * (a Hold flip, then the cable, inside one second) is dropped here
+     * rather than painted as a linen strip over the field — and so
+     * cannot be replayed on the screen the modal pops back to. */
+    if (!banner_hosted()) {
+        g_lock_flash.armed = 0;
+        g_otg_flash.armed  = 0;
+    }
+    int lock_up = ui_window_up(&g_lock_flash, LOCK_FLASH_US, now_us);
+    int otg_up  = ui_window_up(&g_otg_flash,  OTG_FLASH_US,  now_us);
+    if (lock_up || otg_up) {
+        if (!L->banner_up && L->bl_state != BL_OFF) {
+            paint_current_screen();
+            if (lock_up) lock_banner_render(g_locked);
+            else         otg_banner_render();
+            if (L->dirty) {
+                lcd_present_fb(console_framebuffer());
+                L->dirty = 0;
+            } else {
+                lcd_present_rect(console_framebuffer(), 0, 0, LCD_WIDTH,
+                                 top_banner_h());
+            }
+        }
+        L->banner_up = 1;
+        /* The banner skips the render below — and with it the loop's two
+         * halts, so it halts here itself. Idle (which includes paused: no
+         * DMA to pace) parks the core for a tick, as the main 10 ms halt
+         * does. PLAYING takes the same 200 us halt as the bottom of the
+         * loop, under the same "the pump did nothing" gate: without it a
+         * Hold flip mid-track free-spun the core at 80 MHz for the whole
+         * second the banner is up, re-polling the wheel through masked IRQs
+         * — the exact spin the bottom halt exists to prevent. */
+        if (!player_playing()) {
+            cpu_wait_ms(10);
+        } else if (pump_us < 200u) {
+            cpu_wait_us(200);
+        }
+        return 1;                     /* skip the normal render this pass      */
+    }
+    if (L->banner_up) {              /* banner just faded: repaint underneath */
+        L->banner_up = 0;
+        L->dirty = 1;
+    }
+    return 0;
 }

@@ -58,6 +58,7 @@ extern int         g_locked;
 
 extern jackwatch_t g_jack;
 extern ui_window_t g_lock_flash;
+#define LOCK_FLASH_US 1000000u
 
 extern wallclock_t g_wclock;
 extern settime_t   g_settime;
